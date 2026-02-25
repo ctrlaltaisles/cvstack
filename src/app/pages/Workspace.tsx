@@ -1650,7 +1650,7 @@ export default function Workspace() {
             };
           }
         } catch {
-          showToast('Resume generated, but AI curation failed');
+          // Intentionally silent for curate errors.
         } finally {
           setIsCurating(false);
         }
@@ -1661,7 +1661,7 @@ export default function Workspace() {
         const nextJDVariants = [...jdVariants.filter((item) => item.id !== jdVariant.id), { ...jdVariant, variantContent: finalVersion.variantContent ?? buildTextResume(finalVersion.data) }];
         setVersions((prev) => prev.map((v) => (v.id === finalVersion.id ? finalVersion : v)));
         syncLocalStore(nextBaseResume, nextJDVariants);
-        showToast(`Resume created and curated for ${finalVersion.name}`);
+        showToast(`Resume created for ${finalVersion.name}`);
       } catch {
         setIsCurating(false);
         showToast('Failed to save generated version');
@@ -1673,7 +1673,6 @@ export default function Workspace() {
     const versionId = selectedVersionId;
     const snapshot = activeVersion;
     setIsCurating(true);
-    showToast('Curating with AI...', 'info');
     try {
       const result = await curateResume({
         resumeData: snapshot.data,
@@ -1684,16 +1683,10 @@ export default function Workspace() {
       });
       const fallbackReason = getCurationFallbackReason(result);
       if (fallbackReason) {
-        showToast(fallbackReason, 'error');
         return;
       }
       const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now());
       if (nextChanges.length === 0) {
-        if ((result.questions?.length ?? 0) > 0) {
-          showToast('No direct edits yet. Add scope, metrics, and tooling details for stronger AI improvements.', 'info');
-          return;
-        }
-        showToast('No new improvements suggested');
         return;
       }
       setVersions((prev) => prev.map((v) => (
@@ -1701,9 +1694,8 @@ export default function Workspace() {
           ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter((c) => c.status !== 'rejected'), ...nextChanges] }
           : v
       )));
-      showToast(`${nextChanges.length} AI suggestions generated`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to curate resume', 'error');
+    } catch (_error) {
+      // Intentionally silent for curate errors.
     } finally {
       setIsCurating(false);
     }

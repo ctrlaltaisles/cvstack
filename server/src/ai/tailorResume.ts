@@ -140,6 +140,7 @@ const CURATION_SYSTEM_PROMPT = [
   'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
   'Specialize in Product Manager, Software Developer, Front-End Developer, Product Designer, Business Development, and Data Analytics hiring.',
   'Your edits must sound sharp, distinct, and impact-first, aligned with what employers screen for in tech hiring loops.',
+  'When company context is provided, align edits and TLDR to that company focus and the expected profile of a top performer in that role.',
   'Return valid JSON only.',
   'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
   'Use impact-first bullets: [Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools].',
@@ -483,7 +484,13 @@ export function validateElevateSchema(payload: unknown): { valid: boolean; error
   return { valid: errors.length === 0, errors };
 }
 
-function sanitizeElevateOutput(payload: unknown, resumeData: ResumeData, targetRole: string, jdKeywords: string[]): CurateResumeOutput {
+function sanitizeElevateOutput(
+  payload: unknown,
+  resumeData: ResumeData,
+  targetRole: string,
+  jdKeywords: string[],
+  researchedCompanyContext?: CompanyContext,
+): CurateResumeOutput {
   if (!payload || typeof payload !== 'object') {
     throw new TailorResumeError('Model output was not valid JSON object', 502);
   }
@@ -543,6 +550,15 @@ function sanitizeElevateOutput(payload: unknown, resumeData: ResumeData, targetR
     .filter((item): item is { keyword: string; where: string } => Boolean(item));
 
   const qualityRaw = (raw.quality && typeof raw.quality === 'object') ? (raw.quality as Record<string, unknown>) : {};
+  const companyContextRaw = (raw.companyContext && typeof raw.companyContext === 'object') ? (raw.companyContext as Record<string, unknown>) : null;
+  const parsedCompanyContext: CompanyContext | undefined = companyContextRaw
+    ? {
+      company: truncate(String(companyContextRaw.company ?? researchedCompanyContext?.company ?? ''), 120) || (researchedCompanyContext?.company ?? 'Target company'),
+      focus: truncate(String(companyContextRaw.focus ?? researchedCompanyContext?.focus ?? ''), 320) || (researchedCompanyContext?.focus ?? ''),
+      stellarProfile: asStringArray(companyContextRaw.stellarProfile).slice(0, 4).map((line) => truncate(line, 220)),
+      evidence: asStringArray(companyContextRaw.evidence).slice(0, 4).map((line) => truncate(line, 340)),
+    }
+    : researchedCompanyContext;
   const output: CurateResumeOutput = {
     changeSummary: asStringArray(raw.changeSummary),
     redFlags: asStringArray(raw.redFlags),
@@ -553,6 +569,7 @@ function sanitizeElevateOutput(payload: unknown, resumeData: ResumeData, targetR
       candidateNeeds: String(((raw.jdTldr as Record<string, unknown> | undefined)?.candidateNeeds ?? '')).trim(),
       keyFocusAreas: asStringArray((raw.jdTldr as Record<string, unknown> | undefined)?.keyFocusAreas).slice(0, 3),
     },
+    companyContext: parsedCompanyContext,
     suggestions: [],
     improved: {
       about: String(improvedRaw.about ?? '').trim(),
@@ -713,7 +730,7 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   };
 }
 
-function buildFallbackCurateOutput(input: { resumeData: ResumeData; targetRole?: string; jdText?: string }, reason: string): CurateResumeOutput {
+function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, companyContext?: CompanyContext): CurateResumeOutput {
   const role = (input.targetRole || input.resumeData.title || 'this role').trim();
   const jdFocusAreas = extractJDKeywords(input.jdText ?? '', role).slice(0, 3);
   const aboutPointers = [
@@ -745,9 +762,12 @@ function buildFallbackCurateOutput(input: { resumeData: ResumeData; targetRole?:
     jdFocusAreas,
     jdTldr: {
       roleAsks: `Role focus for ${role}: execution quality, ownership, and business-relevant outcomes.`,
-      candidateNeeds: 'Candidate needs: clear scope, decision-making signal, and measurable impact where available.',
+      candidateNeeds: companyContext?.focus
+        ? `Candidate needs: clear scope, decision-making signal, and measurable impact aligned with company focus on ${companyContext.focus.toLowerCase()}.`
+        : 'Candidate needs: clear scope, decision-making signal, and measurable impact where available.',
       keyFocusAreas: jdFocusAreas,
     },
+    companyContext,
     suggestions: [],
     improved: {
       about: input.resumeData.bio,
@@ -878,7 +898,7 @@ export async function tailorResumeWithAI(input: TailorResumeInput, requestId: st
   }
 }
 
-export async function curateResumeWithAI(input: { resumeData: ResumeData; targetRole?: string; jdText?: string; seniority?: SeniorityLevel }, requestId: string): Promise<CurateResumeOutput> {
+export async function curateResumeWithAI(input: CurateResumeInput, requestId: string): Promise<CurateResumeOutput> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new TailorResumeError('OPENAI_API_KEY is not configured', 503);
@@ -891,6 +911,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
   const started = Date.now();
   const targetRole = (input.targetRole || input.resumeData.title || '').trim();
   const jdKeywords = extractJDKeywords(input.jdText ?? '', targetRole);
+  const companyContext = await researchCompanyContext(input);
 
   const systemPrompt = CURATION_SYSTEM_PROMPT;
   const compactResumeData = compactResumeDataForCuration(input.resumeData);
@@ -900,6 +921,8 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
     curationPersona: 'Principal Tech Recruiter',
     roleClusters: CURATION_ROLE_CLUSTERS,
     roleTarget: targetRole,
+    company: companyContext?.company ?? input.jobCompany ?? '',
+    companyResearch: companyContext ?? null,
     seniority: input.seniority ?? '',
     jdText: input.jdText ?? '',
     jdKeywords,
@@ -934,6 +957,12 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
       aboutPointers: 'string[]',
       jdFocusAreas: 'string[] max 3',
       jdTldr: { roleAsks: 'string', candidateNeeds: 'string', keyFocusAreas: 'string[] max 3' },
+      companyContext: {
+        company: 'string',
+        focus: 'string',
+        stellarProfile: 'string[] max 4',
+        evidence: 'string[] max 4',
+      },
       suggestions: [{ field: 'bio|bullet', expId: 'string when bullet', bulletIdx: 'number when bullet', suggested: 'string', reason: 'string with recruiter heuristic' }],
     },
   };
@@ -942,7 +971,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
     console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${(input.jdText ?? '').length}`);
 
     let { parsed } = await runCurateModelParsed(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
-    let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
+    let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
 
     if (output.suggestions.length === 0) {
       output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
@@ -962,7 +991,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
             firstPassQuality: quality,
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
-          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
+          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
           if (output.suggestions.length === 0) {
             output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
           }
@@ -1002,7 +1031,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
     }
 
     if (!hasChangePayload) {
-      return buildFallbackCurateOutput(input, 'Need more details; ask user for metrics, scope, tooling, and ownership signals.');
+      return buildFallbackCurateOutput(input, 'Need more details; ask user for metrics, scope, tooling, and ownership signals.', companyContext);
     }
 
     const elapsedMs = Date.now() - started;
@@ -1020,7 +1049,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
         ? 'AI curation timed out'
         : `AI curation failed: ${String((error as { message?: string }).message ?? 'unknown error')}`;
     console.warn(`[ai-curate][${requestId}] fallback reason="${reason}" elapsedMs=${elapsedMs}`);
-    return buildFallbackCurateOutput(input, reason);
+    return buildFallbackCurateOutput(input, reason, companyContext);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
