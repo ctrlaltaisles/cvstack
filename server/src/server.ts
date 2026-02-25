@@ -99,18 +99,7 @@ app.post('/api/auth/register', async (req, res) => {
   const userId = makeId('usr');
   const now = new Date().toISOString();
   const user: UserRecord = { id: userId, email, passwordHash: hashPassword(password), createdAt: now };
-  const profile: ProfileRecord = {
-    userId,
-    fullName,
-    headline: '',
-    summary: '',
-    contactEmail: email,
-    phone: '',
-    location: '',
-    linkedin: '',
-    website: '',
-    updatedAt: now,
-  };
+  const profile = makeProfileRecord(userId, now, { fullName, contactEmail: email });
 
   await withDb(async (db) => {
     db.users.push(user);
@@ -180,6 +169,60 @@ function resolveRequestUserId(req: express.Request) {
   return safeGuestId ? `guest_${safeGuestId}` : GUEST_USER_ID;
 }
 
+function makeProfileRecord(
+  userId: string,
+  updatedAt: string,
+  overrides: Partial<Omit<ProfileRecord, 'userId' | 'updatedAt'>> = {},
+): ProfileRecord {
+  return {
+    userId,
+    fullName: '',
+    headline: '',
+    summary: '',
+    contactEmail: '',
+    phone: '',
+    location: '',
+    linkedin: '',
+    website: '',
+    ...overrides,
+    updatedAt,
+  };
+}
+
+function sanitizeUploadFileName(rawValue: unknown) {
+  return String(rawValue ?? 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function getPdfBufferOrRespond(req: express.Request, res: express.Response): Buffer | null {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+    return null;
+  }
+  return req.body;
+}
+
+async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
+  try {
+    return await parseUploadedResumeBuffer(buffer);
+  } catch {
+    res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
+    return null;
+  }
+}
+
+function findOwnedResume(state: { resumes: ResumeRecord[] }, userId: string, resumeId: string) {
+  return state.resumes.find((r) => r.id === resumeId && r.userId === userId) ?? null;
+}
+
+function sendResumeNotFound(res: express.Response) {
+  res.status(404).json({ error: 'Resume not found' });
+}
+
+function touchResumeUpdatedAt(db: { resumes: ResumeRecord[] }, resumeId: string, now: string) {
+  const parent = db.resumes.find((r) => r.id === resumeId);
+  if (parent) parent.updatedAt = now;
+}
+
 async function createResumeWithBaseVersion(params: {
   userId: string;
   title: string;
@@ -235,18 +278,7 @@ async function createResumeWithBaseVersion(params: {
         passwordHash: 'guest',
         createdAt: now,
       });
-      db.profiles.push({
-        userId: params.userId,
-        fullName: 'Guest User',
-        headline: '',
-        summary: '',
-        contactEmail: '',
-        phone: '',
-        location: '',
-        linkedin: '',
-        website: '',
-        updatedAt: now,
-      });
+      db.profiles.push(makeProfileRecord(params.userId, now, { fullName: 'Guest User' }));
     }
     db.resumes.push(resume);
     db.versions.push(version);
@@ -302,33 +334,29 @@ app.post('/api/resumes', async (req, res) => {
 app.post('/api/resumes/parse', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
   const debug = String(req.query.debug ?? '') === '1';
   const useLlm = String(req.query.llm ?? '') === '1';
-  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-    res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+  const buffer = getPdfBufferOrRespond(req, res);
+  if (!buffer) {
     return;
   }
 
-  const parsed = await parseResumePdf(req.body, { debug, useLlm });
+  const parsed = await parseResumePdf(buffer, { debug, useLlm });
   res.json(parsed);
 });
 
 app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
-  const fileName = String(req.query.filename ?? 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const fileName = sanitizeUploadFileName(req.query.filename);
   const title = String(req.query.title ?? 'Imported Resume').trim() || 'Imported Resume';
-
-  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-    res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+  const buffer = getPdfBufferOrRespond(req, res);
+  if (!buffer) {
     return;
   }
 
   const uploadName = `${Date.now()}_${fileName}`;
   const filePath = path.join(uploadsDir, uploadName);
-  fs.writeFileSync(filePath, req.body);
+  fs.writeFileSync(filePath, buffer);
 
-  let parsed;
-  try {
-    parsed = await parseUploadedResumeBuffer(req.body);
-  } catch {
-    res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
+  const parsed = await parseUploadOrRespond(buffer, res);
+  if (!parsed) {
     return;
   }
 
@@ -365,9 +393,9 @@ app.get('/api/resumes/:resumeId', async (req, res) => {
   const userId = resolveRequestUserId(req);
   const resumeId = String(req.params.resumeId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
   res.json({ resume });
@@ -377,9 +405,9 @@ app.get('/api/resumes/:resumeId/pdf', async (req, res) => {
   const userId = resolveRequestUserId(req);
   const resumeId = String(req.params.resumeId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
   if (!resume.filePath || !fs.existsSync(resume.filePath)) {
@@ -394,31 +422,27 @@ app.get('/api/resumes/:resumeId/pdf', async (req, res) => {
 app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
   const userId = resolveRequestUserId(req);
   const resumeId = String(req.params.resumeId);
-  const fileName = String(req.query.filename ?? 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-
-  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-    res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+  const fileName = sanitizeUploadFileName(req.query.filename);
+  const buffer = getPdfBufferOrRespond(req, res);
+  if (!buffer) {
     return;
   }
 
   const state = await readDb();
-  const existingResume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const existingResume = findOwnedResume(state, userId, resumeId);
   if (!existingResume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
-  let parsed;
-  try {
-    parsed = await parseUploadedResumeBuffer(req.body);
-  } catch {
-    res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
+  const parsed = await parseUploadOrRespond(buffer, res);
+  if (!parsed) {
     return;
   }
 
   const uploadName = `${Date.now()}_${fileName}`;
   const filePath = path.join(uploadsDir, uploadName);
-  fs.writeFileSync(filePath, req.body);
+  fs.writeFileSync(filePath, buffer);
 
   const now = new Date().toISOString();
   let updatedBaseVersion: VersionRecord | null = null;
@@ -515,9 +539,9 @@ app.get('/api/resumes/:resumeId/versions', async (req, res) => {
   const userId = resolveRequestUserId(req);
   const resumeId = String(req.params.resumeId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
@@ -534,9 +558,9 @@ app.post('/api/resumes/:resumeId/share', async (req, res) => {
   const resumeId = String(req.params.resumeId);
   const requestedVersionId = String(req.body?.versionId ?? '').trim();
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
@@ -582,9 +606,9 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
   const userId = resolveRequestUserId(req);
   const resumeId = String(req.params.resumeId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
@@ -609,8 +633,7 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
 
   await withDb(async (db) => {
     db.versions.push(version);
-    const parent = db.resumes.find((r) => r.id === resumeId);
-    if (parent) parent.updatedAt = now;
+    touchResumeUpdatedAt(db, resumeId, now);
   });
 
   res.status(201).json({ version: versionToDto(version) });
@@ -621,9 +644,9 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
   const resumeId = String(req.params.resumeId);
   const versionId = String(req.params.versionId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
@@ -646,8 +669,7 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
     version.aiChanges = input.aiChanges ?? version.aiChanges;
     version.updatedAt = now;
 
-    const parent = db.resumes.find((r) => r.id === resumeId);
-    if (parent) parent.updatedAt = now;
+    touchResumeUpdatedAt(db, resumeId, now);
 
     updated = version;
   });
@@ -665,9 +687,9 @@ app.delete('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
   const resumeId = String(req.params.resumeId);
   const versionId = String(req.params.versionId);
   const state = await readDb();
-  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  const resume = findOwnedResume(state, userId, resumeId);
   if (!resume) {
-    res.status(404).json({ error: 'Resume not found' });
+    sendResumeNotFound(res);
     return;
   }
 
@@ -677,8 +699,7 @@ app.delete('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
     const version = db.versions.find((v) => v.id === versionId && v.resumeId === resumeId);
     if (!version || version.isBase) return;
     db.versions = db.versions.filter((v) => !(v.id === versionId && v.resumeId === resumeId));
-    const parent = db.resumes.find((r) => r.id === resumeId);
-    if (parent) parent.updatedAt = now;
+    touchResumeUpdatedAt(db, resumeId, now);
     removed = true;
   });
 
@@ -708,18 +729,7 @@ app.post('/api/dev/seed', async (req, res) => {
   const userId = makeId('usr');
   const now = new Date().toISOString();
   const user: UserRecord = { id: userId, email, passwordHash: hashPassword(password), createdAt: now };
-  const profile: ProfileRecord = {
-    userId,
-    fullName: 'Demo User',
-    headline: '',
-    summary: '',
-    contactEmail: email,
-    phone: '',
-    location: '',
-    linkedin: '',
-    website: '',
-    updatedAt: now,
-  };
+  const profile = makeProfileRecord(userId, now, { fullName: 'Demo User', contactEmail: email });
 
   const baseData = defaultResumeData(email);
   baseData.name = 'Demo User';

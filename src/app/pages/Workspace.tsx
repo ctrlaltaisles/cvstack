@@ -15,10 +15,43 @@ import { useAuthGate } from '../components/AuthGate';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const PRODUCT_DESIGNER_TITLE = 'Product Designer';
+const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
 const NOW = new Date(2026, 1);
+function compactText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+function normalizeProductDesignerTitle(value: string): string {
+  const clean = compactText(value);
+  if (!clean) return '';
+  return PRODUCT_DESIGNER_PATTERN.test(clean) ? PRODUCT_DESIGNER_TITLE : clean;
+}
+function composeRoleCompanyTitle(roleName: string, companyName: string): string {
+  const role = compactText(roleName);
+  const company = compactText(companyName);
+  if (role && company) return `${role} @ ${company}`;
+  return role;
+}
+function getHeaderTitleForVersion(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>): string {
+  if (version.isAI) {
+    const aiHeader = composeRoleCompanyTitle(version.jobTitle ?? '', version.jobCompany ?? '');
+    if (aiHeader) return aiHeader;
+  }
+  return normalizeProductDesignerTitle(version.data.title) || PRODUCT_DESIGNER_TITLE;
+}
+function applyHeaderTitleToData(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>, data: ResumeData): ResumeData {
+  const title = getHeaderTitleForVersion({ ...version, data });
+  if (data.title === title) return data;
+  return { ...data, title };
+}
+function applyHeaderTitleToVersion(version: ResumeVersion): ResumeVersion {
+  const nextData = applyHeaderTitleToData(version, version.data);
+  if (nextData === version.data) return version;
+  return { ...version, data: nextData };
+}
 function calcDurationFromDates(start: DateValue, end: DateValue): string {
   const endD = end.present ? NOW : new Date(end.year, end.month - 1);
   const startD = new Date(start.year, start.month - 1);
@@ -377,9 +410,10 @@ function buildVariantContent(baseContent: string): string {
 }
 function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, company: string, jd: string, link: string, baseResume: BaseResumeModel): { version: ResumeVersion; jdVariant: JDVariantModel } {
   const ts = Date.now();
-  const title = company ? `${roleName} @ ${company}` : roleName;
+  const title = composeRoleCompanyTitle(roleName, company) || PRODUCT_DESIGNER_TITLE;
   const jdVariantId = `jdv-${ts}`;
   const variantContent = buildVariantContent(baseResume.content);
+  const variantData = { ...cloneResumeData(baseVersion.data), title };
   const version: ResumeVersion = {
     id: `ai-v-${ts}`,
     name: title,
@@ -392,7 +426,7 @@ function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, c
     baseResumeId: baseResume.id,
     jdVariantId,
     variantContent,
-    data: cloneResumeData(baseVersion.data),
+    data: variantData,
     aiChanges: [],
   };
   const jdVariant: JDVariantModel = {
@@ -869,7 +903,7 @@ function CertificationBlock({ cert, onUpdateCert, onDeleteCert }: { cert: Certif
 
 // ─── ResumeView ──────────────────────────────────────────────────────────────
 
-function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onShowToast, isReviewLocked = false }: { version: ResumeVersion; onUpdateData: (d: ResumeData) => void; onAcceptChange: (id: string) => void; onRejectChange: (id: string) => void; onShowToast: (msg: string) => void; isReviewLocked?: boolean }) {
+function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onShowToast, headerTitle, isReviewLocked = false }: { version: ResumeVersion; onUpdateData: (d: ResumeData) => void; onAcceptChange: (id: string) => void; onRejectChange: (id: string) => void; onShowToast: (msg: string) => void; headerTitle: string; isReviewLocked?: boolean }) {
   const { data, aiChanges } = version;
   const update = (p: Partial<ResumeData>) => onUpdateData({ ...data, ...p });
   const [dragExpFrom, setDragExpFrom] = useState<number | null>(null);
@@ -917,7 +951,10 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
         {/* Header */}
         <div className="flex items-start gap-5 mb-5">
           <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>AJ</div>
-          <div className="flex-1 min-w-0 space-y-1 pt-1"><InlineText disabled={isReviewLocked} value={data.name} onChange={v => update({ name: v })} className="text-[#1A1A1A] text-[22px]" /><InlineText disabled={isReviewLocked} value={data.title} onChange={v => update({ title: v })} className="text-base text-[#6B6B6B]" /></div>
+          <div className="flex-1 min-w-0 space-y-1 pt-1">
+            <InlineText disabled={isReviewLocked} value={data.name} onChange={v => update({ name: v })} className="text-[#1A1A1A] text-[22px]" />
+            <p className="text-base text-[#6B6B6B] px-1 -mx-1">{headerTitle}</p>
+          </div>
         </div>
         {/* Contact */}
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 mb-10">
@@ -1038,7 +1075,60 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
 // ─── FloatingToolbar — Granola/Awwwards style capsule ────────────────────────
 
 function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, onAcceptAll, onRejectAll, onUpdateAllVariations, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
+  const CURATING_LOADING_MESSAGES = [
+    'I swear we’re doing something…',
+    'Not just copy-pasting, promise.',
+    'Turning chaos into clarity…',
+    'Your resume is leveling up…',
+    'Making you look expensive.',
+    'Swapping generic for strategic…',
+    'Removing fluff. Keeping fire.',
+    'This is where the magic happens…',
+    'Making recruiters pause.',
+    'Your resume is adapting…',
+    'Stop rewriting. Start stacking.',
+    'Working smarter, not longer.',
+    'Almost ready to impress.',
+    'Brewing something strong…',
+    'Upgrading from “okay” to “oh.”',
+    'Building your unfair advantage…',
+    'Crafting your next opportunity…',
+    'Turning experience into leverage…',
+    'Sharpening your edge…',
+    'Done soon. Worth the wait.',
+    'Reading between the lines…',
+    'Thinking like a recruiter…',
+    'Matching patterns…',
+    'Connecting the dots…',
+    'Spotting transferable skills…',
+    'Translating experience into impact…',
+    'Reframing your strengths…',
+    'Prioritizing what matters most…',
+    'Aligning signal with intent…',
+    'Making your experience work harder…',
+    'Curating your resume…',
+    'Aligning with job description…',
+    'Analyzing role requirements…',
+    'Optimizing experience highlights…',
+    'Mapping skills to priorities…',
+    'Refining bullet points…',
+    'Adjusting impact statements…',
+    'Strengthening keyword alignment…',
+    'Enhancing clarity and structure…',
+    'Rebalancing your experience…',
+    'Elevating your achievements…',
+    'Tailoring tone and positioning…',
+    'Structuring for recruiter scan…',
+    'Calibrating relevance…',
+    'Updating role emphasis…',
+    'Fine-tuning your narrative…',
+    'Optimizing for ATS systems…',
+    'Rewriting for stronger impact…',
+    'Enhancing measurable results…',
+    'Finalizing tailored version…',
+  ] as const;
   const [showExport, setShowExport] = useState(false);
+  const [curatingMessage, setCuratingMessage] = useState<string>(CURATING_LOADING_MESSAGES[0]);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1048,6 +1138,27 @@ function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPane
   useEffect(() => {
     if (pendingCount > 0 || isCurating) setShowExport(false);
   }, [pendingCount, isCurating]);
+  useEffect(() => {
+    if (!isCurating) {
+      setCuratingMessage(CURATING_LOADING_MESSAGES[0]);
+      return;
+    }
+
+    const pickRandomMessage = (prev?: string) => {
+      if (CURATING_LOADING_MESSAGES.length === 1) return CURATING_LOADING_MESSAGES[0];
+      let next = CURATING_LOADING_MESSAGES[Math.floor(Math.random() * CURATING_LOADING_MESSAGES.length)];
+      while (next === prev) {
+        next = CURATING_LOADING_MESSAGES[Math.floor(Math.random() * CURATING_LOADING_MESSAGES.length)];
+      }
+      return next;
+    };
+
+    setCuratingMessage((prev) => pickRandomMessage(prev));
+    const interval = window.setInterval(() => {
+      setCuratingMessage((prev) => pickRandomMessage(prev));
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [isCurating]);
 
   const segBase = 'relative z-10 flex items-center justify-center gap-2 h-[34px] px-5 rounded-full text-sm whitespace-nowrap transition-all duration-250';
   const segActive = 'bg-white text-[#2B2B2B] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_1px_4px_rgba(0,0,0,0.08)]';
@@ -1091,7 +1202,9 @@ function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPane
           <div className={`relative flex items-center justify-center min-w-[300px] ${segBase} text-[#5E5E5E]`}>
             <div className="relative flex items-center gap-2 text-[#5E5E5E]">
               <Sparkles size={15} />
-              <span className="text-sm">Curating...</span>
+              <span className="text-sm loading-shimmer-text">
+                {curatingMessage}
+              </span>
             </div>
           </div>
         ) : toolbarMode === 'review' ? (
@@ -1162,14 +1275,86 @@ function JDSidePanel({
   onClose: () => void;
   onSave: (jdText: string, jobLink: string) => void;
 }) {
+  const TLDR_LOADING_MESSAGES = [
+    'Researching company and role context…',
+    'Reviewing company background…',
+    'Analyzing job description details…',
+    'Mapping company priorities…',
+    'Understanding team structure…',
+    'Extracting key responsibilities…',
+    'Identifying required competencies…',
+    'Studying company mission and values…',
+    'Reviewing industry positioning…',
+    'Assessing role expectations…',
+    'Identifying success metrics…',
+    'Breaking down role requirements…',
+    'Evaluating strategic alignment…',
+    'Parsing core responsibilities…',
+    'Reviewing organizational signals…',
+    'Analyzing hiring intent…',
+    'Scanning for priority keywords…',
+    'Identifying decision-maker focus…',
+    'Understanding business direction…',
+    'Contextualizing role impact…',
+    'Thinking like a hiring manager…',
+    'Reverse-engineering expectations…',
+    'Connecting responsibilities to outcomes…',
+    'Identifying what really matters…',
+    'Prioritizing signals over noise…',
+    'Extracting hidden requirements…',
+    'Aligning role to business goals…',
+    'Interpreting strategic intent…',
+    'Reading between the lines…',
+    'Highlighting core evaluation criteria…',
+    'Still researching… (we’re not slacking.)',
+    'Digging through the details…',
+    'Doing the homework for you…',
+    'Connecting the dots…',
+    'Looking for what they really want…',
+    'Making sense of the fine print…',
+    'Decoding corporate language…',
+    'Turning buzzwords into clarity…',
+    'Scanning beyond the surface…',
+    'Checking what’s signal vs fluff…',
+    'Taking this seriously…',
+    'Making sure we don’t miss anything…',
+    'Gathering context before conclusions…',
+    'Almost done investigating…',
+    'The TLDR is brewing…',
+    'Putting the puzzle together…',
+    'Verifying what matters most…',
+    'Reading it twice so you don’t have to…',
+    'Building a sharper summary…',
+    'Preparing your strategic TLDR…',
+  ] as const;
   const [isEditing, setIsEditing] = useState(false);
   const [jdDraft, setJdDraft] = useState(version.jobDescription ?? '');
   const [linkDraft, setLinkDraft] = useState(version.jobLink ?? '');
+  const [tldrLoadingMessage, setTldrLoadingMessage] = useState<string>(TLDR_LOADING_MESSAGES[0]);
   useEffect(() => {
     setJdDraft(version.jobDescription ?? '');
     setLinkDraft(version.jobLink ?? '');
     setIsEditing(false);
   }, [version.id, version.jobDescription, version.jobLink]);
+  useEffect(() => {
+    if (!isTldrLoading) {
+      setTldrLoadingMessage(TLDR_LOADING_MESSAGES[0]);
+      return;
+    }
+    const pickRandomMessage = (prev?: string) => {
+      if (TLDR_LOADING_MESSAGES.length === 1) return TLDR_LOADING_MESSAGES[0];
+      let next = TLDR_LOADING_MESSAGES[Math.floor(Math.random() * TLDR_LOADING_MESSAGES.length)];
+      while (next === prev) {
+        next = TLDR_LOADING_MESSAGES[Math.floor(Math.random() * TLDR_LOADING_MESSAGES.length)];
+      }
+      return next;
+    };
+    setTldrLoadingMessage((prev) => pickRandomMessage(prev));
+    const interval = window.setInterval(() => {
+      setTldrLoadingMessage((prev) => pickRandomMessage(prev));
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [isTldrLoading]);
 
   return (
     <div className="absolute right-0 top-0 bottom-0 w-[440px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out] print-hide">
@@ -1187,9 +1372,11 @@ function JDSidePanel({
           {isEditing ? (
             <div className="flex-1 min-h-0 px-6 py-5 flex flex-col">
               <div className="rounded-[10px] bg-[#F7F7F7] border border-[#ECECEC] px-4 py-3 mb-5 shrink-0">
-                <p className="text-[11px] uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
+                <p className="text-xs uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
                 {isTldrLoading ? (
-                  <p className="text-sm text-[#8B8B8B]">Summarizing JD focus...</p>
+                  <p className="text-sm loading-shimmer-text">
+                    {tldrLoadingMessage}
+                  </p>
                 ) : (
                   <div className="space-y-2.5 text-sm text-[#3B3B3B] leading-relaxed">
                     <p>{tldr?.roleAsks || 'No JD summary available yet.'}</p>
@@ -1229,9 +1416,11 @@ function JDSidePanel({
           ) : (
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="rounded-[10px] bg-[#F7F7F7] border border-[#ECECEC] px-4 py-3 mb-5">
-                <p className="text-[11px] uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
+                <p className="text-xs uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
                 {isTldrLoading ? (
-                  <p className="text-sm text-[#8B8B8B]">Summarizing JD focus...</p>
+                  <p className="text-sm loading-shimmer-text">
+                    {tldrLoadingMessage}
+                  </p>
                 ) : (
                   <div className="space-y-2.5 text-sm text-[#3B3B3B] leading-relaxed">
                     <p>{tldr?.roleAsks || 'No JD summary available yet.'}</p>
@@ -1467,7 +1656,7 @@ export default function Workspace() {
         const loadedVersions = response.versions as ResumeVersion[];
         if (!mounted) return;
         const localStore = loadLocalWorkspaceStore(storageKeyForResume(targetResumeId));
-        const nextVersions = loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions;
+        const nextVersions = (loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions).map(applyHeaderTitleToVersion);
         const rootBaseVersion = nextVersions.find((v) => v.isBase) ?? nextVersions[0];
         const baseResumeId = localStore.baseResume?.id ?? rootBaseVersion.baseResumeId ?? `base-${targetResumeId}`;
         const nextBaseResume: BaseResumeModel = {
@@ -1493,6 +1682,15 @@ export default function Workspace() {
         setBaseResumeModel(nextBaseResume);
         setJDVariants(localStore.jdVariants);
         saveLocalWorkspaceStore(storageKeyForResume(targetResumeId), { baseResume: nextBaseResume, jdVariants: localStore.jdVariants });
+        const normalizedTitleVersions = loadedVersions.length === 0
+          ? []
+          : hydrated.filter((version) => {
+            const original = loadedVersions.find((loadedVersion) => loadedVersion.id === version.id);
+            return Boolean(original && original.data.title !== version.data.title);
+          });
+        if (normalizedTitleVersions.length > 0) {
+          void Promise.all(normalizedTitleVersions.map((version) => updateVersion(targetResumeId, version.id, version).catch(() => null)));
+        }
       } catch (err) {
         if (!mounted) return;
         setLoadError(err instanceof Error ? err.message : 'Failed to load resume workspace');
@@ -1560,8 +1758,9 @@ export default function Workspace() {
 
   const updateVersionData = (data: ResumeData) => {
     if (!activeVersion || !baseVersion) return;
-    const contentSnapshot = buildTextResume(data);
-    const nextVersion: ResumeVersion = { ...activeVersion, data, variantContent: contentSnapshot };
+    const normalizedData = applyHeaderTitleToData(activeVersion, data);
+    const contentSnapshot = buildTextResume(normalizedData);
+    const nextVersion: ResumeVersion = { ...activeVersion, data: normalizedData, variantContent: contentSnapshot };
     setVersions((prev) => prev.map((v) => (v.id === selectedVersionId ? nextVersion : v)));
     void persistVersion(nextVersion).catch(() => {});
 
@@ -1614,7 +1813,7 @@ export default function Workspace() {
         if (resumeId) {
           const created = await createVersion(resumeId, nv);
           const createdVersion = created.version as ResumeVersion;
-          nextVersion = {
+          nextVersion = applyHeaderTitleToVersion({
             ...nv,
             ...createdVersion,
             data: (createdVersion.data as ResumeData) ?? nv.data,
@@ -1622,7 +1821,7 @@ export default function Workspace() {
             jdVariantId: createdVersion.jdVariantId ?? nv.jdVariantId,
             variantContent: createdVersion.variantContent ?? nv.variantContent,
             baseResumeId: createdVersion.baseResumeId ?? nv.baseResumeId,
-          };
+          });
         }
         setShowModal(false);
         if (nextVersion.jobTitle) setExpandedGroups(prev => new Set([...prev, nextVersion.jobTitle!]));
@@ -1790,7 +1989,7 @@ export default function Workspace() {
     setIsReplacingBasePdf(true);
     try {
       const response = await replaceResumePdf(resumeId, file, resumeMeta?.title || 'Uploaded Resume');
-      const incomingVersion = response.version as ResumeVersion;
+      const incomingVersion = applyHeaderTitleToVersion(response.version as ResumeVersion);
       setVersions((prev) => prev.map((version) => (
         version.id === incomingVersion.id
           ? {
@@ -1880,11 +2079,13 @@ export default function Workspace() {
     };
   }, [showJDPanel, activeVersion?.id, activeVersion?.jobDescription, activeVersion?.jobTitle, jdTldrByVersion]);
   const pendingSuggestionCount = activeVersion?.aiChanges.filter(c => c.status === 'pending').length ?? 0;
+  const activeHeaderTitle = activeVersion ? getHeaderTitleForVersion(activeVersion) : PRODUCT_DESIGNER_TITLE;
   const handleExportPdf = async () => {
     if (isExporting) return;
     setIsExporting(true);
     try {
-      const pdf = buildPdfDocument(activeVersion.data);
+      const exportData = applyHeaderTitleToData(activeVersion, activeVersion.data);
+      const pdf = buildPdfDocument(exportData);
       pdf.save(`${sanitizeFileName(activeVersion.name)}.pdf`);
       showToast('PDF downloaded');
     } catch (error) {
@@ -1898,7 +2099,8 @@ export default function Workspace() {
     if (isExporting) return;
     setIsExporting(true);
     try {
-      const doc = buildWordDocument(activeVersion.data);
+      const exportData = applyHeaderTitleToData(activeVersion, activeVersion.data);
+      const doc = buildWordDocument(exportData);
       const blob = await Packer.toBlob(doc);
       downloadBlob(blob, `${sanitizeFileName(activeVersion.name)}.docx`);
       showToast('Word document downloaded');
@@ -2048,7 +2250,7 @@ export default function Workspace() {
                 animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                 transition={{ duration: 0.24, ease: 'easeOut' }}
               >
-              <ResumeView isReviewLocked={pendingSuggestionCount > 0} version={activeVersion} onUpdateData={updateVersionData} onAcceptChange={handleAcceptChange} onRejectChange={handleRejectChange} onShowToast={showToast} />
+              <ResumeView isReviewLocked={pendingSuggestionCount > 0} version={activeVersion} headerTitle={activeHeaderTitle} onUpdateData={updateVersionData} onAcceptChange={handleAcceptChange} onRejectChange={handleRejectChange} onShowToast={showToast} />
               </motion.div>
               <p className="text-center mt-12 print-hide" style={{ fontSize: 12, color: '#D4D4D4' }}>Click dates to edit · Click any text to edit · Drag bullets to reorder</p>
             </div>

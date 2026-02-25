@@ -65,6 +65,7 @@ export interface CurateResumeOutput {
   redFlags: string[];
   aboutPointers: string[];
   jdFocusAreas: string[];
+  positioningSummary?: string;
   jdTldr: {
     roleAsks: string;
     candidateNeeds: string;
@@ -109,10 +110,7 @@ export class TailorResumeError extends Error {
 const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
 const REQUEST_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 60000);
 const CURATE_TIMEOUT_MS = Number(process.env.OPENAI_CURATE_TIMEOUT_MS ?? process.env.OPENAI_TIMEOUT_MS ?? 120000);
-const SECOND_PASS_MIN_REMAINING_MS = Number(process.env.OPENAI_SECOND_PASS_MIN_REMAINING_MS ?? 45000);
-const CURATE_SECOND_PASS_ENABLED = String(process.env.OPENAI_CURATE_SECOND_PASS ?? 'false').trim().toLowerCase() === 'true';
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
-const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
 const COMPANY_RESEARCH_TIMEOUT_MS = Number(process.env.COMPANY_RESEARCH_TIMEOUT_MS ?? 4500);
 const CURATION_ROLE_CLUSTERS = [
   'Product Manager',
@@ -128,6 +126,7 @@ const CURATION_HARD_RULES = [
   'If data is missing, ask concise questions (max 5)',
   'Reject synonym-only rewrites',
   'Prioritize ownership, scope, outcomes, and business impact',
+  'Position experience and skills to match expected responsibility of the target role level at the target company',
 ];
 const CURATION_GENERIC_PHRASES_TO_REDUCE = [
   'helped',
@@ -141,6 +140,8 @@ const CURATION_SYSTEM_PROMPT = [
   'Specialize in Product Manager, Software Developer, Front-End Developer, Product Designer, Business Development, and Data Analytics hiring.',
   'Your edits must sound sharp, distinct, and impact-first, aligned with what employers screen for in tech hiring loops.',
   'When company context is provided, align edits and TLDR to that company focus and the expected profile of a top performer in that role.',
+  'Always reason from this lens: "If I am applying for this role and level at this company, how should I position my responsibilities through CV experience and skills?"',
+  'Amend work experience and skills to reflect role-level expectations while staying truthful to source evidence.',
   'Return valid JSON only.',
   'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
   'Use impact-first bullets: [Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools].',
@@ -564,6 +565,7 @@ function sanitizeElevateOutput(
     redFlags: asStringArray(raw.redFlags),
     aboutPointers: asStringArray(raw.aboutPointers),
     jdFocusAreas: asStringArray(raw.jdFocusAreas).slice(0, 3),
+    positioningSummary: truncate(String(raw.positioningSummary ?? ''), 320),
     jdTldr: {
       roleAsks: String(((raw.jdTldr as Record<string, unknown> | undefined)?.roleAsks ?? '')).trim(),
       candidateNeeds: String(((raw.jdTldr as Record<string, unknown> | undefined)?.candidateNeeds ?? '')).trim(),
@@ -760,6 +762,7 @@ function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, com
     redFlags: [reason, 'Need more details; ask user for metrics, scope, tools, and ownership level.'],
     aboutPointers,
     jdFocusAreas,
+    positioningSummary: `Position for ${role} by showing ownership level, scope, and business outcomes relevant to ${companyContext?.company || 'the target company'}.`,
     jdTldr: {
       roleAsks: `Role focus for ${role}: execution quality, ownership, and business-relevant outcomes.`,
       candidateNeeds: companyContext?.focus
@@ -810,7 +813,6 @@ async function runCurateModel(client: OpenAI, systemPrompt: string, userPrompt: 
     {
       model: DEFAULT_MODEL,
       temperature: 0.2,
-      max_tokens: CURATE_MAX_TOKENS,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -923,6 +925,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     roleTarget: targetRole,
     company: companyContext?.company ?? input.jobCompany ?? '',
     companyResearch: companyContext ?? null,
+    positioningQuestion: `If applying for ${targetRole || 'this role'} at ${companyContext?.company || input.jobCompany || 'this company'}, how should this profile present role-level responsibilities through experience and skills?`,
     seniority: input.seniority ?? '',
     jdText: input.jdText ?? '',
     jdKeywords,
@@ -932,6 +935,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
+      role_level_positioning: 'Experience and skills must reflect the responsibility level expected for the target role at the target company.',
     },
     editing_rules: [
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
@@ -956,6 +960,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       redFlags: 'string[]',
       aboutPointers: 'string[]',
       jdFocusAreas: 'string[] max 3',
+      positioningSummary: 'string concise role-level positioning summary tailored to target company',
       jdTldr: { roleAsks: 'string', candidateNeeds: 'string', keyFocusAreas: 'string[] max 3' },
       companyContext: {
         company: 'string',
@@ -980,55 +985,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     let quality = evaluateCurateQuality(input, output);
     output.quality = quality;
 
-    if (CURATE_SECOND_PASS_ENABLED && (!quality.passed || quality.similarityScore >= 0.86)) {
-      const elapsedBeforeSecondPass = Date.now() - started;
-      const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
-      if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
-        try {
-          const secondPassPrompt = JSON.stringify({
-            ...basePayload,
-            correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics.',
-            firstPassQuality: quality,
-          });
-          ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
-          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
-          if (output.suggestions.length === 0) {
-            output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
-          }
-          quality = evaluateCurateQuality(input, output);
-          output.quality = quality;
-          output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
-        } catch (secondPassError) {
-          const elapsedSecondPassMs = Date.now() - started;
-          console.warn(`[ai-curate][${requestId}] second-pass failed elapsedMs=${elapsedSecondPassMs} reason="${String((secondPassError as { message?: string }).message ?? 'unknown error')}"`);
-          output.redFlags = [
-            ...new Set([
-              ...output.redFlags,
-              `Second pass skipped after first-pass completion: ${isAbortLikeError(secondPassError) ? 'timed out' : 'model error'}.`,
-            ]),
-          ];
-        }
-      } else {
-        output.redFlags = [
-          ...new Set([
-            ...output.redFlags,
-            'Second pass skipped to preserve responsiveness within timeout budget.',
-          ]),
-        ];
-      }
-    }
-
     const meaningfulSuggestions = output.suggestions.filter((s) => s.suggested.trim()).length;
     const hasChangePayload = meaningfulSuggestions > 0 || output.changes.length > 0;
-
-    if (!output.quality.passed) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          'Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact.',
-        ]),
-      ];
-    }
 
     if (!hasChangePayload) {
       return buildFallbackCurateOutput(input, 'Need more details; ask user for metrics, scope, tooling, and ownership signals.', companyContext);

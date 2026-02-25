@@ -44,7 +44,7 @@ function getGuestId() {
   return generated;
 }
 
-async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
+function buildRequestHeaders(opts: ReqOpts = {}) {
   const headers = new Headers(opts.headers);
   const token = tokenStore.get();
   if (!token) {
@@ -54,17 +54,38 @@ async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
     if (token) headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...opts,
-    headers,
-  });
+  return headers;
+}
 
+async function assertOk(response: Response) {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || `Request failed: ${response.status}`);
   }
+}
+
+async function request<T>(path: string, opts: ReqOpts = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...opts,
+    headers: buildRequestHeaders(opts),
+  });
+
+  await assertOk(response);
 
   return response.json() as Promise<T>;
+}
+
+function requestJson<T>(path: string, payload: unknown, opts: ReqOpts = {}) {
+  const headers = new Headers(opts.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return request<T>(path, {
+    ...opts,
+    method: opts.method ?? 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface AuthResponse {
@@ -99,6 +120,7 @@ export interface CurateResumeResponse {
   redFlags: string[];
   aboutPointers: string[];
   jdFocusAreas: string[];
+  positioningSummary?: string;
   jdTldr: {
     roleAsks: string;
     candidateNeeds: string;
@@ -138,19 +160,11 @@ export interface SharedResumeResponse {
 }
 
 export function register(email: string, password: string, fullName = '') {
-  return request<AuthResponse>('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, fullName }),
-  });
+  return requestJson<AuthResponse>('/api/auth/register', { email, password, fullName });
 }
 
 export function login(email: string, password: string) {
-  return request<AuthResponse>('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
+  return requestJson<AuthResponse>('/api/auth/login', { email, password });
 }
 
 export function getMe() {
@@ -158,12 +172,7 @@ export function getMe() {
 }
 
 export function createResume(payload: { title?: string; source?: 'manual' | 'linkedin'; email?: string; data?: unknown }) {
-  return request<{ resumeId: string; versionId: string }>('/api/resumes', {
-    method: 'POST',
-    auth: true,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  return requestJson<{ resumeId: string; versionId: string }>('/api/resumes', payload, { auth: true });
 }
 
 export function uploadResumePdf(file: File, title = 'Imported Resume') {
@@ -187,19 +196,10 @@ export function replaceResumePdf(resumeId: string, file: File, title = 'Uploaded
 }
 
 export async function getResumePdfBlob(resumeId: string): Promise<Blob> {
-  const headers = new Headers();
-  const token = tokenStore.get();
-  if (!token) {
-    headers.set('X-CVStack-Guest-Id', getGuestId());
-  } else {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const response = await fetch(`${API_BASE}/api/resumes/${resumeId}/pdf`, { headers });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || `Request failed: ${response.status}`);
-  }
+  const response = await fetch(`${API_BASE}/api/resumes/${resumeId}/pdf`, {
+    headers: buildRequestHeaders({ auth: true }),
+  });
+  await assertOk(response);
   return response.blob();
 }
 
@@ -212,20 +212,13 @@ export function listVersions(resumeId: string) {
 }
 
 export function createVersion(resumeId: string, payload: unknown) {
-  return request<{ version: unknown }>(`/api/resumes/${resumeId}/versions`, {
-    method: 'POST',
-    auth: true,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  return requestJson<{ version: unknown }>(`/api/resumes/${resumeId}/versions`, payload, { auth: true });
 }
 
 export function updateVersion(resumeId: string, versionId: string, payload: unknown) {
-  return request<{ version: unknown }>(`/api/resumes/${resumeId}/versions/${versionId}`, {
+  return requestJson<{ version: unknown }>(`/api/resumes/${resumeId}/versions/${versionId}`, payload, {
     method: 'PATCH',
     auth: true,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
   });
 }
 
@@ -237,28 +230,15 @@ export function deleteVersion(resumeId: string, versionId: string) {
 }
 
 export function tailorResume(payload: TailorResumeRequest) {
-  return request<TailorResumeResponse>('/api/ai/tailor-resume', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  return requestJson<TailorResumeResponse>('/api/ai/tailor-resume', payload);
 }
 
 export function curateResume(payload: CurateResumeRequest) {
-  return request<CurateResumeResponse>('/api/ai/curate-resume', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  return requestJson<CurateResumeResponse>('/api/ai/curate-resume', payload);
 }
 
 export function createResumeShareLink(resumeId: string, versionId: string) {
-  return request<{ token: string; resumeId: string; versionId: string }>(`/api/resumes/${resumeId}/share`, {
-    method: 'POST',
-    auth: true,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ versionId }),
-  });
+  return requestJson<{ token: string; resumeId: string; versionId: string }>(`/api/resumes/${resumeId}/share`, { versionId }, { auth: true });
 }
 
 export function getSharedResume(token: string) {
