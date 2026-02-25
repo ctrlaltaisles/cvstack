@@ -76,22 +76,24 @@ export default function MethodSelection() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="min-h-screen bg-white flex flex-col items-center justify-center px-8"
+      className="relative min-h-screen bg-white flex flex-col items-center justify-center px-8"
     >
-      <div className="w-full max-w-md mb-10">
+      <div className="absolute top-6 left-8 right-8 flex items-center justify-between">
         <button
           onClick={() => navigate('/')}
           className="text-sm text-[#9B9B9B] hover:text-[#1A1A1A] transition-colors"
         >
           ← Back
         </button>
+        <button
+          onClick={() => navigate('/login')}
+          className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"
+        >
+          Sign in
+        </button>
       </div>
 
       <div className="w-full max-w-md">
-        <div className="mb-10">
-          <span className="text-base tracking-tight text-[#1A1A1A]">CVStack</span>
-        </div>
-
         <h1 className="text-[28px] tracking-tight text-[#1A1A1A] mb-2">
           Upload your resume to get started
         </h1>
@@ -108,7 +110,7 @@ export default function MethodSelection() {
                 className="w-full bg-[#F7F7F8] rounded-[14px] p-5 flex items-center gap-4 border border-transparent hover:border-[#CBCBCB] hover:bg-white transition-all text-left group disabled:opacity-60"
               >
                 <div className="w-10 h-10 bg-white rounded-[10px] flex items-center justify-center border border-[#E5E5E5] shrink-0 group-hover:border-[#CBCBCB] transition-colors">
-                  <Icon size={18} className="text-[#2B2B2B]" />
+                  <Icon size={18} strokeWidth={1.8} className="text-[#2B2B2B]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-[#1A1A1A] mb-0.5">{method.title}</p>

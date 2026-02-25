@@ -56,6 +56,34 @@ export function signToken(userId: string) {
   return `${encoded}.${signature}`;
 }
 
+export function signShareToken(payload: { resumeId: string; versionId: string }) {
+  const tokenPayload = {
+    type: 'resume_share',
+    rid: payload.resumeId,
+    vid: payload.versionId,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+  };
+  const encoded = Buffer.from(JSON.stringify(tokenPayload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', tokenSecret).update(encoded).digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+export function verifyShareToken(token: string): { resumeId: string; versionId: string } | null {
+  const [encoded, signature] = token.split('.');
+  if (!encoded || !signature) return null;
+  const expected = crypto.createHmac('sha256', tokenSecret).update(encoded).digest('base64url');
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as { type: string; rid: string; vid: string; exp: number };
+    if (payload.type !== 'resume_share') return null;
+    if (payload.exp < Math.floor(Date.now() / 1000)) return null;
+    if (!payload.rid || !payload.vid) return null;
+    return { resumeId: payload.rid, versionId: payload.vid };
+  } catch {
+    return null;
+  }
+}
+
 export function verifyToken(token: string): string | null {
   const [encoded, signature] = token.split('.');
   if (!encoded || !signature) return null;

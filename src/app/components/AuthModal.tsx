@@ -44,7 +44,7 @@ export default function AuthModal({
       <div className="w-full max-w-md bg-white rounded-[16px] border border-[#EAEAEA] shadow-[0_24px_80px_rgba(0,0,0,0.18)]" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-[#F0F0F0] flex items-center justify-between">
           <div>
-            <h2 className="text-base text-[#1A1A1A]" style={{ fontWeight: 500 }}>Continue with CVStack</h2>
+            <h2 className="text-base text-[#1A1A1A]" style={{ fontWeight: 700 }}>Continue with cv stack</h2>
             <p className="text-xs text-[#9B9B9B] mt-1">Login is required to use AI features.</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] flex items-center justify-center">

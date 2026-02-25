@@ -3,6 +3,7 @@ import LandingPage from "./pages/LandingPage";
 import MethodSelection from "./pages/MethodSelection";
 import Workspace from "./pages/Workspace";
 import LoginPage from "./pages/LoginPage";
+import SharedResumePage from "./pages/SharedResumePage";
 
 export const router = createBrowserRouter([
   {
@@ -20,5 +21,9 @@ export const router = createBrowserRouter([
   {
     path: "/login",
     Component: LoginPage,
+  },
+  {
+    path: "/shared/:token",
+    Component: SharedResumePage,
   },
 ]);

@@ -14,7 +14,7 @@ export default function LandingPage() {
     >
       {/* Nav */}
       <div className="px-8 py-5 flex items-center justify-between border-b border-[#F0F0F0]">
-        <span className="text-base tracking-tight text-[#1A1A1A]">CVStack</span>
+        <span className="text-base tracking-tight text-[#1A1A1A]" style={{ fontWeight: 700 }}>cv stack</span>
         <button
           onClick={() => navigate('/login')}
           className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"

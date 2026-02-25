@@ -4,11 +4,12 @@ import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, makeId, requireAuth, signToken, verifyPassword } from './auth';
+import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, makeId, requireAuth, signShareToken, signToken, verifyPassword, verifyShareToken } from './auth';
 import { defaultResumeData } from './defaults';
 import { initDb, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
 import type { ResumeData, ResumeVersionDTO } from './types';
 import { inferResumeSummaryFromDebug, parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
+import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
 
 dotenv.config();
 
@@ -22,6 +23,59 @@ app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
+app.post('/api/ai/tailor-resume', async (req, res) => {
+  const requestId = makeId('air');
+  const jdText = String(req.body?.jdText ?? '').trim();
+  const baseResumeText = String(req.body?.baseResumeText ?? '').trim();
+  const targetTitle = String(req.body?.targetTitle ?? '').trim() || undefined;
+  const seniorityRaw = String(req.body?.seniority ?? '').trim().toLowerCase();
+  const allowedSeniorities: SeniorityLevel[] = ['intern', 'junior', 'mid', 'senior'];
+  const seniority = (allowedSeniorities.includes(seniorityRaw as SeniorityLevel) ? seniorityRaw : undefined) as SeniorityLevel | undefined;
+
+  if (!jdText || !baseResumeText) {
+    res.status(400).json({ error: 'jdText and baseResumeText are required', requestId });
+    return;
+  }
+
+  try {
+    const result = await tailorResumeWithAI({ jdText, baseResumeText, targetTitle, seniority }, requestId);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof TailorResumeError) {
+      console.warn(`[ai-tailor][${requestId}] failed status=${error.statusCode} jdLen=${jdText.length} baseLen=${baseResumeText.length}`);
+      res.status(error.statusCode).json({ error: error.message, requestId });
+      return;
+    }
+    console.warn(`[ai-tailor][${requestId}] failed status=500 jdLen=${jdText.length} baseLen=${baseResumeText.length}`);
+    res.status(500).json({ error: 'Unexpected AI tailoring error', requestId });
+  }
+});
+
+app.post('/api/ai/curate-resume', async (req, res) => {
+  const requestId = makeId('aic');
+  const resumeData = req.body?.resumeData as ResumeData | undefined;
+  const targetRole = String(req.body?.targetRole ?? '').trim() || undefined;
+  const jdText = String(req.body?.jdText ?? '').trim() || undefined;
+
+  if (!resumeData || typeof resumeData !== 'object') {
+    res.status(400).json({ error: 'resumeData is required', requestId });
+    return;
+  }
+
+  try {
+    const result = await curateResumeWithAI({ resumeData, targetRole, jdText }, requestId);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof TailorResumeError) {
+      console.warn(`[ai-curate][${requestId}] failed status=${error.statusCode}`);
+      res.status(error.statusCode).json({ error: error.message, requestId });
+      return;
+    }
+    console.warn(`[ai-curate][${requestId}] failed status=500`);
+    res.status(500).json({ error: 'Unexpected AI curation error', requestId });
+  }
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -199,6 +253,40 @@ async function createResumeWithBaseVersion(params: {
   return { resumeId, versionId };
 }
 
+async function parseUploadedResumeBuffer(buffer: Buffer) {
+  const parsedPayload = await parseResumePdf(buffer, { debug: true });
+  const parsedData = parsedPayload.data;
+  const warnings = parsedPayload.warnings;
+
+  const extractedText = [
+    parsedData.name,
+    parsedData.currentTitle,
+    ...(parsedData.experiences ?? []).flatMap((exp) => [exp.role, exp.company, ...exp.description]),
+    ...(parsedData.education ?? []).flatMap((edu) => [edu.degree, edu.school]),
+    ...(parsedData.skills ?? []),
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join('\n')
+    .slice(0, 5000);
+
+  if (!parsedData.name && parsedData.experiences.length === 0 && parsedData.education.length === 0 && parsedData.skills.length === 0) {
+    throw new Error('PDF text extraction failed; try a text-based PDF');
+  }
+
+  const data = toResumeDataFromParsedResume(parsedData);
+  const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
+  if (inferredSummary) {
+    data.bio = inferredSummary.slice(0, 1200);
+  }
+
+  return {
+    parsedData,
+    warnings,
+    extractedText,
+    data,
+  };
+}
+
 app.post('/api/resumes', async (req, res) => {
   const title = String(req.body?.title ?? 'Base Resume').trim() || 'Base Resume';
   const source = (req.body?.source === 'linkedin' ? 'linkedin' : 'manual') as 'manual' | 'linkedin';
@@ -234,30 +322,12 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
   const filePath = path.join(uploadsDir, uploadName);
   fs.writeFileSync(filePath, req.body);
 
-  const parsedPayload = await parseResumePdf(req.body, { debug: true });
-  const parsedData = parsedPayload.data;
-  const warnings = parsedPayload.warnings;
-
-  const extractedText = [
-    parsedData.name,
-    parsedData.currentTitle,
-    ...(parsedData.experiences ?? []).flatMap((exp) => [exp.role, exp.company, ...exp.description]),
-    ...(parsedData.education ?? []).flatMap((edu) => [edu.degree, edu.school]),
-    ...(parsedData.skills ?? []),
-  ]
-    .filter((v): v is string => Boolean(v))
-    .join('\n')
-    .slice(0, 5000);
-
-  if (!parsedData.name && parsedData.experiences.length === 0 && parsedData.education.length === 0 && parsedData.skills.length === 0) {
+  let parsed;
+  try {
+    parsed = await parseUploadedResumeBuffer(req.body);
+  } catch {
     res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
     return;
-  }
-
-  const data = toResumeDataFromParsedResume(parsedData);
-  const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
-  if (inferredSummary) {
-    data.bio = inferredSummary.slice(0, 1200);
   }
 
   const created = await createResumeWithBaseVersion({
@@ -266,16 +336,16 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     source: 'upload',
     filePath,
     fileName,
-    extractedText,
-    parsed: parsedData,
-    data,
+    extractedText: parsed.extractedText,
+    parsed: parsed.parsedData,
+    data: parsed.data,
   });
 
   res.status(201).json({
     ...created,
-    parsed: parsedData,
-    warnings,
-    extractedTextPreview: extractedText.slice(0, 1200),
+    parsed: parsed.parsedData,
+    warnings: parsed.warnings,
+    extractedTextPreview: parsed.extractedText.slice(0, 1200),
   });
 });
 
@@ -299,6 +369,102 @@ app.get('/api/resumes/:resumeId', async (req, res) => {
     return;
   }
   res.json({ resume });
+});
+
+app.get('/api/resumes/:resumeId/pdf', async (req, res) => {
+  const userId = resolveRequestUserId(req);
+  const resumeId = String(req.params.resumeId);
+  const state = await readDb();
+  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  if (!resume) {
+    res.status(404).json({ error: 'Resume not found' });
+    return;
+  }
+  if (!resume.filePath || !fs.existsSync(resume.filePath)) {
+    res.status(404).json({ error: 'Uploaded PDF not found' });
+    return;
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${resume.fileName || 'resume.pdf'}"`);
+  res.sendFile(path.resolve(resume.filePath));
+});
+
+app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
+  const userId = resolveRequestUserId(req);
+  const resumeId = String(req.params.resumeId);
+  const fileName = String(req.query.filename ?? 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+    return;
+  }
+
+  const state = await readDb();
+  const existingResume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  if (!existingResume) {
+    res.status(404).json({ error: 'Resume not found' });
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = await parseUploadedResumeBuffer(req.body);
+  } catch {
+    res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
+    return;
+  }
+
+  const uploadName = `${Date.now()}_${fileName}`;
+  const filePath = path.join(uploadsDir, uploadName);
+  fs.writeFileSync(filePath, req.body);
+
+  const now = new Date().toISOString();
+  let updatedBaseVersion: VersionRecord | null = null;
+  await withDb(async (db) => {
+    const resume = db.resumes.find((r) => r.id === resumeId && r.userId === userId);
+    if (!resume) return;
+    const previousPath = resume.filePath;
+
+    resume.source = 'upload';
+    resume.filePath = filePath;
+    resume.fileName = fileName;
+    resume.extractedText = parsed.extractedText;
+    resume.parsed = parsed.parsedData as any;
+    resume.updatedAt = now;
+
+    const baseVersion = db.versions.find((v) => v.resumeId === resumeId && v.isBase);
+    if (baseVersion) {
+      baseVersion.data = parsed.data;
+      baseVersion.aiChanges = [];
+      baseVersion.updatedAt = now;
+      updatedBaseVersion = baseVersion;
+    }
+
+    if (previousPath && previousPath !== filePath && fs.existsSync(previousPath)) {
+      fs.unlink(previousPath, () => {});
+    }
+  });
+
+  if (!updatedBaseVersion) {
+    res.status(404).json({ error: 'Base version not found' });
+    return;
+  }
+  const baseVersionToReturn = updatedBaseVersion as VersionRecord;
+
+  res.json({
+    resumeId,
+    versionId: baseVersionToReturn.id,
+    version: versionToDto(baseVersionToReturn),
+    parsed: parsed.parsedData,
+    warnings: parsed.warnings,
+    extractedTextPreview: parsed.extractedText.slice(0, 1200),
+    resume: {
+      id: resumeId,
+      source: 'upload',
+      file_name: fileName,
+      updated_at: now,
+    },
+  });
 });
 
 app.patch('/api/resumes/:resumeId', async (req, res) => {
@@ -359,6 +525,55 @@ app.get('/api/resumes/:resumeId/versions', async (req, res) => {
     .map(versionToDto);
 
   res.json({ versions });
+});
+
+app.post('/api/resumes/:resumeId/share', async (req, res) => {
+  const userId = resolveRequestUserId(req);
+  const resumeId = String(req.params.resumeId);
+  const requestedVersionId = String(req.body?.versionId ?? '').trim();
+  const state = await readDb();
+  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  if (!resume) {
+    res.status(404).json({ error: 'Resume not found' });
+    return;
+  }
+
+  const version = requestedVersionId
+    ? state.versions.find((v) => v.id === requestedVersionId && v.resumeId === resumeId)
+    : state.versions.find((v) => v.resumeId === resumeId && v.isBase);
+
+  if (!version) {
+    res.status(404).json({ error: 'Version not found' });
+    return;
+  }
+
+  const token = signShareToken({ resumeId, versionId: version.id });
+  res.json({ token, resumeId, versionId: version.id });
+});
+
+app.get('/api/public/resume/:token', async (req, res) => {
+  const token = String(req.params.token ?? '').trim();
+  const decoded = verifyShareToken(token);
+  if (!decoded) {
+    res.status(404).json({ error: 'Invalid or expired share link' });
+    return;
+  }
+
+  const state = await readDb();
+  const resume = state.resumes.find((r) => r.id === decoded.resumeId);
+  const version = state.versions.find((v) => v.id === decoded.versionId && v.resumeId === decoded.resumeId);
+  if (!resume || !version) {
+    res.status(404).json({ error: 'Shared resume not found' });
+    return;
+  }
+
+  res.json({
+    resume: {
+      id: resume.id,
+      title: resume.title,
+    },
+    version: versionToDto(version),
+  });
 });
 
 app.post('/api/resumes/:resumeId/versions', async (req, res) => {
@@ -441,6 +656,36 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
   }
 
   res.json({ version: versionToDto(updated) });
+});
+
+app.delete('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
+  const userId = resolveRequestUserId(req);
+  const resumeId = String(req.params.resumeId);
+  const versionId = String(req.params.versionId);
+  const state = await readDb();
+  const resume = state.resumes.find((r) => r.id === resumeId && r.userId === userId);
+  if (!resume) {
+    res.status(404).json({ error: 'Resume not found' });
+    return;
+  }
+
+  let removed = false;
+  const now = new Date().toISOString();
+  await withDb(async (db) => {
+    const version = db.versions.find((v) => v.id === versionId && v.resumeId === resumeId);
+    if (!version || version.isBase) return;
+    db.versions = db.versions.filter((v) => !(v.id === versionId && v.resumeId === resumeId));
+    const parent = db.resumes.find((r) => r.id === resumeId);
+    if (parent) parent.updatedAt = now;
+    removed = true;
+  });
+
+  if (!removed) {
+    res.status(404).json({ error: 'Version not found' });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 app.post('/api/dev/seed', async (req, res) => {

@@ -72,6 +72,63 @@ export interface AuthResponse {
   user: StoredUser;
 }
 
+export interface TailorResumeRequest {
+  jdText: string;
+  baseResumeText: string;
+  targetTitle?: string;
+  seniority?: 'intern' | 'junior' | 'mid' | 'senior';
+}
+
+export interface TailorResumeResponse {
+  variantResumeText: string;
+  changeSummary: string[];
+  redFlags: string[];
+  keywordCoverage: { matched: string[]; missing: string[] };
+}
+
+export interface CurateResumeRequest {
+  resumeData: unknown;
+  targetRole?: string;
+  jdText?: string;
+}
+
+export interface CurateResumeResponse {
+  changeSummary: string[];
+  redFlags: string[];
+  aboutPointers: string[];
+  jdFocusAreas: string[];
+  jdTldr: {
+    roleAsks: string;
+    candidateNeeds: string;
+    keyFocusAreas: string[];
+  };
+  suggestions: Array<{
+    field: 'bio' | 'bullet';
+    expId?: string;
+    bulletIdx?: number;
+    suggested: string;
+    reason?: string;
+  }>;
+  questions?: string[];
+  quality?: {
+    similarityScore: number;
+    impactScore: number;
+    atsScore: number;
+    passed: boolean;
+    notes: string;
+  };
+  meta?: {
+    providerStatus: 'ok' | 'fallback';
+    fallbackReason?: string;
+    model?: string;
+  };
+}
+
+export interface SharedResumeResponse {
+  resume: { id: string; title: string };
+  version: unknown;
+}
+
 export function register(email: string, password: string, fullName = '') {
   return request<AuthResponse>('/api/auth/register', {
     method: 'POST',
@@ -111,6 +168,33 @@ export function uploadResumePdf(file: File, title = 'Imported Resume') {
   });
 }
 
+export function replaceResumePdf(resumeId: string, file: File, title = 'Uploaded Resume') {
+  const query = new URLSearchParams({ filename: file.name, title }).toString();
+  return request<{ resumeId: string; versionId: string; version: unknown; parsed: unknown; extractedTextPreview: string; warnings?: string[]; resume: { id: string; source: string; file_name?: string; updated_at: string } }>(`/api/resumes/${resumeId}/upload?${query}`, {
+    method: 'POST',
+    auth: true,
+    headers: { 'Content-Type': 'application/pdf' },
+    body: file,
+  });
+}
+
+export async function getResumePdfBlob(resumeId: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = tokenStore.get();
+  if (!token) {
+    headers.set('X-CVStack-Guest-Id', getGuestId());
+  } else {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE}/api/resumes/${resumeId}/pdf`, { headers });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Request failed: ${response.status}`);
+  }
+  return response.blob();
+}
+
 export function listResumes() {
   return request<{ resumes: Array<{ id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string }> }>('/api/resumes', { auth: true });
 }
@@ -135,4 +219,40 @@ export function updateVersion(resumeId: string, versionId: string, payload: unkn
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+export function deleteVersion(resumeId: string, versionId: string) {
+  return request<{ ok: true }>(`/api/resumes/${resumeId}/versions/${versionId}`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
+export function tailorResume(payload: TailorResumeRequest) {
+  return request<TailorResumeResponse>('/api/ai/tailor-resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function curateResume(payload: CurateResumeRequest) {
+  return request<CurateResumeResponse>('/api/ai/curate-resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createResumeShareLink(resumeId: string, versionId: string) {
+  return request<{ token: string; resumeId: string; versionId: string }>(`/api/resumes/${resumeId}/share`, {
+    method: 'POST',
+    auth: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ versionId }),
+  });
+}
+
+export function getSharedResume(token: string) {
+  return request<SharedResumeResponse>(`/api/public/resume/${encodeURIComponent(token)}`);
 }

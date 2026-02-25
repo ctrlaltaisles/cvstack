@@ -5,11 +5,11 @@ import { jsPDF } from 'jspdf';
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
-  Copy, GripVertical, MoreHorizontal, RefreshCw, FileText, Upload,
-  Paperclip, ExternalLink,
+  Copy, GripVertical, MoreHorizontal, FileText, Share2, Trash2,
+  Paperclip, ExternalLink, AlertCircle, Info,
 } from 'lucide-react';
-import { clearAuthStorage, createVersion, listResumes, listVersions, userStore, updateVersion } from '../../lib/api';
-import type { AIChange, Certification, ContactInfo, DateValue, EducationEntry, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
+import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
+import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -32,12 +32,6 @@ function calcDurationFromDates(start: DateValue, end: DateValue): string {
 }
 function formatDateRange(s: DateValue, e: DateValue) { return `${MONTHS[s.month - 1]} ${s.year} – ${e.present ? 'Present' : `${MONTHS[e.month - 1]} ${e.year}`}`; }
 function formatMonthYear(m: number, y: number) { return `${MONTHS[m - 1]} ${y}`; }
-function getSectionKey(c: AIChange) { return c.field === 'bio' ? 'bio' : `${c.expId}-${c.bulletIdx}`; }
-function getChangeLabel(c: AIChange, d: ResumeData) {
-  if (c.field === 'bio') return 'About';
-  if (c.field === 'bullet' && c.expId) { const exp = d.workExperience.find(e => e.id === c.expId); return exp ? `${exp.company} · Bullet ${(c.bulletIdx ?? 0) + 1}` : 'Experience'; }
-  return 'Suggestion';
-}
 function buildTextResume(data: ResumeData): string {
   const lines: string[] = [data.name, data.title, [data.contact.email, data.contact.phone, data.contact.location].filter(Boolean).join(' | '), '', 'ABOUT', data.bio, '', 'WORK EXPERIENCE'];
   (data.workExperience ?? []).forEach(exp => { lines.push('', `${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate)); exp.bullets.forEach(b => lines.push(`• ${b}`)); });
@@ -184,7 +178,7 @@ function buildPdfDocument(data: ResumeData): jsPDF {
 
   const PT_TO_MM = 0.3528;
   const BODY_SIZE = 10;
-  const LINE_HEIGHT = 1.2; // strict 120% line-height
+  const LINE_HEIGHT = 1.3; // 130% line-height for exported body text
   const lineStep = (fontSize: number) => fontSize * PT_TO_MM * LINE_HEIGHT;
   const fontList = pdf.getFontList();
   const availableFonts = Object.keys(fontList).map((f) => f.toLowerCase());
@@ -338,42 +332,79 @@ function buildPdfDocument(data: ResumeData): jsPDF {
   return pdf;
 }
 
-// ─── Mock Data ──────────────────────────────────────────────────────────────────
+// ─── Local Model Helpers ───────────────────────────────────────────────────────
 
-const BASE_CONTACT: ContactInfo = { email: 'alex@johnson.co', phone: '+1 415 555 0100', location: 'San Francisco, CA', website: 'alexjohnson.co', linkedin: 'linkedin.com/in/alexjohnson' };
-const BASE_DATA: ResumeData = {
-  name: 'Alex Johnson', title: 'Senior Product Designer', contact: BASE_CONTACT,
-  bio: 'Passionate about creating intuitive digital experiences that solve real user problems. 8+ years of experience in product design, UX research, and design systems.',
-  workExperience: [
-    { id: 'exp1', company: 'TechCorp Inc.', role: 'Senior Product Designer', startDate: { month: 12, year: 2021, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Led redesign of main dashboard, improving user engagement by 40%', 'Established design system used across 5 product teams', 'Mentored 3 junior designers'] },
-    { id: 'exp2', company: 'StartupCo', role: 'Product Designer', startDate: { month: 3, year: 2018, present: false }, endDate: { month: 1, year: 2021, present: false }, bullets: ['Designed mobile app from 0 to 1, reached 100k users', 'Conducted user research with 50+ customers'] },
-  ],
-  education: [{ id: 'edu1', school: 'Design University', degree: 'BFA in Graphic Design', location: 'San Francisco, CA', startDate: { month: 9, year: 2014, present: false }, endDate: { month: 5, year: 2018, present: false } }],
-  certifications: [{ id: 'cert1', name: 'Google UX Design Certificate', organization: 'Google', issuedMonth: 3, issuedYear: 2022, credentialId: 'GUX-2022-AJ' }],
-  skills: ['Figma', 'Prototyping', 'User Research', 'Design Systems', 'React'],
+const EMPTY_CONTACT: ContactInfo = { email: '', phone: '', location: '', website: '', linkedin: '' };
+const EMPTY_DATA: ResumeData = {
+  name: '',
+  title: '',
+  contact: EMPTY_CONTACT,
+  bio: '',
+  workExperience: [],
+  education: [],
+  certifications: [],
+  skills: [],
 };
-const makeVariant = (bio: string, bullets0: string[]): ResumeData => ({ ...BASE_DATA, contact: { ...BASE_CONTACT }, bio, workExperience: [{ ...BASE_DATA.workExperience[0], bullets: bullets0 }, BASE_DATA.workExperience[1]] });
-const STRIPE_DATA = makeVariant('Strategic product designer with 8+ years shaping fintech and payment UX. Known for scaling design systems and leading cross-functional teams.', ['Spearheaded end-to-end dashboard redesign, driving 40% lift in DAU and 25% drop in task completion time', 'Architected a scalable design system adopted across 5 product teams, enabling 3× faster feature delivery', 'Mentored 3 junior designers, establishing critique culture that elevated overall team output']);
-const AIRBNB_DATA = makeVariant('Creative product designer crafting seamless marketplace experiences. Specialises in 0-to-1 product development.', ['Led host experience redesign, improving listing completion rate by 35% across mobile and web', 'Built and maintained multi-platform design system used by 8 product teams globally', 'Mentored 3 junior designers and established a weekly design critique cadence']);
-const META_DATA = makeVariant('Systems-thinking product designer with 8+ years building at scale for consumer platforms.', ['Led redesign of core dashboard serving 2M+ users, increasing engagement by 40% and reducing churn by 18%', 'Built and maintained design system adopted by 5 teams, cutting design-to-dev handoff time by 60%', "Mentored 3 designers to senior level, fostering a critique-driven culture"]);
-
-let versionCounter = 3;
-function generateAIVersion(jobTitle: string, jobCompany: string, jobDescription = '', jobLink = ''): ResumeVersion {
-  const ts = Date.now();
-  const changes: AIChange[] = [
-    { id: `c-bio-${ts}`, field: 'bio', original: BASE_DATA.bio, suggested: 'Strategic product designer with 8+ years shaping fintech and SaaS experiences. Known for building scalable design systems and leading cross-functional teams to ship products with measurable business impact.', status: 'pending' },
-    { id: `c-b0-${ts}`, field: 'bullet', expId: 'exp1', bulletIdx: 0, original: BASE_DATA.workExperience[0].bullets[0], suggested: 'Spearheaded end-to-end dashboard redesign, driving 40% lift in daily active users and 25% reduction in task completion time, contributing to $2.4M ARR growth', status: 'pending' },
-    { id: `c-b1-${ts}`, field: 'bullet', expId: 'exp1', bulletIdx: 1, original: BASE_DATA.workExperience[0].bullets[1], suggested: 'Architected scalable design system adopted across 5 product teams, enabling 3× faster feature delivery and cutting design-to-dev handoff by 60%', status: 'pending' },
-  ];
-  versionCounter++;
-  return { id: `ai-v${versionCounter}-${ts}`, name: jobCompany ? `${jobTitle} @ ${jobCompany}` : jobTitle, isAI: true, matchScore: 82, jobTitle, jobCompany: jobCompany || 'Company', jobDescription, jobLink, data: { ...BASE_DATA, contact: { ...BASE_CONTACT } }, aiChanges: changes };
-}
 const INITIAL_VERSIONS: ResumeVersion[] = [
-  { id: 'base', name: 'Base Resume', isAI: false, data: BASE_DATA, aiChanges: [] },
-  { id: 'stripe-v1', name: 'Product Designer @ Stripe', isAI: true, matchScore: 82, jobTitle: 'Product Designer', jobCompany: 'Stripe', jobDescription: 'We are looking for a Senior Product Designer to join our Payments team. You will shape the future of financial infrastructure by designing elegant, intuitive experiences for millions of users worldwide. Requirements: 6+ years product design, strong systems thinking, experience with complex B2B products.', jobLink: 'https://stripe.com/jobs', data: STRIPE_DATA, aiChanges: [] },
-  { id: 'airbnb-v1', name: 'Product Designer @ Airbnb', isAI: true, matchScore: 74, jobTitle: 'Product Designer', jobCompany: 'Airbnb', data: AIRBNB_DATA, aiChanges: [] },
-  { id: 'meta-v1', name: 'Frontend Engineer @ Meta', isAI: true, matchScore: 78, jobTitle: 'Frontend Engineer', jobCompany: 'Meta', data: META_DATA, aiChanges: [] },
+  { id: 'base', name: 'Base Resume', isAI: false, isBase: true, data: EMPTY_DATA, aiChanges: [] },
 ];
+type LocalWorkspaceStore = { baseResume: BaseResumeModel | null; jdVariants: JDVariantModel[] };
+
+function cloneResumeData(data: ResumeData): ResumeData {
+  return JSON.parse(JSON.stringify(data)) as ResumeData;
+}
+function storageKeyForResume(resumeId?: string): string {
+  return `cvstack_workspace_variants_${resumeId || 'local'}`;
+}
+function loadLocalWorkspaceStore(key: string): LocalWorkspaceStore {
+  const raw = localStorage.getItem(key);
+  if (!raw) return { baseResume: null, jdVariants: [] };
+  try {
+    const parsed = JSON.parse(raw) as Partial<LocalWorkspaceStore>;
+    return {
+      baseResume: parsed.baseResume ?? null,
+      jdVariants: Array.isArray(parsed.jdVariants) ? parsed.jdVariants : [],
+    };
+  } catch {
+    return { baseResume: null, jdVariants: [] };
+  }
+}
+function saveLocalWorkspaceStore(key: string, store: LocalWorkspaceStore) {
+  localStorage.setItem(key, JSON.stringify(store));
+}
+function buildVariantContent(baseContent: string): string {
+  return baseContent;
+}
+function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, company: string, jd: string, link: string, baseResume: BaseResumeModel): { version: ResumeVersion; jdVariant: JDVariantModel } {
+  const ts = Date.now();
+  const title = company ? `${roleName} @ ${company}` : roleName;
+  const jdVariantId = `jdv-${ts}`;
+  const variantContent = buildVariantContent(baseResume.content);
+  const version: ResumeVersion = {
+    id: `ai-v-${ts}`,
+    name: title,
+    isAI: true,
+    matchScore: 82,
+    jobTitle: roleName,
+    jobCompany: company || 'Company',
+    jobDescription: jd,
+    jobLink: link,
+    baseResumeId: baseResume.id,
+    jdVariantId,
+    variantContent,
+    data: cloneResumeData(baseVersion.data),
+    aiChanges: [],
+  };
+  const jdVariant: JDVariantModel = {
+    id: jdVariantId,
+    baseResumeId: baseResume.id,
+    title,
+    jdText: jd,
+    variantContent,
+    createdAt: new Date(ts).toISOString(),
+  };
+  return { version, jdVariant };
+}
 function applyChange(change: AIChange, d: ResumeData): ResumeData {
   if (change.field === 'bio') return { ...d, bio: change.suggested };
   if (change.field === 'bullet' && change.expId && change.bulletIdx !== undefined) {
@@ -381,14 +412,128 @@ function applyChange(change: AIChange, d: ResumeData): ResumeData {
   }
   return d;
 }
+function buildPendingAIChangesFromCuration(version: ResumeVersion, result: Awaited<ReturnType<typeof curateResume>>, seed = Date.now()): AIChange[] {
+  const nextChanges: AIChange[] = [];
+  let hasBioSuggestion = false;
+
+  for (const [idx, suggestion] of result.suggestions.entries()) {
+    if (suggestion.field === 'bio') {
+      if (suggestion.suggested.trim() === version.data.bio.trim()) continue;
+      hasBioSuggestion = true;
+      nextChanges.push({
+        id: `c-ai-bio-${seed}-${idx}`,
+        field: 'bio',
+        original: version.data.bio,
+        suggested: suggestion.suggested.trim(),
+        status: 'pending',
+      });
+      continue;
+    }
+
+    if (!suggestion.expId || suggestion.bulletIdx === undefined) continue;
+    const exp = version.data.workExperience.find((item) => item.id === suggestion.expId);
+    if (!exp) continue;
+    const bullet = exp.bullets[suggestion.bulletIdx];
+    if (!bullet || suggestion.suggested.trim() === bullet.trim()) continue;
+    nextChanges.push({
+      id: `c-ai-bullet-${seed}-${idx}`,
+      field: 'bullet',
+      expId: suggestion.expId,
+      bulletIdx: suggestion.bulletIdx,
+      original: bullet,
+      suggested: suggestion.suggested.trim(),
+      status: 'pending',
+    });
+  }
+
+  if (!hasBioSuggestion && !version.data.bio.trim()) {
+    const lines: string[] = [];
+    if ((result.jdFocusAreas ?? []).length > 0) {
+      lines.push('Target focus areas from JD:');
+      result.jdFocusAreas.slice(0, 3).forEach((focus) => lines.push(`- ${focus}`));
+      lines.push('');
+    }
+    if ((result.aboutPointers ?? []).length > 0) {
+      lines.push('About section pointers:');
+      result.aboutPointers.slice(0, 4).forEach((pointer) => lines.push(`- ${pointer}`));
+    }
+    if (lines.length > 0) {
+      nextChanges.push({
+        id: `c-ai-bio-guidance-${seed}`,
+        field: 'bio',
+        original: version.data.bio,
+        suggested: lines.join('\n'),
+        status: 'pending',
+      });
+    }
+  }
+
+  return nextChanges;
+}
+function getCurationFallbackReason(result: Awaited<ReturnType<typeof curateResume>>): string | null {
+  if (result.meta?.providerStatus !== 'fallback') return null;
+  const baseReason = result.meta.fallbackReason?.trim() || result.redFlags?.[0]?.trim() || 'AI curation is currently unavailable.';
+  if (/timed out|abort/i.test(baseReason)) return 'AI curation timed out. Please try again in a moment.';
+  if (/api[_\s-]?key|unauthorized|forbidden|auth/i.test(baseReason)) return 'AI curation is not configured correctly. Please verify your OpenAI API key.';
+  return `AI curation fallback: ${baseReason}`;
+}
+function applyAllChanges(data: ResumeData, changes: AIChange[]): ResumeData {
+  return changes.reduce((acc, change) => applyChange(change, acc), data);
+}
+
+function normalizeRoleKey(exp: WorkExperience): string {
+  return `${exp.role.trim().toLowerCase()}::${exp.company.trim().toLowerCase()}`;
+}
+
+function syncVariantExperiencesWithBase(baseData: ResumeData, variantData: ResumeData): ResumeData {
+  const baseById = new Map(baseData.workExperience.map((exp) => [exp.id, exp]));
+  const baseByRoleKey = new Map(baseData.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
+  const syncedWorkExperience = variantData.workExperience.map((exp) => {
+    const byId = baseById.get(exp.id);
+    if (byId) return JSON.parse(JSON.stringify(byId)) as WorkExperience;
+    const byRole = baseByRoleKey.get(normalizeRoleKey(exp));
+    if (byRole) return { ...byRole, id: exp.id };
+    return exp;
+  });
+  return { ...variantData, workExperience: syncedWorkExperience };
+}
+
+function hasSyncDiffForVariant(baseData: ResumeData, variantData: ResumeData): boolean {
+  const synced = syncVariantExperiencesWithBase(baseData, variantData);
+  return JSON.stringify(synced.workExperience) !== JSON.stringify(variantData.workExperience);
+}
 
 // ─── Toast ──────────────────────────────────────────────────────────────────────
 
-function Toast({ message, visible }: { message: string; visible: boolean }) {
+function Toast({ message, visible, tone = 'success' }: { message: string; visible: boolean; tone?: 'success' | 'info' | 'error' }) {
+  const toneStyles = tone === 'error'
+    ? {
+      text: 'text-[#6E1E20]',
+      border: 'border-[#F2C7CC]',
+      iconColor: 'text-[#D6454E]',
+      bg: 'bg-[#FFF4F5]/95',
+      Icon: AlertCircle,
+    }
+    : tone === 'info'
+      ? {
+        text: 'text-[#1F3D66]',
+        border: 'border-[#CFE2F7]',
+        iconColor: 'text-[#3B82F6]',
+        bg: 'bg-[#F4FAFF]/95',
+        Icon: Info,
+      }
+      : {
+        text: 'text-[#2A5139]',
+        border: 'border-[#CCEAD8]',
+        iconColor: 'text-[#2FB46E]',
+        bg: 'bg-white/90',
+        Icon: Check,
+      };
+
   return (
     <div className={`fixed bottom-28 left-1/2 -translate-x-1/2 z-[100] transition-all duration-300 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}>
-      <div className="bg-[#1A1A1A] text-white px-4 py-2.5 rounded-[10px] shadow-lg whitespace-nowrap flex items-center gap-2" style={{ fontSize: 13 }}>
-        <Check size={13} className="text-[#4ADE80]" />{message}
+      <div className={`${toneStyles.bg} backdrop-blur-md border ${toneStyles.border} ${toneStyles.text} px-4 py-2.5 rounded-[12px] shadow-[0_8px_22px_rgba(0,0,0,0.08)] whitespace-nowrap flex items-center gap-2`} style={{ fontSize: 13 }}>
+        <toneStyles.Icon size={13} strokeWidth={1.8} className={toneStyles.iconColor} />{message}
       </div>
     </div>
   );
@@ -396,7 +541,7 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
 
 // ─── InlineText ─────────────────────────────────────────────────────────────────
 
-function InlineText({ value, onChange, className = '', placeholder = 'Click to edit', onFocusChange }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; onFocusChange?: (f: boolean) => void }) {
+function InlineText({ value, onChange, className = '', placeholder = 'Click to edit', onFocusChange, disabled = false }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; onFocusChange?: (f: boolean) => void; disabled?: boolean }) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => { if (editing) { ref.current?.focus(); ref.current?.select(); } }, [editing]);
@@ -405,14 +550,14 @@ function InlineText({ value, onChange, className = '', placeholder = 'Click to e
     <div className={className}>
       {editing
         ? <input ref={ref} value={local} onChange={e => setLocal(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setLocal(value); setEditing(false); onFocusChange?.(false); } }} className="w-full bg-[#F5F5F5] border-0 border-b border-[#D0D0D0] outline-none px-1 py-0.5" style={{ fontSize: 'inherit', fontFamily: 'inherit', color: 'inherit', lineHeight: 'inherit', fontWeight: 'inherit' }} />
-        : <span onClick={() => { setEditing(true); onFocusChange?.(true); }} className="cursor-text hover:bg-[#F5F5F5] rounded-[4px] px-1 -mx-1 transition-colors inline-block w-full">{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</span>}
+        : <span onClick={() => { if (!disabled) { setEditing(true); onFocusChange?.(true); } }} className={`${disabled ? '' : 'cursor-text hover:bg-[#F5F5F5]'} rounded-[4px] px-1 -mx-1 transition-colors inline-block w-full`}>{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</span>}
     </div>
   );
 }
 
 // ─── InlineArea ─────────────────────────────────────────────────────────────────
 
-function InlineArea({ value, onChange, className = '', placeholder = 'Click to edit' }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string }) {
+function InlineArea({ value, onChange, className = '', placeholder = 'Click to edit', disabled = false }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; disabled?: boolean }) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => { if (editing && ref.current) { ref.current.focus(); ref.current.style.height = 'auto'; ref.current.style.height = ref.current.scrollHeight + 'px'; } }, [editing]);
@@ -421,14 +566,14 @@ function InlineArea({ value, onChange, className = '', placeholder = 'Click to e
     <div className={className}>
       {editing
         ? <textarea ref={ref} value={local} onChange={e => { setLocal(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onBlur={save} onKeyDown={e => { if (e.key === 'Escape') { setLocal(value); setEditing(false); } }} className="w-full bg-[#F5F5F5] outline-none resize-none overflow-hidden px-2 py-1.5 leading-relaxed rounded-[8px]" style={{ fontSize: 'inherit', fontFamily: 'inherit', color: 'inherit' }} />
-        : <p onClick={() => setEditing(true)} className="cursor-text hover:bg-[#F5F5F5] rounded-[8px] px-2 -mx-2 py-1.5 -my-1.5 transition-colors leading-relaxed">{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</p>}
+        : <p onClick={() => { if (!disabled) setEditing(true); }} className={`${disabled ? '' : 'cursor-text hover:bg-[#F5F5F5]'} rounded-[8px] px-2 -mx-2 py-1.5 -my-1.5 transition-colors leading-relaxed`}>{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</p>}
     </div>
   );
 }
 
 // ─── BulletInlineArea ─────────────────────────────────────────────────────────
 
-function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onEnterNewBullet, autoEdit, onAutoEditConsumed }: { value: string; onChange: (v: string) => void; onDeleteOnEmpty?: () => void; onFocusChange?: (f: boolean) => void; onEnterNewBullet?: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void }) {
+function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onEnterNewBullet, autoEdit, onAutoEditConsumed, disabled = false }: { value: string; onChange: (v: string) => void; onDeleteOnEmpty?: () => void; onFocusChange?: (f: boolean) => void; onEnterNewBullet?: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; disabled?: boolean }) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => { if (editing && ref.current) { const el = ref.current; el.focus(); el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; const l = el.value.length; el.setSelectionRange(l, l); } }, [editing]);
@@ -453,27 +598,27 @@ function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onE
     if (e.key === 'Escape') { setLocal(value); setEditing(false); onFocusChange?.(false); }
     if (e.key === 'Backspace' && local === '' && onDeleteOnEmpty) { e.preventDefault(); onDeleteOnEmpty(); }
   }} className="w-full bg-transparent outline-none resize-none overflow-hidden text-sm text-[#2B2B2B] leading-relaxed" style={{ fontFamily: 'inherit', minHeight: '1.5em' }} />;
-  return <span onClick={() => { setEditing(true); onFocusChange?.(true); }} className="cursor-text inline-block w-full text-sm text-[#2B2B2B] leading-relaxed whitespace-pre-wrap break-words min-h-[1.5em]">{local || <span className="text-[#D0D0D0] not-italic">Add bullet text…</span>}</span>;
+  return <span onClick={() => { if (!disabled) { setEditing(true); onFocusChange?.(true); } }} className={`${disabled ? '' : 'cursor-text'} inline-block w-full text-sm text-[#2B2B2B] leading-relaxed whitespace-pre-wrap break-words min-h-[1.5em]`}>{local || <span className="text-[#D0D0D0] not-italic">Add bullet text…</span>}</span>;
 }
 
 // ─── ContactInlineField ─────────────────────────────────────────────────────────
 
-function ContactInlineField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+function ContactInlineField({ value, onChange, placeholder, disabled = false }: { value: string; onChange: (v: string) => void; placeholder: string; disabled?: boolean }) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { setLocal(value); }, [value]); useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
   const save = () => { setEditing(false); if (local !== value) onChange(local); };
   if (editing) return <input ref={ref} value={local} onChange={e => setLocal(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setLocal(value); setEditing(false); } }} placeholder={placeholder} className="outline-none border-b border-[#D0D0D0] bg-[#F5F5F5] text-sm text-[#6B6B6B] px-0.5" style={{ width: `${Math.max(local.length, placeholder.length) * 7.5 + 8}px`, minWidth: 60 }} />;
-  if (!value) return <span onClick={() => setEditing(true)} className="cursor-text text-sm text-[#D0D0D0] hover:text-[#CBCBCB] italic">{placeholder}</span>;
-  return <span onClick={() => setEditing(true)} className="cursor-text text-sm text-[#6B6B6B] hover:bg-[#F5F5F5] rounded-[3px] px-0.5 transition-colors">{value}</span>;
+  if (!value) return <span onClick={() => { if (!disabled) setEditing(true); }} className={`${disabled ? '' : 'cursor-text'} text-sm text-[#D0D0D0] hover:text-[#CBCBCB] italic`}>{placeholder}</span>;
+  return <span onClick={() => { if (!disabled) setEditing(true); }} className={`${disabled ? '' : 'cursor-text hover:bg-[#F5F5F5]'} text-sm text-[#6B6B6B] rounded-[3px] px-0.5 transition-colors`}>{value}</span>;
 }
 
 // ─── SkillPill + SkillsEditor ────────────────────────────────────────────────
 
 function SkillPill({ skill, onDelete }: { skill: string; onDelete: () => void }) {
   const [hov, setHov] = useState(false);
-  return <div className="flex items-center gap-1 px-3 py-1.5 bg-[#F5F5F5] rounded-[8px] text-sm text-[#2B2B2B]" onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>{skill}<button onClick={onDelete} className={`ml-0.5 text-[#AAAAAA] hover:text-[#444] transition-all ${hov ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}><X size={11} /></button></div>;
+  return <div className="flex items-center gap-1 px-4 py-1.5 bg-[#F5F5F5] rounded-full text-sm text-[#2B2B2B]" onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>{skill}<button onClick={onDelete} className={`ml-0.5 text-[#AAAAAA] hover:text-[#444] transition-all ${hov ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}><X size={11} strokeWidth={1.8} /></button></div>;
 }
-function SkillsEditor({ skills, onUpdate }: { skills: string[]; onUpdate: (s: string[]) => void }) {
+function SkillsEditor({ skills, onUpdate, disabled = false }: { skills: string[]; onUpdate: (s: string[]) => void; disabled?: boolean }) {
   const [adding, setAdding] = useState(false); const [input, setInput] = useState(''); const ref = useRef<HTMLInputElement>(null);
   const maxSkills = 8;
   useEffect(() => { if (adding) ref.current?.focus(); }, [adding]);
@@ -489,8 +634,8 @@ function SkillsEditor({ skills, onUpdate }: { skills: string[]; onUpdate: (s: st
     <div className="flex flex-wrap gap-2">
       {skills.map((s, i) => <SkillPill key={i} skill={s} onDelete={() => onUpdate(skills.filter((_, j) => j !== i))} />)}
       {adding && skills.length < maxSkills
-        ? <input ref={ref} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } if (e.key === 'Backspace' && input === '') setAdding(false); if (e.key === 'Escape') { setInput(''); setAdding(false); } }} onBlur={submit} placeholder="Type a skill…" className="px-3 py-1.5 bg-[#F0F0F0] rounded-[8px] text-sm text-[#2B2B2B] outline-none min-w-[120px]" />
-        : <button onClick={() => setAdding(true)} disabled={skills.length >= maxSkills} className="px-3 py-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{skills.length >= maxSkills ? 'Max 8 skills' : '+ Add Skill'}</button>}
+        ? <input ref={ref} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } if (e.key === 'Backspace' && input === '') setAdding(false); if (e.key === 'Escape') { setInput(''); setAdding(false); } }} onBlur={submit} placeholder="Type a skill…" className="px-4 py-1.5 bg-[#F0F0F0] rounded-full text-sm text-[#2B2B2B] outline-none min-w-[120px]" />
+        : <button onClick={() => { if (!disabled) setAdding(true); }} disabled={disabled || skills.length >= maxSkills} className="px-4 py-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B] rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{skills.length >= maxSkills ? 'Max 8 skills' : '+ Add Skill'}</button>}
     </div>
   );
 }
@@ -558,25 +703,25 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
 
 // ─── BulletRow ───────────────────────────────────────────────────────────────
 
-function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, autoEdit, onAutoEditConsumed }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void }) {
+function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, autoEdit, onAutoEditConsumed, isReviewLocked = false }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; isReviewLocked?: boolean }) {
   const [rowHov, setRowHov] = useState(false); const [active, setActive] = useState(false); const [showMenu, setShowMenu] = useState(false); const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!showMenu) return; const h = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [showMenu]);
   return (
-    <div className={`flex items-start gap-1 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => { if (!showMenu) setRowHov(false); }}>
-      <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`shrink-0 mt-[3px] cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} /></div>
+    <div className={`relative flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => { if (!showMenu) setRowHov(false); }}>
+      {!isReviewLocked && <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`absolute -left-4 top-[3px] shrink-0 cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} strokeWidth={1.8} /></div>}
       <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
-      <div className="flex-1 min-w-0"><BulletInlineArea value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
-      <div className="relative shrink-0" ref={menuRef}>
+      <div className="flex-1 min-w-0"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
+      {!isReviewLocked && <div className="relative shrink-0" ref={menuRef}>
         <button onClick={() => setShowMenu(!showMenu)} className={`p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-opacity mt-0.5 ${rowHov || showMenu ? 'opacity-100' : 'opacity-0'}`}><MoreHorizontal size={13} /></button>
         {showMenu && <div className="absolute right-0 top-6 w-28 bg-white border border-[#EBEBEB] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.08)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]"><button onClick={() => { onDuplicate(); setShowMenu(false); setRowHov(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] hover:bg-[#F7F7F8]">Duplicate</button><div className="h-px bg-[#F0F0F0]" /><button onClick={() => { onDelete(); setShowMenu(false); }} className="w-full text-left px-3 py-2.5 text-sm text-red-500 hover:bg-red-50">Delete</button></div>}
-      </div>
+      </div>}
     </div>
   );
 }
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
-function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, highlightedSectionKey, registerBulletRef, onShowToast }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; highlightedSectionKey: string | null; registerBulletRef: (key: string, el: HTMLElement | null) => void; onShowToast: (msg: string) => void }) {
+function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, isReviewLocked = false }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; isReviewLocked?: boolean }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const [autoEditBulletIdx, setAutoEditBulletIdx] = useState<number | null>(null); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const updateBullets = (bullets: string[]) => onUpdateExp({ ...exp, bullets });
@@ -588,43 +733,56 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
   };
   const handleDrop = (toIdx: number) => { if (dragFrom === null || dragFrom === toIdx) { setDragFrom(null); setDragTarget(null); return; } const next = [...exp.bullets]; const [moved] = next.splice(dragFrom, 1); next.splice(toIdx, 0, moved); updateBullets(next); setDragFrom(null); setDragTarget(null); };
   const duration = calcDurationFromDates(exp.startDate, exp.endDate);
+  const hasPending = pendingBulletChanges.size > 0;
   return (
-    <div className={`flex gap-10 group/exp transition-opacity ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
-      <div className="w-4 shrink-0 self-start pt-0.5">
-        <button
+    <div className={`flex gap-10 group/exp transition-all duration-300 ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
+      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
+        {!isReviewLocked && <button
           draggable
           onDragStart={onDragStartExperience}
           onDragEnd={onDragEndExperience}
-          className="opacity-0 group-hover/exp:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5 cursor-grab active:cursor-grabbing"
+          className="absolute -left-5 top-0 opacity-0 group-hover/exp:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5 cursor-grab active:cursor-grabbing"
         >
-          <GripVertical size={12} />
-        </button>
-      </div>
-      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
-        <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
+          <GripVertical size={12} strokeWidth={1.8} />
+        </button>}
+        <div onClick={() => { if (!isReviewLocked) setEditingDate(!editingDate); }} className={`${isReviewLocked ? '' : 'cursor-pointer'}`}><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={exp.startDate} endDate={exp.endDate} onChangeStart={v => onUpdateExp({ ...exp, startDate: v })} onChangeEnd={v => onUpdateExp({ ...exp, endDate: v })} onClose={() => setEditingDate(false)} />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2 group/role mb-0.5">
-          <div className="flex-1 min-w-0"><InlineText value={exp.role} onChange={v => onUpdateExp({ ...exp, role: v })} className="text-sm text-[#1A1A1A]" /></div>
+          <div className="flex-1 min-w-0"><InlineText disabled={isReviewLocked} value={exp.role} onChange={v => onUpdateExp({ ...exp, role: v })} className="text-sm text-[#1A1A1A]" /></div>
           <div className="relative shrink-0 mt-0.5 flex items-center gap-1">
-            <button onClick={() => { const text = [`${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate), '', ...exp.bullets.map(b => `• ${b}`)].join('\n'); navigator.clipboard.writeText(text).catch(() => {}); onShowToast('Copied to clipboard'); }} onMouseEnter={() => setShowCopyTip(true)} onMouseLeave={() => setShowCopyTip(false)} className="opacity-0 group-hover/role:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5"><Copy size={12} /></button>
+            {!isReviewLocked && <button onClick={() => { const text = [`${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate), '', ...exp.bullets.map(b => `• ${b}`)].join('\n'); navigator.clipboard.writeText(text).catch(() => {}); onShowToast('Copied to clipboard'); }} onMouseEnter={() => setShowCopyTip(true)} onMouseLeave={() => setShowCopyTip(false)} className="opacity-0 group-hover/role:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5"><Copy size={12} strokeWidth={1.8} /></button>}
             {showCopyTip && <div className="absolute right-0 top-6 bg-[#1A1A1A] text-white rounded-[6px] px-2 py-1 whitespace-nowrap pointer-events-none z-50" style={{ fontSize: 11 }}>Copy role</div>}
           </div>
         </div>
-        <div className="mb-4"><InlineText value={exp.company} onChange={v => onUpdateExp({ ...exp, company: v })} className="text-sm text-[#6B6B6B]" /></div>
+        <div className="mb-4"><InlineText disabled={isReviewLocked} value={exp.company} onChange={v => onUpdateExp({ ...exp, company: v })} className="text-sm text-[#6B6B6B]" /></div>
         <ul className="space-y-0.5">
           {exp.bullets.map((bullet, idx) => {
-            const key = `${exp.id}-${idx}`;
+            const pendingChange = pendingBulletChanges.get(idx);
             return (
-              <li key={idx} ref={el => registerBulletRef(key, el)} className={`border-t-2 transition-colors ${dragTarget === idx && dragFrom !== null && dragFrom !== idx ? 'border-[#BFBFBF]' : 'border-transparent'}`} onDragOver={e => { e.preventDefault(); if (dragFrom !== null && dragFrom !== idx) setDragTarget(idx); }} onDrop={() => handleDrop(idx)} onDragLeave={() => setDragTarget(null)}>
-                <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={highlightedSectionKey === key} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} />
+              <li key={idx} className={`border-t-2 transition-colors ${dragTarget === idx && dragFrom !== null && dragFrom !== idx ? 'border-[#BFBFBF]' : 'border-transparent'}`} onDragOver={e => { e.preventDefault(); if (dragFrom !== null && dragFrom !== idx) setDragTarget(idx); }} onDrop={() => handleDrop(idx)} onDragLeave={() => setDragTarget(null)}>
+                {pendingChange ? (
+                  <div className="flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-1.5 bg-[#F7F7F7]">
+                    <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
+                    <p className="text-sm text-[#2B2B2B] leading-relaxed">{showOriginal ? pendingChange.original : pendingChange.suggested}</p>
+                  </div>
+                ) : (
+                  <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={false} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} isReviewLocked={isReviewLocked} />
+                )}
               </li>
             );
           })}
         </ul>
-        <button onClick={() => updateBullets([...exp.bullets, ''])} className="mt-3 text-xs text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add bullet</button>
-        <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>
+        {hasPending && (
+          <div className="flex gap-2 mt-4">
+            <button onClick={onAcceptPending} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] text-white rounded-[7px] hover:bg-black" style={{ fontSize: 12 }}><Check size={11} /> Accept</button>
+            <button onClick={onRejectPending} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>Reject</button>
+            <button onClick={onToggleShowOriginal} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>{showOriginal ? 'Show Changed' : 'Show Original'}</button>
+          </div>
+        )}
+        {!isReviewLocked && <button onClick={() => updateBullets([...exp.bullets, ''])} className="mt-3 text-xs text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add bullet</button>}
+        {!isReviewLocked && <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>}
       </div>
     </div>
   );
@@ -681,119 +839,80 @@ function CertificationBlock({ cert, onUpdateCert, onDeleteCert }: { cert: Certif
 
 // ─── SuggestionCard ──────────────────────────────────────────────────────────
 
-function SuggestionCard({ change, data, isActive, onClick, onAccept, onReject }: { change: AIChange; data: ResumeData; isActive: boolean; onClick: () => void; onAccept: () => void; onReject: () => void }) {
-  return (
-    <div onClick={onClick} className={`rounded-[10px] border p-4 bg-white cursor-pointer select-none transition-all ${isActive ? 'border-[#C8C8C8] shadow-[0_2px_12px_rgba(0,0,0,0.07)]' : 'border-[#E8E8E8] hover:border-[#D0D0D0]'}`}>
-      <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA] mb-2">{getChangeLabel(change, data)}</p>
-      <p className="text-sm text-[#2B2B2B] leading-relaxed mb-4">{change.suggested}</p>
-      <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-        <button onClick={onAccept} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] text-white rounded-[7px] hover:bg-black" style={{ fontSize: 12 }}><Check size={11} /> Accept</button>
-        <button onClick={onReject} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>Reject</button>
-      </div>
-    </div>
-  );
-}
-
 // ─── ResumeView ──────────────────────────────────────────────────────────────
 
-// Card height estimate for layout (includes gap to next card)
-const CARD_EST_H = 155;
-const CARD_GAP = 20; // Updated from 12 to 20 for better spacing (16-24px range)
-
-function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onAcceptAll, onRejectAll, onShowToast }: { version: ResumeVersion; onUpdateData: (d: ResumeData) => void; onAcceptChange: (id: string) => void; onRejectChange: (id: string) => void; onAcceptAll: () => void; onRejectAll: () => void; onShowToast: (msg: string) => void }) {
+function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onShowToast, isReviewLocked = false }: { version: ResumeVersion; onUpdateData: (d: ResumeData) => void; onAcceptChange: (id: string) => void; onRejectChange: (id: string) => void; onShowToast: (msg: string) => void; isReviewLocked?: boolean }) {
   const { data, aiChanges } = version;
   const update = (p: Partial<ResumeData>) => onUpdateData({ ...data, ...p });
   const [dragExpFrom, setDragExpFrom] = useState<number | null>(null);
   const [dragExpTarget, setDragExpTarget] = useState<number | null>(null);
   const pendingChanges = (aiChanges ?? []).filter(c => c.status === 'pending');
-  const hasSuggestions = pendingChanges.length > 0;
+  const [showOriginalGroups, setShowOriginalGroups] = useState<Set<string>>(new Set());
+  const bioChanges = pendingChanges.filter((c) => c.field === 'bio');
+  const bioChange = bioChanges[0];
+  const pendingByExp = React.useMemo(() => {
+    const map = new Map<string, AIChange[]>();
+    pendingChanges
+      .filter((c) => c.field === 'bullet' && c.expId)
+      .forEach((change) => {
+        const key = change.expId!;
+        const list = map.get(key) ?? [];
+        list.push(change);
+        map.set(key, list);
+      });
+    return map;
+  }, [pendingChanges]);
   const hasAbout = data.bio.trim().length > 0;
   const hasWorkExperience = (data.workExperience ?? []).length > 0;
   const hasEducation = (data.education ?? []).length > 0;
   const hasCertifications = (data.certifications ?? []).length > 0;
   const hasSkills = (data.skills ?? []).length > 0;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
-  // idealTop[id] = card top such that card CENTER aligns to element CENTER
-  const [idealTop, setIdealTop] = useState<Record<string, number>>({});
-  const [highlightedSectionKey, setHighlightedSectionKey] = useState<string | null>(null);
-  const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
-  const highlightTimer = useRef<ReturnType<typeof setTimeout>>();
-
-  const recalcPositions = useCallback(() => {
-    if (!containerRef.current) return;
-    const cRect = containerRef.current.getBoundingClientRect();
-    const next: Record<string, number> = {};
-    pendingChanges.forEach(ch => {
-      const el = sectionRefs.current.get(getSectionKey(ch));
-      if (el) {
-        const eRect = el.getBoundingClientRect();
-        // Center-to-center: top = element_center_Y - card_half_height
-        const elementCenterY = eRect.top - cRect.top + eRect.height / 2;
-        next[ch.id] = Math.round(elementCenterY - CARD_EST_H / 2);
-      }
+  const toggleOriginal = (groupKey: string) => {
+    setShowOriginalGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
     });
-    setIdealTop(prev => {
-      const same = Object.keys(next).length === Object.keys(prev).length && Object.keys(next).every(k => next[k] === prev[k]);
-      return same ? prev : next;
-    });
-  }, [pendingChanges]);
-
-  useLayoutEffect(() => { recalcPositions(); });
-  useEffect(() => { window.addEventListener('resize', recalcPositions); return () => window.removeEventListener('resize', recalcPositions); }, [recalcPositions]);
-  const registerRef = useCallback((key: string, el: HTMLElement | null) => { if (el) sectionRefs.current.set(key, el); else sectionRefs.current.delete(key); }, []);
-
-  const handleSuggestionClick = (change: AIChange) => {
-    const key = getSectionKey(change);
-    if (highlightTimer.current) clearTimeout(highlightTimer.current);
-    setHighlightedSectionKey(key); setActiveSuggestionId(change.id);
-    sectionRefs.current.get(key)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    highlightTimer.current = setTimeout(() => { setHighlightedSectionKey(null); setActiveSuggestionId(null); }, 2200);
   };
-
-  // Resolve positions: sort by idealTop, prevent overlap by pushing cards down
-  // Active card is prioritized and appears at the top
-  const HEADER_H = 38;
-  const COLUMN_PADDING_TOP = 24;
-  const DISPLACED_THRESHOLD = 30; // px displacement before showing connector
-  const sortedPending = [...pendingChanges].sort((a, b) => {
-    // Active suggestion goes first
-    if (activeSuggestionId === a.id) return -1;
-    if (activeSuggestionId === b.id) return 1;
-    // Otherwise sort by ideal position
-    return (idealTop[a.id] ?? 0) - (idealTop[b.id] ?? 0);
-  });
-  const resolvedTop: Record<string, number> = {};
-  let cursor = Math.max(HEADER_H, COLUMN_PADDING_TOP);
-  sortedPending.forEach(ch => {
-    const ideal = Math.max(idealTop[ch.id] ?? cursor, HEADER_H);
-    const placed = Math.max(ideal, cursor);
-    resolvedTop[ch.id] = placed;
-    cursor = placed + CARD_EST_H + CARD_GAP;
-  });
-
-  const bioChange = pendingChanges.find(c => c.field === 'bio');
+  const acceptChanges = (changes: AIChange[]) => {
+    changes.forEach((change) => onAcceptChange(change.id));
+  };
+  const rejectChanges = (changes: AIChange[]) => {
+    changes.forEach((change) => onRejectChange(change.id));
+  };
   const contactItems: Array<{ key: keyof ContactInfo; placeholder: string }> = [{ key: 'email', placeholder: 'email@email.com' }, { key: 'phone', placeholder: '+1 234 567 890' }, { key: 'location', placeholder: 'City, Country' }, { key: 'website', placeholder: 'website.com' }, { key: 'linkedin', placeholder: 'linkedin.com/in/…' }];
 
   return (
-    <div ref={containerRef} className="relative">
-      <div className={`print-main-content text-[13px] leading-[1.55] ${hasSuggestions ? 'mr-[288px]' : ''}`}>
+    <div className="relative">
+      <div className="print-main-content text-[13px] leading-[1.55]">
         {/* Header */}
         <div className="flex items-start gap-5 mb-5">
           <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>AJ</div>
-          <div className="flex-1 min-w-0 space-y-1 pt-1"><InlineText value={data.name} onChange={v => update({ name: v })} className="text-[#1A1A1A] text-[22px]" /><InlineText value={data.title} onChange={v => update({ title: v })} className="text-base text-[#6B6B6B]" /></div>
+          <div className="flex-1 min-w-0 space-y-1 pt-1"><InlineText disabled={isReviewLocked} value={data.name} onChange={v => update({ name: v })} className="text-[#1A1A1A] text-[22px]" /><InlineText disabled={isReviewLocked} value={data.title} onChange={v => update({ title: v })} className="text-base text-[#6B6B6B]" /></div>
         </div>
         {/* Contact */}
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 mb-10">
-          {contactItems.flatMap((item, idx) => [idx > 0 ? <span key={`d-${item.key}`} className="text-[#D8D8D8] text-sm">•</span> : null, <ContactInlineField key={item.key} value={data.contact[item.key]} onChange={v => update({ contact: { ...data.contact, [item.key]: v } })} placeholder={item.placeholder} />])}
+          {contactItems.flatMap((item, idx) => [idx > 0 ? <span key={`d-${item.key}`} className="text-[#D8D8D8] text-sm">•</span> : null, <ContactInlineField disabled={isReviewLocked} key={item.key} value={data.contact[item.key]} onChange={v => update({ contact: { ...data.contact, [item.key]: v } })} placeholder={item.placeholder} />])}
         </div>
         {/* About */}
         <div className="resume-section mb-7" data-empty={!hasAbout}>
           <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-4">About</p>
-          <div ref={el => registerRef('bio', el)} className={`rounded-[8px] transition-colors duration-500 ${highlightedSectionKey === 'bio' ? 'bg-[#F5F5F5]' : ''} ${bioChange ? 'border-l-2 pl-3 -ml-3 border-[#E0E0E0]' : ''}`}>
-            <InlineArea value={data.bio} onChange={v => update({ bio: v })} className="text-sm text-[#2B2B2B]" />
-          </div>
+          {bioChange ? (
+            <>
+              <div className="rounded-[8px] bg-[#F7F7F7] px-2 py-1.5">
+                <p className="text-sm text-[#2B2B2B] leading-relaxed whitespace-pre-wrap">{showOriginalGroups.has('bio') ? bioChange.original : bioChange.suggested}</p>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => onAcceptChange(bioChange.id)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] text-white rounded-[7px] hover:bg-black" style={{ fontSize: 12 }}><Check size={11} /> Accept</button>
+                <button onClick={() => onRejectChange(bioChange.id)} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>Reject</button>
+                <button onClick={() => toggleOriginal('bio')} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>{showOriginalGroups.has('bio') ? 'Show Changed' : 'Show Original'}</button>
+              </div>
+            </>
+          ) : (
+            <InlineArea disabled={isReviewLocked} value={data.bio} onChange={v => update({ bio: v })} className="text-sm text-[#2B2B2B]" />
+          )}
         </div>
         {/* Work Experience */}
         <div className="resume-section mb-7" data-empty={!hasWorkExperience}>
@@ -805,12 +924,12 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
                 key={exp.id}
                 className={`border-t-2 transition-colors ${dragExpTarget === idx && dragExpFrom !== null && dragExpFrom !== idx ? 'border-[#BFBFBF]' : 'border-transparent'}`}
                 onDragOver={(e) => {
-                  if (dragExpFrom === null) return;
+                  if (isReviewLocked || dragExpFrom === null) return;
                   e.preventDefault();
                   if (dragExpFrom !== idx) setDragExpTarget(idx);
                 }}
                 onDrop={() => {
-                  if (dragExpFrom === null || dragExpFrom === idx) {
+                  if (isReviewLocked || dragExpFrom === null || dragExpFrom === idx) {
                     setDragExpFrom(null);
                     setDragExpTarget(null);
                     return;
@@ -826,6 +945,14 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
                   if (dragExpFrom !== null) setDragExpTarget(null);
                 }}
               >
+                {(() => {
+                  const expChanges = [...(pendingByExp.get(exp.id) ?? [])].sort((a, b) => (a.bulletIdx ?? 0) - (b.bulletIdx ?? 0));
+                  const pendingBulletChanges = new Map<number, AIChange>();
+                  expChanges.forEach((change) => {
+                    if (change.bulletIdx !== undefined) pendingBulletChanges.set(change.bulletIdx, change);
+                  });
+                  const groupKey = `exp-${exp.id}`;
+                  return (
                 <ExperienceBlock
                   exp={exp}
                   onUpdateExp={u => update({ workExperience: data.workExperience.map(e => e.id === exp.id ? u : e) })}
@@ -839,89 +966,50 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
                     setDragExpTarget(null);
                   }}
                   isDraggingExperience={dragExpFrom === idx}
-                  highlightedSectionKey={highlightedSectionKey}
-                  registerBulletRef={registerRef}
+                  isReviewLocked={isReviewLocked}
+                  pendingBulletChanges={pendingBulletChanges}
+                  showOriginal={showOriginalGroups.has(groupKey)}
+                  onAcceptPending={() => acceptChanges(expChanges)}
+                  onRejectPending={() => rejectChanges(expChanges)}
+                  onToggleShowOriginal={() => toggleOriginal(groupKey)}
                   onShowToast={onShowToast}
                 />
+                  );
+                })()}
               </div>
             ))}
           </div>
-          <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Experience</button>
+          {!isReviewLocked && <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Experience</button>}
         </div>
         {/* Education */}
-        <div className="resume-section mb-7" data-empty={!hasEducation}>
+        <div className={`resume-section mb-7 ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasEducation}>
           <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Education</p>
           <div className="space-y-5">{(data.education ?? []).map(edu => <EducationBlock key={edu.id} edu={edu} onUpdateEdu={u => update({ education: data.education.map(e => e.id === edu.id ? u : e) })} onDeleteEdu={() => update({ education: data.education.filter(e => e.id !== edu.id) })} />)}</div>
-          <button onClick={() => update({ education: [...data.education, { id: `edu-${Date.now()}`, school: 'School Name', degree: 'Degree', location: '', startDate: { month: 9, year: 2020, present: false }, endDate: { month: 5, year: 2024, present: false } }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Education</button>
+          {!isReviewLocked && <button onClick={() => update({ education: [...data.education, { id: `edu-${Date.now()}`, school: 'School Name', degree: 'Degree', location: '', startDate: { month: 9, year: 2020, present: false }, endDate: { month: 5, year: 2024, present: false } }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Education</button>}
         </div>
         {/* Certifications */}
-        <div className="resume-section mb-7" data-empty={!hasCertifications}>
+        <div className={`resume-section mb-7 ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasCertifications}>
           <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Certifications</p>
           <div className="space-y-6">{(data.certifications ?? []).map(cert => <CertificationBlock key={cert.id} cert={cert} onUpdateCert={u => update({ certifications: data.certifications.map(c => c.id === cert.id ? u : c) })} onDeleteCert={() => update({ certifications: data.certifications.filter(c => c.id !== cert.id) })} />)}</div>
-          <button onClick={() => update({ certifications: [...data.certifications, { id: `cert-${Date.now()}`, name: 'Certificate Name', organization: 'Issuing Organization', issuedMonth: 1, issuedYear: 2024, credentialId: '' }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Certification</button>
+          {!isReviewLocked && <button onClick={() => update({ certifications: [...data.certifications, { id: `cert-${Date.now()}`, name: 'Certificate Name', organization: 'Issuing Organization', issuedMonth: 1, issuedYear: 2024, credentialId: '' }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Certification</button>}
         </div>
         {/* Skills */}
-        <div className="resume-section" data-empty={!hasSkills}>
+        <div className={`resume-section ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasSkills}>
           <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-5">Skills</p>
-          <SkillsEditor skills={data.skills ?? []} onUpdate={s => update({ skills: s })} />
+          <SkillsEditor disabled={isReviewLocked} skills={data.skills ?? []} onUpdate={s => update({ skills: s })} />
         </div>
       </div>
 
-      {/* ── Suggestion cards — right gutter, center-to-center aligned with connectors ── */}
-      {hasSuggestions && (
-        <div className="absolute top-0 right-0 w-[264px] print-hide">
-          {/* Header */}
-          <div className="flex items-center justify-between" style={{ height: HEADER_H }}>
-            <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA]">{pendingChanges.length} suggestion{pendingChanges.length !== 1 ? 's' : ''}</p>
-            <div className="flex gap-3">
-              <button onClick={onAcceptAll} className="text-[#2B2B2B] hover:text-black" style={{ fontSize: 11 }}>Accept all</button>
-              <button onClick={onRejectAll} className="text-[#9B9B9B] hover:text-[#2B2B2B]" style={{ fontSize: 11 }}>Reject all</button>
-            </div>
-          </div>
-          {/* Card container — relative for absolute child positioning */}
-          <div className="relative pt-6 pb-6" style={{ minHeight: cursor + 48 }}>
-            {pendingChanges.map(change => {
-              const ideal = idealTop[change.id] ?? HEADER_H;
-              const resolved = resolvedTop[change.id] ?? ideal;
-              const displaced = resolved - ideal > DISPLACED_THRESHOLD;
-              const targetCenterY = ideal + CARD_EST_H / 2;
-              const cardCenterY = resolved + CARD_EST_H / 2;
-
-              return (
-                // div with display:contents replaces React.Fragment — avoids Figma inspector
-                // injecting invalid data-* props into Fragment nodes (React warns on those)
-                <div key={change.id} className="contents">
-                  {/* Connector: shown when card is displaced below its target line */}
-                  {displaced && (
-                    <>
-                      {/* Anchor dot at the target line center */}
-                      <div className="absolute rounded-full bg-[#CBCBCB]" style={{ width: 5, height: 5, top: targetCenterY - 2.5, left: -12 }} />
-                      {/* Vertical line from anchor dot down to card left edge */}
-                      <div className="absolute bg-[#E5E5E5]" style={{ width: 1.5, top: targetCenterY + 2.5, left: -10, height: Math.max(0, cardCenterY - targetCenterY - 2.5) }} />
-                      {/* Horizontal connector line to card */}
-                      <div className="absolute bg-[#E5E5E5]" style={{ width: 10, height: 1.5, top: cardCenterY - 0.75, left: -10 }} />
-                    </>
-                  )}
-                  {/* Card with smooth transitions */}
-                  <div className="absolute left-0 right-0 transition-all duration-300 ease-out" style={{ top: resolved }}>
-                    <SuggestionCard change={change} data={data} isActive={activeSuggestionId === change.id} onClick={() => handleSuggestionClick(change)} onAccept={() => { onAcceptChange(change.id); setActiveSuggestionId(null); }} onReject={() => { onRejectChange(change.id); setActiveSuggestionId(null); }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 // ─── FloatingToolbar — Granola/Awwwards style capsule ────────────────────────
 
-function FloatingToolbar({ isBaseResume, hasJD, onAddNew, onJDClick, onCurate, onExportPDF, onExportWord }: { isBaseResume: boolean; hasJD: boolean; onAddNew?: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void }) {
+function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, onAcceptAll, onRejectAll, onUpdateAllVariations, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
   const [showExport, setShowExport] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -929,68 +1017,134 @@ function FloatingToolbar({ isBaseResume, hasJD, onAddNew, onJDClick, onCurate, o
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) { setShowExport(false); } };
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, []);
+  useEffect(() => {
+    if (pendingCount > 0 || isCurating) setShowExport(false);
+  }, [pendingCount, isCurating]);
 
-  const btnBase = 'flex items-center gap-2 px-4 transition-colors whitespace-nowrap text-sm text-[#2B2B2B] hover:bg-[#F5F5F5]';
+  const segBase = 'relative z-10 flex items-center justify-center gap-2 h-[34px] px-5 rounded-full text-sm whitespace-nowrap transition-all duration-250';
+  const segActive = 'bg-white text-[#2B2B2B] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_1px_4px_rgba(0,0,0,0.08)]';
+  const segIdle = 'text-[#2F2F2F] hover:bg-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_1px_4px_rgba(0,0,0,0.08)]';
+  const segAction = 'text-[#2F2F2F] hover:bg-white/65 active:bg-white/75';
+  const toolbarMode = jdPanelOpen ? 'jd_only' : isCurating ? 'curating' : pendingCount > 0 ? 'review' : 'default';
 
   return (
     <div ref={ref} className="relative flex flex-col items-center">
+      {toolbarMode === 'curating' && (
+        <>
+          <div className="pointer-events-none absolute -bottom-4 h-10 w-[86%] rounded-full blur-2xl opacity-70 bg-[linear-gradient(110deg,#7FE6DA,#9FAEFF,#F09BE7,#7FE6DA)] bg-[length:260%_260%] animate-[toolbarGlow_2.2s_linear_infinite]" />
+          <div className="pointer-events-none absolute -bottom-1 h-5 w-[72%] rounded-full blur-lg opacity-65 bg-[linear-gradient(110deg,#86F0E2,#B6C4FF,#F4ACEB,#86F0E2)] bg-[length:240%_240%] animate-[toolbarGlow_2.2s_linear_infinite]" />
+        </>
+      )}
 
-      {/* Export dropdown — appears above toolbar */}
+      {/* Share dropdown — appears above toolbar */}
       {showExport && (
-        <div className="absolute bottom-[calc(100%+8px)] right-0 w-48 bg-white border border-[#EBEBEB] rounded-[12px] shadow-[0_-4px_24px_rgba(0,0,0,0.1),0_4px_12px_rgba(0,0,0,0.04)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]">
-          <button onClick={() => { onExportPDF(); setShowExport(false); }} className="w-full text-left px-4 py-2.5 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] transition-colors">Export to PDF</button>
-          <button onClick={() => { onExportWord(); setShowExport(false); }} className="w-full text-left px-4 py-2.5 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] transition-colors">Export to Word Doc</button>
+        <div className="absolute bottom-[calc(100%+8px)] right-0 w-56 bg-[#F8F8F8] border border-[#E2E2E2] rounded-[16px] shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-2 z-50 animate-[fadeInDown_150ms_ease-out]">
+          <button onClick={() => { onExportPDF(); setShowExport(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] rounded-[10px] hover:bg-[#E7E7E7] transition-colors">Share as PDF</button>
+          <button onClick={() => { onExportWord(); setShowExport(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] rounded-[10px] hover:bg-[#E7E7E7] transition-colors">Share as Word Doc</button>
+          <button onClick={() => { onShareLink(); setShowExport(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] rounded-[10px] hover:bg-[#E7E7E7] transition-colors">Copy Share Link</button>
         </div>
       )}
 
       {/* ── Main capsule ── */}
-      <div className="inline-flex items-stretch bg-white rounded-full border border-[#E5E5E5] shadow-[0_4px_20px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.06)]" style={{ height: 44 }}>
-
-        {/* First Button: Add New (Base Resume) or JD (Role Version) */}
-        {isBaseResume ? (
-          <button onClick={onAddNew}
-            className={`${btnBase} rounded-l-full pl-5 pr-4`}>
-            <Plus size={14} className="text-[#1A1A1A]" />
-            <span>Add New</span>
-          </button>
-        ) : (
-          <button onClick={onJDClick}
-            className={`${btnBase} rounded-l-full pl-5 pr-4 ${hasJD ? '' : 'opacity-60'}`}>
+      <motion.div
+        layout
+        key={toolbarMode}
+        transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.8 }}
+        className="inline-flex items-center rounded-full border border-[#DADADA] bg-[#F8F8F8] px-1.5 py-1 shadow-[0_14px_34px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.6)] transition-[width,transform,box-shadow,background-color] duration-300"
+        style={{ height: 44 }}
+      >
+        {toolbarMode === 'jd_only' ? (
+          <button onClick={onJDClick} className={`${segBase} ${segActive} min-w-[108px]`}>
             <Paperclip size={14} className={hasJD ? 'text-[#1A1A1A]' : 'text-[#9B9B9B]'} />
             <span>JD</span>
             {hasJD && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A] ml-0.5" />}
           </button>
+        ) : toolbarMode === 'curating' ? (
+          <div className={`relative flex items-center justify-center min-w-[300px] ${segBase} text-[#5E5E5E]`}>
+            <div className="relative flex items-center gap-2 text-[#5E5E5E]">
+              <Sparkles size={15} />
+              <span className="text-sm">Curating...</span>
+            </div>
+          </div>
+        ) : toolbarMode === 'review' ? (
+          <>
+            <button
+              disabled
+              className={`${segBase} text-[#AFAFAF] cursor-not-allowed`}
+            >
+              <Sparkles size={14} className="text-[#B7B7B7]" />
+              <span>Curate</span>
+            </button>
+            <div className="w-px bg-white/55 my-2.5 shrink-0" />
+            <div className={`${segBase} text-[#2F2F2F]`}>{pendingCount} Suggestion{pendingCount !== 1 ? 's' : ''}</div>
+            <button onClick={onAcceptAll} className={`${segBase} ${segAction}`}><span>Accept all</span></button>
+            <button onClick={onRejectAll} className={`${segBase} text-[#979797] hover:bg-white/65 active:bg-white/75 hover:text-[#787878]`}><span>Reject all</span></button>
+          </>
+        ) : (
+          <>
+            {isBaseResume ? (
+              <>
+                <button onClick={onCurate} className={`${segBase} ${segIdle}`}>
+                  <Sparkles size={14} className="text-[#1A1A1A]" />
+                  <span>Curate</span>
+                </button>
+                <div className="w-px bg-white/55 my-2.5 shrink-0" />
+                <button onClick={onUpdateAllVariations} disabled={!canUpdateAllVariations} className={`${segBase} ${canUpdateAllVariations ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}>
+                  <span>Update All Variations</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={onJDClick} className={`${segBase} ${segIdle} ${hasJD ? '' : 'opacity-60'}`}>
+                  <Paperclip size={14} className={hasJD ? 'text-[#1A1A1A]' : 'text-[#9B9B9B]'} />
+                  <span>JD</span>
+                  {hasJD && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A] ml-0.5" />}
+                </button>
+                <div className="w-px bg-white/55 my-2.5 shrink-0" />
+                <button onClick={onCurate} className={`${segBase} ${segIdle}`}>
+                  <Sparkles size={14} className="text-[#1A1A1A]" />
+                  <span>Curate</span>
+                </button>
+              </>
+            )}
+            <div className="w-px bg-white/55 my-2.5 shrink-0" />
+            <button onClick={() => { setShowExport(p => !p); }} className={`${segBase} ${showExport ? segActive : segIdle}`}>
+              <Share2 size={14} className="text-[#9B9B9B]" />
+              <span>Share</span>
+            </button>
+          </>
         )}
-
-        {/* Divider */}
-        <div className="w-px bg-[#EBEBEB] my-2.5 shrink-0" />
-
-        {/* Curate with AI — single action button */}
-        <button onClick={onCurate}
-          className={`${btnBase} px-4`}>
-          <Sparkles size={14} className="text-[#1A1A1A]" />
-          <span>Curate</span>
-        </button>
-
-        {/* Divider */}
-        <div className="w-px bg-[#EBEBEB] my-2.5 shrink-0" />
-
-        {/* Export */}
-        <button onClick={() => { setShowExport(p => !p); }}
-          className={`${btnBase} rounded-r-full pl-4 pr-5 ${showExport ? 'bg-[#F0F0F0]' : ''}`}>
-          <Upload size={14} className="text-[#9B9B9B]" />
-          <span>Export</span>
-        </button>
-      </div>
+      </motion.div>
     </div>
   );
 }
 
 // ─── JDSidePanel — right overlay panel ───────────────────────────────────────
 
-function JDSidePanel({ version, onClose, onCopy }: { version: ResumeVersion; onClose: () => void; onCopy: () => void }) {
+function JDSidePanel({
+  version,
+  tldr,
+  isTldrLoading,
+  onClose,
+  onSave,
+}: {
+  version: ResumeVersion;
+  tldr?: { roleAsks: string; candidateNeeds: string; keyFocusAreas: string[] };
+  isTldrLoading: boolean;
+  onClose: () => void;
+  onSave: (jdText: string, jobLink: string) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [jdDraft, setJdDraft] = useState(version.jobDescription ?? '');
+  const [linkDraft, setLinkDraft] = useState(version.jobLink ?? '');
+  useEffect(() => {
+    setJdDraft(version.jobDescription ?? '');
+    setLinkDraft(version.jobLink ?? '');
+    setIsEditing(false);
+  }, [version.id, version.jobDescription, version.jobLink]);
+
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out] print-hide">
+    <div className="absolute right-0 top-0 bottom-0 w-[440px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out] print-hide">
       {/* Header */}
       <div className="px-6 py-4 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
         <div>
@@ -1002,18 +1156,107 @@ function JDSidePanel({ version, onClose, onCopy }: { version: ResumeVersion; onC
       {/* Content */}
       {version.jobDescription ? (
         <>
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            <p className="text-sm text-[#4B4B4B] leading-[1.75] whitespace-pre-wrap">{version.jobDescription}</p>
-          </div>
+          {isEditing ? (
+            <div className="flex-1 min-h-0 px-6 py-5 flex flex-col">
+              <div className="rounded-[10px] bg-[#F7F7F7] border border-[#ECECEC] px-4 py-3 mb-5 shrink-0">
+                <p className="text-[11px] uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
+                {isTldrLoading ? (
+                  <p className="text-sm text-[#8B8B8B]">Summarizing JD focus...</p>
+                ) : (
+                  <div className="space-y-2.5 text-sm text-[#3B3B3B] leading-relaxed">
+                    <p>{tldr?.roleAsks || 'No JD summary available yet.'}</p>
+                    <p>{tldr?.candidateNeeds || 'Open the JD panel with a full job description for AI summary.'}</p>
+                    {tldr?.keyFocusAreas && tldr.keyFocusAreas.length > 0 && (
+                      <div className="mt-6">
+                        <p className="text-xs uppercase tracking-widest text-[#9B9B9B] mb-1.5">Key Focus Areas</p>
+                        <ul className="space-y-1">
+                          {tldr.keyFocusAreas.slice(0, 3).map((focus, idx) => (
+                            <li key={`${focus}-${idx}`}>• {focus}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 min-h-0 flex flex-col">
+                <textarea
+                  value={jdDraft}
+                  onChange={(e) => setJdDraft(e.target.value)}
+                  className="flex-1 min-h-0 w-full text-sm text-[#4B4B4B] leading-[1.75] whitespace-pre-wrap bg-[#FAFAFA] border border-[#ECECEC] rounded-[8px] px-3 py-2.5 outline-none resize-none overflow-y-auto"
+                />
+              </div>
+
+              <div className="pt-3 shrink-0">
+                <label className="block text-[11px] uppercase tracking-widest text-[#9B9B9B] mb-1.5">Job Link</label>
+                <input
+                  value={linkDraft}
+                  onChange={(e) => setLinkDraft(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full text-sm text-[#4B4B4B] bg-[#FAFAFA] border border-[#ECECEC] rounded-[8px] px-3 py-2 outline-none"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="rounded-[10px] bg-[#F7F7F7] border border-[#ECECEC] px-4 py-3 mb-5">
+                <p className="text-[11px] uppercase tracking-widest text-[#9B9B9B] mb-2">TL;DR</p>
+                {isTldrLoading ? (
+                  <p className="text-sm text-[#8B8B8B]">Summarizing JD focus...</p>
+                ) : (
+                  <div className="space-y-2.5 text-sm text-[#3B3B3B] leading-relaxed">
+                    <p>{tldr?.roleAsks || 'No JD summary available yet.'}</p>
+                    <p>{tldr?.candidateNeeds || 'Open the JD panel with a full job description for AI summary.'}</p>
+                    {tldr?.keyFocusAreas && tldr.keyFocusAreas.length > 0 && (
+                      <div className="mt-6">
+                        <p className="text-xs uppercase tracking-widest text-[#9B9B9B] mb-1.5">Key Focus Areas</p>
+                        <ul className="space-y-1">
+                          {tldr.keyFocusAreas.slice(0, 3).map((focus, idx) => (
+                            <li key={`${focus}-${idx}`}>• {focus}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="py-1">
+                <p className="text-sm text-[#4B4B4B] leading-[1.75] whitespace-pre-wrap px-4">{version.jobDescription}</p>
+              </div>
+            </div>
+          )}
           <div className="px-6 py-4 border-t border-[#F0F0F0] flex gap-2 shrink-0">
-            {version.jobLink && (
+            {(version.jobLink || linkDraft) && !isEditing && (
               <a href={version.jobLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 border border-[#E8E8E8] rounded-[8px] text-xs text-[#6B6B6B] hover:bg-[#F5F5F5] transition-colors">
                 <ExternalLink size={12} /> View posting
               </a>
             )}
-            <button onClick={onCopy} className="flex items-center gap-1.5 px-3 py-1.5 border border-[#E8E8E8] rounded-[8px] text-xs text-[#6B6B6B] hover:bg-[#F5F5F5] transition-colors">
-              <Copy size={12} /> Copy JD
+            <button
+              onClick={() => {
+                if (isEditing) {
+                  onSave(jdDraft, linkDraft);
+                  setIsEditing(false);
+                  return;
+                }
+                setIsEditing(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#E8E8E8] rounded-[8px] text-xs text-[#6B6B6B] hover:bg-[#F5F5F5] transition-colors"
+            >
+              <FileText size={12} /> {isEditing ? 'Save' : 'Edit'}
             </button>
+            {isEditing && (
+              <button
+                onClick={() => {
+                  setJdDraft(version.jobDescription ?? '');
+                  setLinkDraft(version.jobLink ?? '');
+                  setIsEditing(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#E8E8E8] rounded-[8px] text-xs text-[#6B6B6B] hover:bg-[#F5F5F5] transition-colors"
+              >
+                <X size={12} /> Cancel
+              </button>
+            )}
           </div>
         </>
       ) : (
@@ -1059,6 +1302,66 @@ function CreateResumeModal({ onGenerate, onClose }: { onGenerate: (role: string,
   );
 }
 
+function BaseResumeFileModal({
+  fileName,
+  pdfUrl,
+  isLoading,
+  isUploading,
+  onClose,
+  onReplace,
+}: {
+  fileName: string;
+  pdfUrl: string;
+  isLoading: boolean;
+  isUploading: boolean;
+  onClose: () => void;
+  onReplace: (file: File) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="fixed inset-0 bg-black/20 z-[220] flex items-center justify-center p-6 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={onClose}>
+      <div className="bg-white rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.14)] w-full max-w-[920px] max-h-[94vh] overflow-hidden animate-[fadeInScale_200ms_ease-out] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-base text-[#1A1A1A]" style={{ fontWeight: 500 }}>Uploaded Resume</h3>
+            <p className="text-xs text-[#9B9B9B] mt-0.5 truncate max-w-[520px]">{fileName || 'resume.pdf'}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors"><X size={16} /></button>
+        </div>
+
+        <div className="bg-[#FAFAFA] p-4">
+          {isLoading ? (
+            <div className="h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white flex items-center justify-center text-sm text-[#8B8B8B]">Loading PDF preview...</div>
+          ) : pdfUrl ? (
+            <iframe title="Uploaded resume preview" src={pdfUrl} className="block h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white" />
+          ) : (
+            <div className="h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white flex items-center justify-center text-sm text-[#8B8B8B]">Unable to preview this PDF.</div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-[#F0F0F0] flex gap-3 shrink-0">
+          <button onClick={() => fileRef.current?.click()} disabled={isUploading} className="px-4 py-2 rounded-[10px] border border-[#E2E2E2] text-sm text-[#3B3B3B] hover:bg-[#F5F5F5] disabled:opacity-60">
+            {isUploading ? 'Uploading...' : 'Replace Resume PDF'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 rounded-[10px] border border-[#E2E2E2] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5]">Close</button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onReplace(file);
+              event.currentTarget.value = '';
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ─── Workspace ──────────────────────────────────────────────────────────────────
 
 export default function Workspace() {
@@ -1071,21 +1374,43 @@ export default function Workspace() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showBaseFileModal, setShowBaseFileModal] = useState(false);
+  const [basePdfUrl, setBasePdfUrl] = useState('');
+  const [basePdfLoading, setBasePdfLoading] = useState(false);
+  const [basePdfRefreshKey, setBasePdfRefreshKey] = useState(0);
+  const [isReplacingBasePdf, setIsReplacingBasePdf] = useState(false);
   const [showJDPanel, setShowJDPanel] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: '' });
+  const [isCurating, setIsCurating] = useState(false);
+  const [isTldrLoading, setIsTldrLoading] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; tone: 'success' | 'info' | 'error' }>({ visible: false, message: '', tone: 'success' });
+  const [baseResumeModel, setBaseResumeModel] = useState<BaseResumeModel | null>(null);
+  const [jdVariants, setJDVariants] = useState<JDVariantModel[]>([]);
+  const [resumeMeta, setResumeMeta] = useState<{ id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string } | null>(null);
+  const [jdTldrByVersion, setJdTldrByVersion] = useState<Record<string, { roleAsks: string; candidateNeeds: string; keyFocusAreas: string[] }>>({});
   const avatarRef = useRef<HTMLDivElement>(null);
   const currentUser = userStore.get();
+  const activeVersionRef = useRef<ResumeVersion | null>(null);
+  const autoSavedSigRef = useRef<Record<string, string>>({});
   const initialExpanded = INITIAL_VERSIONS.filter(v => v.isAI && v.jobTitle).map(v => v.jobTitle!);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(initialExpanded));
+  const localStoreKey = storageKeyForResume(resumeId);
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) setShowAvatarMenu(false); };
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const showToast = (msg: string) => { setToast({ visible: true, message: msg }); setTimeout(() => setToast({ visible: false, message: '' }), 2500); };
+  const showToast = (msg: string, tone: 'success' | 'info' | 'error' = 'success') => {
+    setToast({ visible: true, message: msg, tone });
+    setTimeout(() => setToast({ visible: false, message: '', tone: 'success' }), 2500);
+  };
+  const syncLocalStore = useCallback((nextBase: BaseResumeModel | null, nextJDVariants: JDVariantModel[]) => {
+    setBaseResumeModel(nextBase);
+    setJDVariants(nextJDVariants);
+    saveLocalWorkspaceStore(localStoreKey, { baseResume: nextBase, jdVariants: nextJDVariants });
+  }, [localStoreKey]);
 
   useEffect(() => {
     let mounted = true;
@@ -1093,23 +1418,53 @@ export default function Workspace() {
       setIsLoading(true);
       setLoadError('');
       try {
-        const targetResumeId = resumeId || (await listResumes()).resumes[0]?.id;
+        const resumeListResponse = await listResumes();
+        const targetResumeId = resumeId || resumeListResponse.resumes[0]?.id;
         if (!targetResumeId) {
-          setVersions(INITIAL_VERSIONS);
-          setSelectedVersionId(INITIAL_VERSIONS[0].id);
+          const initialBase = {
+            id: 'base-local',
+            content: buildTextResume(INITIAL_VERSIONS[0].data),
+            updatedAt: new Date().toISOString(),
+          };
+          const initialVersion = { ...INITIAL_VERSIONS[0], isBase: true, baseResumeId: initialBase.id, variantContent: initialBase.content };
+          setVersions([initialVersion]);
+          setSelectedVersionId(initialVersion.id);
+          setResumeMeta(null);
+          syncLocalStore(initialBase, []);
           return;
         }
         if (!resumeId) setResumeId(targetResumeId);
+        setResumeMeta(resumeListResponse.resumes.find((resume) => resume.id === targetResumeId) ?? null);
         const response = await listVersions(targetResumeId);
         const loadedVersions = response.versions as ResumeVersion[];
         if (!mounted) return;
-        if (loadedVersions.length === 0) {
-          setVersions(INITIAL_VERSIONS);
-          setSelectedVersionId(INITIAL_VERSIONS[0].id);
-        } else {
-          setVersions(loadedVersions);
-          setSelectedVersionId(loadedVersions.find((v) => v.isBase)?.id ?? loadedVersions[0].id);
-        }
+        const localStore = loadLocalWorkspaceStore(storageKeyForResume(targetResumeId));
+        const nextVersions = loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions;
+        const rootBaseVersion = nextVersions.find((v) => v.isBase) ?? nextVersions[0];
+        const baseResumeId = localStore.baseResume?.id ?? rootBaseVersion.baseResumeId ?? `base-${targetResumeId}`;
+        const nextBaseResume: BaseResumeModel = {
+          id: baseResumeId,
+          content: buildTextResume(rootBaseVersion.data),
+          updatedAt: new Date().toISOString(),
+        };
+        const hydrated = nextVersions.map((version) => {
+          const contentSnapshot = buildTextResume(version.data);
+          if (version.id === rootBaseVersion.id) {
+            return { ...version, isBase: true, baseResumeId, variantContent: contentSnapshot };
+          }
+          if (!version.isAI) return version;
+          const linkedVariant = version.jdVariantId ? localStore.jdVariants.find((item) => item.id === version.jdVariantId) : null;
+          return {
+            ...version,
+            baseResumeId: version.baseResumeId ?? baseResumeId,
+            variantContent: linkedVariant?.variantContent ?? version.variantContent ?? contentSnapshot,
+          };
+        });
+        setVersions(hydrated);
+        setSelectedVersionId((hydrated.find((v) => v.isBase)?.id ?? hydrated[0].id));
+        setBaseResumeModel(nextBaseResume);
+        setJDVariants(localStore.jdVariants);
+        saveLocalWorkspaceStore(storageKeyForResume(targetResumeId), { baseResume: nextBaseResume, jdVariants: localStore.jdVariants });
       } catch (err) {
         if (!mounted) return;
         setLoadError(err instanceof Error ? err.message : 'Failed to load resume workspace');
@@ -1121,11 +1476,16 @@ export default function Workspace() {
     return () => {
       mounted = false;
     };
-  }, [resumeId]);
+  }, [resumeId, syncLocalStore]);
+
+  useEffect(() => {
+    activeVersionRef.current = (versions.find(v => v.id === selectedVersionId) || versions[0] || null);
+  }, [versions, selectedVersionId]);
 
   const activeVersion = versions.find(v => v.id === selectedVersionId) || versions[0];
   const baseVersion = versions.find(v => v.isBase) ?? versions[0];
-  const isNonBase = activeVersion ? activeVersion.id !== baseVersion?.id : false;
+  const canPreviewUploadedResume = Boolean(resumeId && resumeMeta?.source === 'upload' && resumeMeta.file_name);
+  const hasUpdatableVariants = versions.some((version) => version.isAI && hasSyncDiffForVariant(baseVersion.data, version.data));
   const sidebarGroups = versions.filter(v => v.isAI).reduce((acc, v) => { const role = v.jobTitle || v.name; const g = acc.find(x => x.role === role); if (g) g.items.push(v); else acc.push({ role, items: [v] }); return acc; }, [] as { role: string; items: ResumeVersion[] }[]);
 
   const persistVersion = async (nextVersion: ResumeVersion) => {
@@ -1133,12 +1493,78 @@ export default function Workspace() {
     await updateVersion(resumeId, nextVersion.id, nextVersion);
   };
 
-  const updateVersionData = (data: ResumeData) => setVersions(prev => prev.map(v => {
-    if (v.id !== selectedVersionId) return v;
-    const next = { ...v, data };
-    void persistVersion(next).catch(() => {});
-    return next;
-  }));
+  const autosaveSerialize = (version: ResumeVersion) => JSON.stringify({
+    name: version.name,
+    isAI: version.isAI,
+    isBase: version.isBase,
+    matchScore: version.matchScore,
+    jobTitle: version.jobTitle,
+    jobCompany: version.jobCompany,
+    jobDescription: version.jobDescription,
+    jobLink: version.jobLink,
+    baseResumeId: version.baseResumeId,
+    jdVariantId: version.jdVariantId,
+    variantContent: version.variantContent,
+    data: version.data,
+    aiChanges: version.aiChanges,
+  });
+
+  useEffect(() => {
+    if (!resumeId) return;
+    const interval = window.setInterval(() => {
+      const version = activeVersionRef.current;
+      if (!version) return;
+      const sig = autosaveSerialize(version);
+      const prevSig = autoSavedSigRef.current[version.id];
+      if (prevSig === undefined) {
+        autoSavedSigRef.current[version.id] = sig;
+        return;
+      }
+      if (sig === prevSig) return;
+      void persistVersion(version)
+        .then(() => {
+          autoSavedSigRef.current[version.id] = sig;
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [resumeId]);
+
+  const updateVersionData = (data: ResumeData) => {
+    if (!activeVersion || !baseVersion) return;
+    const contentSnapshot = buildTextResume(data);
+    const nextVersion: ResumeVersion = { ...activeVersion, data, variantContent: contentSnapshot };
+    setVersions((prev) => prev.map((v) => (v.id === selectedVersionId ? nextVersion : v)));
+    void persistVersion(nextVersion).catch(() => {});
+
+    if (nextVersion.id === baseVersion.id) {
+      const nextBaseResume: BaseResumeModel = {
+        id: nextVersion.baseResumeId ?? baseResumeModel?.id ?? `base-${resumeId || 'local'}`,
+        content: contentSnapshot,
+        updatedAt: new Date().toISOString(),
+      };
+      syncLocalStore(nextBaseResume, jdVariants);
+      return;
+    }
+
+    if (nextVersion.jdVariantId) {
+      const nowIso = new Date().toISOString();
+      const nextJDVariants = jdVariants.some((item) => item.id === nextVersion.jdVariantId)
+        ? jdVariants.map((item) => item.id === nextVersion.jdVariantId ? { ...item, variantContent: contentSnapshot } : item)
+        : [
+          ...jdVariants,
+          {
+            id: nextVersion.jdVariantId,
+            baseResumeId: nextVersion.baseResumeId ?? baseResumeModel?.id ?? `base-${resumeId || 'local'}`,
+            title: nextVersion.name,
+            jdText: nextVersion.jobDescription ?? '',
+            variantContent: contentSnapshot,
+            createdAt: nowIso,
+          },
+        ];
+      syncLocalStore(baseResumeModel, nextJDVariants);
+    }
+  };
   const handleAcceptChange = (id: string) => setVersions(prev => prev.map(v => { if (v.id !== selectedVersionId) return v; const c = v.aiChanges.find(c => c.id === id); if (!c) return v; return { ...v, data: applyChange(c, v.data), aiChanges: v.aiChanges.map(ch => ch.id === id ? { ...ch, status: 'accepted' as const } : ch) }; }));
   const handleRejectChange = (id: string) => setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: v.aiChanges.map(c => c.id === id ? { ...c, status: 'rejected' as const } : c) } : v));
   const handleAcceptAll = () => setVersions(prev => prev.map(v => { if (v.id !== selectedVersionId) return v; let data = v.data; v.aiChanges.filter(c => c.status === 'pending').forEach(c => { data = applyChange(c, data); }); return { ...v, data, aiChanges: v.aiChanges.map(c => ({ ...c, status: 'accepted' as const })) }; }));
@@ -1146,63 +1572,288 @@ export default function Workspace() {
 
   const handleGenerateVersion = (roleName: string, company: string, jd: string, link: string) => {
     requireAuth(async () => {
-      const nv = generateAIVersion(roleName || 'New Role', company, jd, link);
+      if (!baseVersion) return;
+      const baseSnapshot = buildTextResume(baseVersion.data);
+      const nowIso = new Date().toISOString();
+      const nextBaseResume: BaseResumeModel = {
+        id: baseResumeModel?.id ?? baseVersion.baseResumeId ?? `base-${resumeId || 'local'}`,
+        content: baseSnapshot,
+        updatedAt: nowIso,
+      };
+      const { version: nv, jdVariant } = createJDVariantFromBase(baseVersion, roleName || 'New Role', company, jd, link, nextBaseResume);
       try {
+        let nextVersion = nv;
         if (resumeId) {
           const created = await createVersion(resumeId, nv);
           const createdVersion = created.version as ResumeVersion;
-          setVersions(prev => [...prev, createdVersion]);
-          setSelectedVersionId(createdVersion.id);
-        } else {
-          setVersions(prev => [...prev, nv]);
-          setSelectedVersionId(nv.id);
+          nextVersion = {
+            ...nv,
+            ...createdVersion,
+            data: (createdVersion.data as ResumeData) ?? nv.data,
+            aiChanges: (createdVersion.aiChanges as AIChange[]) ?? nv.aiChanges,
+            jdVariantId: createdVersion.jdVariantId ?? nv.jdVariantId,
+            variantContent: createdVersion.variantContent ?? nv.variantContent,
+            baseResumeId: createdVersion.baseResumeId ?? nv.baseResumeId,
+          };
         }
         setShowModal(false);
-        if (nv.jobTitle) setExpandedGroups(prev => new Set([...prev, nv.jobTitle!]));
-        showToast(`Resume created for ${nv.name}`);
+        if (nextVersion.jobTitle) setExpandedGroups(prev => new Set([...prev, nextVersion.jobTitle!]));
+        setVersions((prev) => [...prev, nextVersion]);
+        setSelectedVersionId(nextVersion.id);
+        setIsCurating(true);
+
+        let finalVersion = nextVersion;
+        try {
+          const curation = await curateResume({
+            resumeData: nextVersion.data,
+            targetRole: nextVersion.jobTitle || nextVersion.data.title,
+            jdText: nextVersion.jobDescription,
+          });
+          const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
+          if (changes.length > 0) {
+            const curatedData = applyAllChanges(nextVersion.data, changes);
+            finalVersion = {
+              ...nextVersion,
+              data: curatedData,
+              variantContent: buildTextResume(curatedData),
+              aiChanges: [],
+            };
+          }
+        } catch {
+          showToast('Resume generated, but AI curation failed');
+        } finally {
+          setIsCurating(false);
+        }
+
+        if (resumeId) {
+          await updateVersion(resumeId, finalVersion.id, finalVersion);
+        }
+        const nextJDVariants = [...jdVariants.filter((item) => item.id !== jdVariant.id), { ...jdVariant, variantContent: finalVersion.variantContent ?? buildTextResume(finalVersion.data) }];
+        setVersions((prev) => prev.map((v) => (v.id === finalVersion.id ? finalVersion : v)));
+        syncLocalStore(nextBaseResume, nextJDVariants);
+        showToast(`Resume created and curated for ${finalVersion.name}`);
       } catch {
+        setIsCurating(false);
         showToast('Failed to save generated version');
       }
     });
   };
 
-  const handleCurate = () => {
-    requireAuth(() => {
-      const ts = Date.now();
-      const exp = activeVersion.data.workExperience?.[0];
-      const changes: AIChange[] = [];
-      if (activeVersion.data.bio) changes.push({ id: `c-bio-${ts}`, field: 'bio', original: activeVersion.data.bio, suggested: 'Strategic product designer with 8+ years shaping complex digital products. Known for building scalable design systems and leading cross-functional teams to deliver measurable business impact.', status: 'pending' });
-      if (exp?.bullets?.[0]) changes.push({ id: `c-b0-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 0, original: exp.bullets[0], suggested: exp.bullets[0].replace(/(\d+)%/, (_, n) => `${Math.min(parseInt(n) + 5, 99)}%`) + ', directly contributing to $2.4M in incremental ARR', status: 'pending' });
-      if (exp?.bullets?.[1]) changes.push({ id: `c-b1-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 1, original: exp.bullets[1], suggested: exp.bullets[1] + ', reducing design-to-dev handoff time by 40%', status: 'pending' });
-      setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter(c => c.status !== 'rejected'), ...changes] } : v));
-      showToast(`${changes.length} suggestions generated`);
+  const handleCurate = async () => {
+    const versionId = selectedVersionId;
+    const snapshot = activeVersion;
+    setIsCurating(true);
+    showToast('Curating with AI...', 'info');
+    try {
+      const result = await curateResume({
+        resumeData: snapshot.data,
+        targetRole: snapshot.jobTitle || snapshot.data.title,
+        jdText: snapshot.jobDescription,
+      });
+      const fallbackReason = getCurationFallbackReason(result);
+      if (fallbackReason) {
+        showToast(fallbackReason, 'error');
+        return;
+      }
+      const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now());
+      if (nextChanges.length === 0) {
+        if ((result.questions?.length ?? 0) > 0) {
+          showToast('No direct edits yet. Add scope, metrics, and tooling details for stronger AI improvements.', 'info');
+          return;
+        }
+        showToast('No new improvements suggested');
+        return;
+      }
+      setVersions((prev) => prev.map((v) => (
+        v.id === versionId
+          ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter((c) => c.status !== 'rejected'), ...nextChanges] }
+          : v
+      )));
+      showToast(`${nextChanges.length} AI suggestions generated`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to curate resume', 'error');
+    } finally {
+      setIsCurating(false);
+    }
+  };
+
+  const handleDeleteVariant = (versionId: string) => {
+    const target = versions.find((v) => v.id === versionId);
+    if (!target || target.isBase) return;
+    const confirmed = window.confirm(`Delete ${target.name}? This cannot be undone.`);
+    if (!confirmed) return;
+    const fallbackSelectedId = baseVersion?.id ?? versions[0]?.id ?? '';
+    const nextJDVariants = target.jdVariantId ? jdVariants.filter((item) => item.id !== target.jdVariantId) : jdVariants;
+    if (resumeId) {
+      void deleteVersion(resumeId, versionId)
+        .then(() => {
+          setVersions((prev) => prev.filter((v) => v.id !== versionId));
+          if (selectedVersionId === versionId) setSelectedVersionId(fallbackSelectedId);
+          syncLocalStore(baseResumeModel, nextJDVariants);
+          showToast('Variant deleted');
+        })
+        .catch((error) => {
+          showToast(error instanceof Error ? error.message : 'Failed to delete variant');
+        });
+      return;
+    }
+    setVersions((prev) => prev.filter((v) => v.id !== versionId));
+    if (selectedVersionId === versionId) setSelectedVersionId(fallbackSelectedId);
+    syncLocalStore(baseResumeModel, nextJDVariants);
+    showToast('Variant deleted');
+  };
+  const handleUpdateAllVariations = async () => {
+    if (!baseVersion || !hasUpdatableVariants) return;
+    const nextVersions = versions.map((version) => {
+      if (!version.isAI) return version;
+      if (!hasSyncDiffForVariant(baseVersion.data, version.data)) return version;
+      const syncedData = syncVariantExperiencesWithBase(baseVersion.data, version.data);
+      return {
+        ...version,
+        data: syncedData,
+        variantContent: buildTextResume(syncedData),
+      };
     });
+    setVersions(nextVersions);
+
+    if (resumeId) {
+      await Promise.all(
+        nextVersions
+          .filter((version) => version.isAI)
+          .map((version) => updateVersion(resumeId, version.id, version).catch(() => null)),
+      );
+    }
+
+    const nextJDVariants = jdVariants.map((item) => {
+      const linkedVersion = nextVersions.find((version) => version.jdVariantId === item.id);
+      if (!linkedVersion) return item;
+      return { ...item, variantContent: linkedVersion.variantContent ?? item.variantContent };
+    });
+    syncLocalStore(baseResumeModel, nextJDVariants);
+
+    showToast('Updated matching role experience across variations');
   };
 
-  const handleCurateAction = (action: string) => {
-    const ts = Date.now();
-    const exp = activeVersion.data.workExperience?.[0];
-    if (!exp) { showToast('Add experience entries first'); return; }
-    const suggestions: Record<string, string> = {
-      'curate': 'Strategic product designer with 8+ years shaping fintech and SaaS products. Expert in design systems and cross-functional leadership.',
-      'rewrite-about': 'Award-winning product designer with 8+ years driving 40%+ engagement improvements through rigorous UX research and scalable design systems across B2B and B2C products.',
-      'rewrite-bullet': 'Orchestrated end-to-end dashboard transformation, achieving 40% improvement in user engagement and 25% faster task completion — directly driving $2.4M incremental ARR',
-      'concise': 'Product designer. 8+ years. Design systems, UX research, cross-functional leadership.',
-      'metrics': 'Led redesign of main dashboard for 50k+ users, improving engagement by 40% and reducing task completion time by 25%, resulting in $2.4M ARR uplift',
+  useEffect(() => {
+    if (!showBaseFileModal || !resumeId) return;
+    let revokedUrl: string | null = null;
+    setBasePdfLoading(true);
+    void getResumePdfBlob(resumeId)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        revokedUrl = url;
+        setBasePdfUrl(url);
+      })
+      .catch(() => {
+        setBasePdfUrl('');
+        showToast('Unable to load uploaded PDF preview');
+      })
+      .finally(() => {
+        setBasePdfLoading(false);
+      });
+
+    return () => {
+      if (revokedUrl) URL.revokeObjectURL(revokedUrl);
     };
-    const changes: AIChange[] = [{ id: `ca-${ts}`, field: action === 'rewrite-about' || action === 'concise' ? 'bio' : 'bullet', expId: action !== 'rewrite-about' && action !== 'concise' ? exp.id : undefined, bulletIdx: action !== 'rewrite-about' && action !== 'concise' ? 0 : undefined, original: action === 'rewrite-about' || action === 'concise' ? activeVersion.data.bio : exp.bullets[0], suggested: suggestions[action] ?? suggestions['curate'], status: 'pending' }];
-    setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter(c => c.status !== 'rejected'), ...changes] } : v));
-    showToast(`"${action.replace('-', ' ')}" applied`);
+  }, [showBaseFileModal, resumeId, basePdfRefreshKey]);
+
+  const handleReplaceBasePdf = async (file: File) => {
+    if (!resumeId) return;
+    if (file.type !== 'application/pdf') {
+      showToast('Please upload a PDF file');
+      return;
+    }
+    setIsReplacingBasePdf(true);
+    try {
+      const response = await replaceResumePdf(resumeId, file, resumeMeta?.title || 'Uploaded Resume');
+      const incomingVersion = response.version as ResumeVersion;
+      setVersions((prev) => prev.map((version) => (
+        version.id === incomingVersion.id
+          ? {
+            ...version,
+            ...incomingVersion,
+            isBase: true,
+            aiChanges: [],
+            variantContent: buildTextResume(incomingVersion.data),
+          }
+          : version
+      )));
+
+      const refreshedBase = {
+        id: baseResumeModel?.id ?? incomingVersion.baseResumeId ?? `base-${resumeId}`,
+        content: buildTextResume(incomingVersion.data),
+        updatedAt: new Date().toISOString(),
+      };
+      syncLocalStore(refreshedBase, jdVariants);
+      setResumeMeta((prev) => prev ? { ...prev, source: response.resume.source, file_name: response.resume.file_name, updated_at: response.resume.updated_at } : prev);
+      setSelectedVersionId(incomingVersion.id);
+      setBasePdfRefreshKey((prev) => prev + 1);
+      showToast('Base resume replaced from uploaded PDF');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to replace uploaded PDF');
+    } finally {
+      setIsReplacingBasePdf(false);
+    }
   };
 
-  const handleUpdateBase = () => {
-    if (!baseVersion || !activeVersion) return;
-    const nextBase = { ...baseVersion, data: { ...activeVersion.data } };
-    setVersions(prev => prev.map(v => v.id === baseVersion.id ? nextBase : v));
-    void persistVersion(nextBase).catch(() => {});
-    showToast('Base resume updated');
+  const handleSaveJDDetails = (jdText: string, jobLink: string) => {
+    if (!activeVersion) return;
+    const trimmedJd = jdText.trim();
+    const trimmedLink = jobLink.trim();
+    const nextVersion: ResumeVersion = {
+      ...activeVersion,
+      jobDescription: trimmedJd,
+      jobLink: trimmedLink,
+    };
+    setVersions((prev) => prev.map((v) => (v.id === activeVersion.id ? nextVersion : v)));
+    void persistVersion(nextVersion).catch(() => {});
+    if (nextVersion.jdVariantId) {
+      const nextVariants = jdVariants.map((item) => item.id === nextVersion.jdVariantId ? { ...item, jdText: trimmedJd } : item);
+      syncLocalStore(baseResumeModel, nextVariants);
+    }
+    showToast('Job description updated');
   };
-  const hasPendingChanges = activeVersion?.aiChanges.some(c => c.status === 'pending') ?? false;
+  useEffect(() => {
+    if (!showJDPanel || !activeVersion?.id || !activeVersion.jobDescription?.trim()) return;
+    if (jdTldrByVersion[activeVersion.id]) return;
+    let cancelled = false;
+    setIsTldrLoading(true);
+    void curateResume({
+      resumeData: activeVersion.data,
+      targetRole: activeVersion.jobTitle || activeVersion.data.title,
+      jdText: activeVersion.jobDescription,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        const keyFocusAreas = (result.jdTldr?.keyFocusAreas?.length ? result.jdTldr.keyFocusAreas : result.jdFocusAreas ?? []).slice(0, 3);
+        setJdTldrByVersion((prev) => ({
+          ...prev,
+          [activeVersion.id]: {
+            roleAsks: result.jdTldr?.roleAsks || 'Role asks: deliver against responsibilities and ownership outlined in the JD.',
+            candidateNeeds: result.jdTldr?.candidateNeeds || 'Candidate needs: clear execution quality, collaboration, and role-relevant outcomes.',
+            keyFocusAreas,
+          },
+        }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setJdTldrByVersion((prev) => ({
+          ...prev,
+          [activeVersion.id]: {
+            roleAsks: 'Role asks: execute core responsibilities defined in the JD with strong quality and ownership.',
+            candidateNeeds: 'Candidate needs: show relevant outcomes, communication, and cross-functional execution.',
+            keyFocusAreas: [],
+          },
+        }));
+      })
+      .finally(() => {
+        if (!cancelled) setIsTldrLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showJDPanel, activeVersion?.id, activeVersion?.jobDescription, activeVersion?.jobTitle, jdTldrByVersion]);
+  const pendingSuggestionCount = activeVersion?.aiChanges.filter(c => c.status === 'pending').length ?? 0;
   const handleExportPdf = async () => {
     if (isExporting) return;
     setIsExporting(true);
@@ -1232,6 +1883,20 @@ export default function Workspace() {
       setIsExporting(false);
     }
   };
+  const handleShareLink = async () => {
+    if (!resumeId || !activeVersion?.id) {
+      showToast('Unable to create share link');
+      return;
+    }
+    try {
+      const response = await createResumeShareLink(resumeId, activeVersion.id);
+      const shareUrl = `${window.location.origin}/shared/${response.token}`;
+      await navigator.clipboard.writeText(shareUrl);
+      showToast('Share link copied');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to create share link');
+    }
+  };
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">Loading workspace...</div>;
@@ -1255,23 +1920,60 @@ export default function Workspace() {
     >
 
       {/* ── Sidebar ── */}
-      <div className="w-[220px] shrink-0 border-r border-[#F0F0F0] flex flex-col print-hide">
-        <div className="px-6 py-5 border-b border-[#F0F0F0]"><span className="text-base tracking-tight text-[#1A1A1A]">CVStack</span></div>
+      <div className="w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide">
+        <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]"><span className="text-base tracking-tight text-[#1A1A1A]" style={{ fontWeight: 700 }}>cv stack</span></div>
         <div className="flex-1 overflow-y-auto py-3">
-          <button onClick={() => setSelectedVersionId(baseVersion.id)} className={`w-full text-left px-6 py-2 rounded-[8px] mb-1 text-sm transition-colors ${selectedVersionId === baseVersion.id ? 'bg-[#F0F0F0] text-[#111]' : 'text-[#6B6B6B] hover:bg-[#F5F5F5]'}`}>Base Resume</button>
+          <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
+            <button onClick={() => setSelectedVersionId(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
+            {canPreviewUploadedResume && (
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowBaseFileModal(true);
+                }}
+                className="opacity-0 group-hover/base:opacity-100 text-[#9B9B9B] hover:text-[#5B5B5B] transition-opacity p-1 rounded"
+                title="Preview or replace uploaded resume"
+                aria-label="Preview uploaded resume"
+              >
+                <FileText size={13} strokeWidth={1.8} />
+              </button>
+            )}
+          </div>
           {sidebarGroups.map(group => {
             const isOpen = expandedGroups.has(group.role);
             return (
               <div key={group.role} className="mb-1">
-                <button onClick={() => setExpandedGroups(prev => { const n = new Set(prev); n.has(group.role) ? n.delete(group.role) : n.add(group.role); return n; })} className="w-full text-left px-4 py-2 flex items-center gap-2 rounded-[8px] hover:bg-[#F5F5F5] group">
-                  <ChevronRight size={13} className={`text-[#AAAAAA] group-hover:text-[#6B6B6B] transition-all duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+                <button onClick={() => setExpandedGroups(prev => { const n = new Set(prev); n.has(group.role) ? n.delete(group.role) : n.add(group.role); return n; })} className="w-[calc(100%-16px)] mx-2 text-left px-4 py-2 flex items-center gap-2 rounded-[10px] hover:bg-[#ECECEC] group">
+                  <ChevronRight size={13} strokeWidth={1.8} className={`text-[#AAAAAA] group-hover:text-[#6B6B6B] transition-all duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
                   <span className="text-[13px] text-[#2B2B2B] truncate" style={{ fontWeight: 500 }}>{group.role}</span>
                 </button>
-                {isOpen && <div className="mt-0.5 mb-1 animate-[fadeIn_150ms_ease-out]">{group.items.map(v => (<button key={v.id} onClick={() => setSelectedVersionId(v.id)} className={`w-full text-left pl-[38px] pr-4 py-1.5 rounded-[8px] mb-0.5 text-[12px] transition-colors ${selectedVersionId === v.id ? 'bg-[#F0F0F0] text-[#111]' : 'text-[#8B8B8B] hover:bg-[#F5F5F5]'}`}>{v.jobCompany}</button>))}</div>}
+                {isOpen && (
+                  <div className="mt-0.5 mb-1 animate-[fadeIn_150ms_ease-out]">
+                    {group.items.map(v => (
+                      <div key={v.id} className={`group/item w-[calc(100%-16px)] mx-2 pl-4 pr-2 py-1.5 rounded-[10px] mb-0.5 transition-colors flex items-center gap-1 ${selectedVersionId === v.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
+                        <span className="w-[21px] shrink-0" />
+                        <button onClick={() => setSelectedVersionId(v.id)} className={`flex-1 text-left text-[13px] truncate ${selectedVersionId === v.id ? 'text-[#111] font-medium' : 'text-[#7F7F7F]'}`}>
+                          {v.jobCompany}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteVariant(v.id);
+                          }}
+                          className="opacity-0 group-hover/item:opacity-100 text-[#B5B5B5] hover:text-[#7A7A7A] transition-opacity p-1 rounded"
+                          aria-label={`Delete ${v.name}`}
+                          title="Delete variant"
+                        >
+                          <Trash2 size={12} strokeWidth={1.8} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
-          <button onClick={() => requireAuth(() => setShowModal(true))} className="w-full text-left px-6 py-2 rounded-[8px] text-sm text-[#9B9B9B] hover:bg-[#F5F5F5] hover:text-[#6B6B6B] flex items-center gap-2 mt-2"><Plus size={13} /> Add new</button>
+          <button onClick={() => requireAuth(() => setShowModal(true))} className="w-[calc(100%-16px)] mx-2 text-left px-4 py-2 rounded-[10px] text-[13px] text-[#9B9B9B] hover:bg-[#ECECEC] hover:text-[#6B6B6B] flex items-center gap-2 mt-2"><Plus size={13} strokeWidth={1.8} /> Add new</button>
         </div>
       </div>
 
@@ -1279,30 +1981,34 @@ export default function Workspace() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* Top bar */}
-        <div className="h-14 border-b border-[#F0F0F0] px-6 flex items-center justify-between shrink-0 print-hide">
-          <div className="flex items-center gap-2 min-w-0 text-sm">
-            <span className="text-[#CBCBCB]">Resumes</span><span className="text-[#E0E0E0]">/</span>
-            <span className="text-[#1A1A1A] truncate">{activeVersion.name}</span>
-            {activeVersion.matchScore && <span className="px-2 py-0.5 bg-[#F5F5F5] rounded-full text-[10px] text-[#9B9B9B] shrink-0">{activeVersion.matchScore}% match</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative" ref={avatarRef}>
-              <button onClick={() => setShowAvatarMenu(p => !p)} className="flex items-center gap-1 group">
-                <div className="w-8 h-8 rounded-full bg-[#2B2B2B] text-white flex items-center justify-center group-hover:bg-black select-none" style={{ fontSize: 12 }}>
-                  {(currentUser?.fullName || currentUser?.email || 'Guest').slice(0, 2).toUpperCase()}
-                </div>
-                <ChevronDown size={13} className="text-[#CBCBCB]" />
-              </button>
-              {showAvatarMenu && (
-                <div className="absolute right-0 top-11 w-40 bg-white border border-[#EBEBEB] rounded-[12px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]">
-                  <button className="w-full text-left px-4 py-3 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] flex items-center gap-2.5"><Settings size={14} className="text-[#AAAAAA]" /> Settings</button>
-                  <div className="h-px bg-[#F0F0F0]" />
-                  <button onClick={() => { clearAuthStorage(); navigate('/start'); }} className="w-full text-left px-4 py-3 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] flex items-center gap-2.5"><LogOut size={14} className="text-[#AAAAAA]" /> Log Out</button>
-                </div>
-              )}
+        <div className="h-14 px-6 flex items-center justify-between shrink-0 print-hide relative bg-white">
+            <div className="flex items-center gap-2 min-w-0 text-sm">
+              <span className="text-[#CBCBCB]">Resumes</span><span className="text-[#E0E0E0]">/</span>
+              <span className="text-[#1A1A1A] truncate">{activeVersion.name}</span>
+              {activeVersion.matchScore && <span className="px-2 py-0.5 bg-[#F5F5F5] rounded-full text-[10px] text-[#9B9B9B] shrink-0">{activeVersion.matchScore}% match</span>}
             </div>
+            <div className="flex items-center gap-2">
+              <div className="relative" ref={avatarRef}>
+                <button onClick={() => setShowAvatarMenu(p => !p)} className="flex items-center gap-1 group">
+                  <div className="w-8 h-8 rounded-full bg-[#2B2B2B] text-white flex items-center justify-center group-hover:bg-black select-none" style={{ fontSize: 12 }}>
+                    {(currentUser?.fullName || currentUser?.email || 'Guest').slice(0, 2).toUpperCase()}
+                  </div>
+                  <ChevronDown size={13} className="text-[#CBCBCB]" />
+                </button>
+                {showAvatarMenu && (
+                  <div className="absolute right-0 top-11 w-48 bg-[#F3F3F3] border border-[#E2E2E2] rounded-[16px] shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-2 z-50 animate-[fadeInDown_150ms_ease-out]">
+                    <button className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] rounded-[10px] hover:bg-[#E7E7E7] transition-colors flex items-center gap-2.5">
+                      <Settings size={14} className="text-[#A0A0A0]" /> Settings
+                    </button>
+                    <button onClick={() => { clearAuthStorage(); navigate('/start'); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] rounded-[10px] hover:bg-[#E7E7E7] transition-colors flex items-center gap-2.5">
+                      <LogOut size={14} className="text-[#A0A0A0]" /> Log Out
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="absolute bottom-0 left-6 right-6 h-px bg-[#EFEFEF]" />
           </div>
-        </div>
 
         {/* Content + JD overlay + floating toolbar */}
         <div className="flex-1 relative overflow-hidden">
@@ -1310,42 +2016,58 @@ export default function Workspace() {
           {/* Scrollable resume content */}
           <div className="absolute inset-0 overflow-y-auto bg-white" id="print-resume-root">
             <div className="max-w-[960px] mx-auto py-14 px-12 pb-32 print-page resume-print-root">
-              {hasPendingChanges && (
-                <div className="mb-8 flex items-center gap-3 px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px] print-hide">
-                  <Sparkles size={12} className="text-[#9B9B9B] shrink-0" />
-                  <span className="text-sm text-[#6B6B6B]">AI suggestions for <span className="text-[#1A1A1A]">{activeVersion.jobTitle} @ {activeVersion.jobCompany}</span></span>
-                  <span className="text-[#D0D0D0]">·</span>
-                  <span className="text-xs text-[#9B9B9B]">{activeVersion.aiChanges.filter(c => c.status === 'pending').length} pending</span>
-                </div>
-              )}
-              {isNonBase && (
-                <div className="mb-8 flex items-center justify-between px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px] print-hide">
-                  <span className="text-xs text-[#9B9B9B]">Editing <span className="text-[#6B6B6B]">{activeVersion.name}</span>. Changes apply to this version only.</span>
-                  <button onClick={handleUpdateBase} className="flex items-center gap-1.5 text-xs text-[#2B2B2B] hover:text-black ml-4 shrink-0"><RefreshCw size={11} /> Update Base</button>
-                </div>
-              )}
-              <ResumeView version={activeVersion} onUpdateData={updateVersionData} onAcceptChange={handleAcceptChange} onRejectChange={handleRejectChange} onAcceptAll={handleAcceptAll} onRejectAll={handleRejectAll} onShowToast={showToast} />
+              <motion.div
+                key={activeVersion.id}
+                initial={{ opacity: 0, y: 6, filter: 'blur(2px)' }}
+                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                transition={{ duration: 0.24, ease: 'easeOut' }}
+              >
+              <ResumeView isReviewLocked={pendingSuggestionCount > 0} version={activeVersion} onUpdateData={updateVersionData} onAcceptChange={handleAcceptChange} onRejectChange={handleRejectChange} onShowToast={showToast} />
+              </motion.div>
               <p className="text-center mt-12 print-hide" style={{ fontSize: 12, color: '#D4D4D4' }}>Click dates to edit · Click any text to edit · Drag bullets to reorder</p>
             </div>
           </div>
 
           {/* JD Side Panel — slides in from right */}
           {showJDPanel && (
-            <JDSidePanel version={activeVersion} onClose={() => setShowJDPanel(false)}
-              onCopy={() => { if (activeVersion.jobDescription) navigator.clipboard.writeText(activeVersion.jobDescription).catch(() => {}); showToast('Job description copied'); }} />
+            <>
+              <button
+                aria-label="Close job description panel"
+                onClick={() => setShowJDPanel(false)}
+                className="absolute inset-0 z-[9] cursor-default"
+              />
+              <JDSidePanel
+                version={activeVersion}
+                tldr={jdTldrByVersion[activeVersion.id]}
+                isTldrLoading={isTldrLoading}
+                onClose={() => setShowJDPanel(false)}
+                onSave={handleSaveJDDetails}
+              />
+            </>
           )}
 
+          <div
+            className={`absolute inset-0 z-30 bg-white/20 backdrop-blur-[3px] transition-all duration-400 ${isCurating ? 'opacity-100 pointer-events-auto cursor-progress' : 'opacity-0 pointer-events-none'}`}
+          />
+
           {/* ── Floating toolbar — centered at bottom, above scroll ── */}
-          <div className="absolute bottom-8 inset-x-0 flex justify-center z-20 pointer-events-none print-hide">
+          <div className="absolute bottom-8 inset-x-0 flex justify-center z-40 pointer-events-none print-hide">
             <div className="pointer-events-auto">
               <FloatingToolbar
                 isBaseResume={selectedVersionId === baseVersion.id}
                 hasJD={!!(activeVersion.jobDescription)}
-                onAddNew={() => requireAuth(() => setShowModal(true))}
+                pendingCount={pendingSuggestionCount}
+                isCurating={isCurating}
+                jdPanelOpen={showJDPanel}
+                canUpdateAllVariations={hasUpdatableVariants}
+                onAcceptAll={handleAcceptAll}
+                onRejectAll={handleRejectAll}
+                onUpdateAllVariations={() => { void handleUpdateAllVariations(); }}
                 onJDClick={() => setShowJDPanel(p => !p)}
                 onCurate={handleCurate}
                 onExportPDF={handleExportPdf}
                 onExportWord={handleExportWord}
+                onShareLink={() => { void handleShareLink(); }}
               />
             </div>
           </div>
@@ -1353,7 +2075,17 @@ export default function Workspace() {
       </div>
 
       {showModal && <CreateResumeModal onGenerate={handleGenerateVersion} onClose={() => setShowModal(false)} />}
-      <Toast message={toast.message} visible={toast.visible} />
+      {showBaseFileModal && (
+        <BaseResumeFileModal
+          fileName={resumeMeta?.file_name || 'resume.pdf'}
+          pdfUrl={basePdfUrl}
+          isLoading={basePdfLoading}
+          isUploading={isReplacingBasePdf}
+          onClose={() => setShowBaseFileModal(false)}
+          onReplace={(file) => { void handleReplaceBasePdf(file); }}
+        />
+      )}
+      <Toast message={toast.message} visible={toast.visible} tone={toast.tone} />
     </motion.div>
   );
 }
