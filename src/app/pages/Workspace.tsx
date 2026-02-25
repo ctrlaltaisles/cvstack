@@ -21,7 +21,8 @@ const MIN_JD_CURATION_LENGTH = 40;
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
-const NOW = new Date(2026, 1);
+const NOW = new Date();
+const CURRENT_MONTH_YEAR = { month: NOW.getMonth() + 1, year: NOW.getFullYear() };
 function compactText(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
@@ -69,6 +70,13 @@ function calcDurationFromDates(start: DateValue, end: DateValue): string {
 }
 function formatDateRange(s: DateValue, e: DateValue) { return `${MONTHS[s.month - 1]} ${s.year} – ${e.present ? 'Present' : `${MONTHS[e.month - 1]} ${e.year}`}`; }
 function formatMonthYear(m: number, y: number) { return `${MONTHS[m - 1]} ${y}`; }
+function monthKey(v: { month: number; year: number }) { return v.year * 12 + (v.month - 1); }
+function isInRange(v: { month: number; year: number }, minDate?: { month: number; year: number }, maxDate?: { month: number; year: number }) {
+  const key = monthKey(v);
+  if (minDate && key < monthKey(minDate)) return false;
+  if (maxDate && key > monthKey(maxDate)) return false;
+  return true;
+}
 function buildTextResume(data: ResumeData): string {
   const lines: string[] = [data.name, data.title, [data.contact.email, data.contact.phone, data.contact.location].filter(Boolean).join(' | '), '', 'ABOUT', data.bio, '', 'WORK EXPERIENCE'];
   (data.workExperience ?? []).forEach(exp => { lines.push('', `${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate)); exp.bullets.forEach(b => lines.push(`• ${b}`)); });
@@ -703,32 +711,72 @@ function SkillsEditor({ skills, onUpdate, disabled = false }: { skills: string[]
 
 // ─── MonthGridPicker ─────────────────────────────────────────────────────────
 
-function MonthGridPicker({ year, month, onSelect }: { year: number; month: number; onSelect: (m: number, y: number) => void }) {
+function MonthGridPicker({
+  year,
+  month,
+  onSelect,
+  minDate,
+  maxDate,
+}: {
+  year: number;
+  month: number;
+  onSelect: (m: number, y: number) => void;
+  minDate?: { month: number; year: number };
+  maxDate?: { month: number; year: number };
+}) {
   const [dy, setDy] = useState(year);
-  const [mode, setMode] = useState<'month' | 'year'>('month');
   useEffect(() => { setDy(year); }, [year]);
-  const yearBase = Math.floor(dy / 12) * 12;
+  const canGoPrev = isInRange({ month, year: dy - 1 }, minDate, maxDate);
+  const canGoNext = isInRange({ month, year: dy + 1 }, minDate, maxDate);
+  const goPrevYear = () => {
+    if (!canGoPrev) return;
+    const nextYear = dy - 1;
+    setDy(nextYear);
+    onSelect(month, nextYear);
+  };
+  const goNextYear = () => {
+    if (!canGoNext) return;
+    const nextYear = dy + 1;
+    setDy(nextYear);
+    onSelect(month, nextYear);
+  };
   return (
     <div>
       <div className="flex items-center justify-between px-1 mb-3">
-        <button onClick={e => { e.stopPropagation(); setDy(y => y + (mode === 'month' ? -1 : -12)); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>‹</button>
-        <button onClick={e => { e.stopPropagation(); setMode(m => m === 'month' ? 'year' : 'month'); }} className="text-sm text-[#1A1A1A] hover:text-black transition-colors">{dy}</button>
-        <button onClick={e => { e.stopPropagation(); setDy(y => y + (mode === 'month' ? 1 : 12)); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>›</button>
+        <button
+          onClick={e => { e.stopPropagation(); goPrevYear(); }}
+          disabled={!canGoPrev}
+          className={`w-6 h-6 flex items-center justify-center rounded-[4px] transition-colors select-none ${canGoPrev ? 'text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0]' : 'text-[#D8D8D8] cursor-not-allowed'}`}
+          style={{ fontSize: 16 }}
+        >
+          ‹
+        </button>
+        <p className="text-sm text-[#1A1A1A] select-none">{dy}</p>
+        <button
+          onClick={e => { e.stopPropagation(); goNextYear(); }}
+          disabled={!canGoNext}
+          className={`w-6 h-6 flex items-center justify-center rounded-[4px] transition-colors select-none ${canGoNext ? 'text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0]' : 'text-[#D8D8D8] cursor-not-allowed'}`}
+          style={{ fontSize: 16 }}
+        >
+          ›
+        </button>
       </div>
-      {mode === 'month' ? (
-        <div className="grid grid-cols-4 gap-1">
-          {MONTHS.map((m, i) => <button key={m} onClick={e => { e.stopPropagation(); onSelect(i + 1, dy); }} className={`py-2 text-xs rounded-[6px] transition-colors ${i + 1 === month && dy === year ? 'bg-[#1A1A1A] text-white' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}>{m}</button>)}
-        </div>
-      ) : (
-        <div className="grid grid-cols-4 gap-1">
-          {Array.from({ length: 12 }).map((_, i) => {
-            const y = yearBase + i;
-            return (
-              <button key={y} onClick={e => { e.stopPropagation(); setDy(y); setMode('month'); }} className={`py-2 text-xs rounded-[6px] transition-colors ${y === year ? 'bg-[#1A1A1A] text-white' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}>{y}</button>
-            );
-          })}
-        </div>
-      )}
+      <div className="grid grid-cols-4 gap-1">
+        {MONTHS.map((m, i) => {
+          const isSelected = i + 1 === month;
+          const disabled = !isInRange({ month: i + 1, year: dy }, minDate, maxDate);
+          return (
+            <button
+              key={m}
+              onClick={e => { e.stopPropagation(); if (!disabled) onSelect(i + 1, dy); }}
+              disabled={disabled}
+              className={`py-2 text-xs rounded-[6px] transition-colors ${isSelected ? 'bg-[#1A1A1A] text-white' : disabled ? 'text-[#D0D0D0] cursor-not-allowed' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}
+            >
+              {m}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -736,19 +784,48 @@ function MonthGridPicker({ year, month, onSelect }: { year: number; month: numbe
 // ─── DateRangeEditor & MonthYearEditor ──────────────────────────────────────
 
 function DateRangeEditor({ startDate, endDate, onChangeStart, onChangeEnd }: { startDate: DateValue; endDate: DateValue; onChangeStart: (v: DateValue) => void; onChangeEnd: (v: DateValue) => void; onClose: () => void }) {
+  const startMaxByEnd = endDate.present ? undefined : { month: endDate.month, year: endDate.year };
+  const startMax = startMaxByEnd && monthKey(startMaxByEnd) < monthKey(CURRENT_MONTH_YEAR) ? startMaxByEnd : CURRENT_MONTH_YEAR;
+  const endMin = { month: startDate.month, year: startDate.year };
+  const endMax = CURRENT_MONTH_YEAR;
+  const handleStartChange = (m: number, y: number) => {
+    const nextStart = { ...startDate, month: m, year: y };
+    onChangeStart(nextStart);
+    if (!endDate.present && monthKey(nextStart) > monthKey(endDate)) {
+      onChangeEnd({ ...endDate, month: m, year: y });
+    }
+  };
+  const handleEndChange = (m: number, y: number) => {
+    const nextEnd = { ...endDate, month: m, year: y };
+    onChangeEnd(nextEnd);
+    if (monthKey(nextEnd) < monthKey(startDate)) {
+      onChangeStart({ ...startDate, month: m, year: y });
+    }
+  };
+  const togglePresent = () => {
+    if (endDate.present) {
+      const fallbackRaw = monthKey(endDate) < monthKey(startDate)
+        ? { month: startDate.month, year: startDate.year }
+        : { month: endDate.month, year: endDate.year };
+      const fallback = monthKey(fallbackRaw) > monthKey(CURRENT_MONTH_YEAR) ? CURRENT_MONTH_YEAR : fallbackRaw;
+      onChangeEnd({ ...endDate, present: false, ...fallback });
+      return;
+    }
+    onChangeEnd({ ...endDate, present: true });
+  };
   return (
     <div className="absolute left-0 top-full mt-2 w-[220px] bg-white border border-[#E5E5E5] rounded-[12px] shadow-[0_8px_32px_rgba(0,0,0,0.1)] p-4 z-[60] animate-[fadeInDown_150ms_ease-out]">
       <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA] mb-3">Start</p>
-      <MonthGridPicker year={startDate.year} month={startDate.month} onSelect={(m, y) => onChangeStart({ ...startDate, month: m, year: y })} />
+      <MonthGridPicker year={startDate.year} month={startDate.month} maxDate={startMax} onSelect={handleStartChange} />
       <div className="mt-4 pt-4 border-t border-[#F0F0F0]">
         <div className="flex items-center justify-between mb-3">
           <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA]">End</p>
-          <button onClick={e => { e.stopPropagation(); onChangeEnd({ ...endDate, present: !endDate.present }); }} className="flex items-center gap-2">
+          <button onClick={e => { e.stopPropagation(); togglePresent(); }} className="flex items-center gap-2">
             <div className={`relative w-8 h-4 rounded-full transition-colors ${endDate.present ? 'bg-[#1A1A1A]' : 'bg-[#DDDDDD]'}`}><div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow-sm transition-transform ${endDate.present ? 'translate-x-4' : 'translate-x-0'}`} /></div>
             <span className="text-xs text-[#6B6B6B]">Present</span>
           </button>
         </div>
-        {!endDate.present && <MonthGridPicker year={endDate.year} month={endDate.month} onSelect={(m, y) => onChangeEnd({ ...endDate, month: m, year: y })} />}
+        {!endDate.present && <MonthGridPicker year={endDate.year} month={endDate.month} minDate={endMin} maxDate={endMax} onSelect={handleEndChange} />}
       </div>
     </div>
   );
@@ -757,7 +834,7 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
   return (
     <div className="absolute left-0 top-full mt-2 w-[200px] bg-white border border-[#E5E5E5] rounded-[12px] shadow-[0_8px_32px_rgba(0,0,0,0.1)] p-4 z-[60] animate-[fadeInDown_150ms_ease-out]">
       <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA] mb-3">Date Issued</p>
-      <MonthGridPicker year={year} month={month} onSelect={(m, y) => onChange(m, y)} />
+      <MonthGridPicker year={year} month={month} maxDate={CURRENT_MONTH_YEAR} onSelect={(m, y) => onChange(m, y)} />
     </div>
   );
 }

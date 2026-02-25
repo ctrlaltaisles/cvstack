@@ -1328,6 +1328,12 @@ export async function parseResumePdf(buffer: Buffer, opts: ParseOptions = {}): P
 
 export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
   const data = defaultResumeData(parsed.email ?? '');
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const unknownStart = { month: 1, year: 2020, present: false as const };
+  const unknownEnd = { month: currentMonth, year: currentYear };
+
   data.bio = '';
   data.name = parsed.name ?? data.name;
   data.title = parsed.currentTitle ?? data.title;
@@ -1340,16 +1346,12 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
     id: `exp-${idx + 1}`,
     company: exp.company ?? 'Unknown Company',
     role: exp.role ?? 'Unknown Role',
-    startDate: {
-      month: exp.start.month ?? 1,
-      year: exp.start.year ?? 2020,
-      present: false,
-    },
-    endDate: {
-      month: exp.end.month ?? 1,
-      year: exp.end.year ?? (exp.isCurrent ? new Date().getFullYear() : 2020),
-      present: exp.isCurrent,
-    },
+    startDate: (exp.start.month == null || exp.start.year == null)
+      ? unknownStart
+      : { month: exp.start.month, year: exp.start.year, present: false },
+    endDate: (exp.end.month == null || exp.end.year == null)
+      ? { ...unknownEnd, present: exp.isCurrent }
+      : { month: exp.end.month, year: exp.end.year, present: exp.isCurrent },
     bullets: exp.description,
   }));
 
@@ -1358,16 +1360,12 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
     degree: edu.degree ?? 'Degree',
     school: edu.school ?? 'School',
     location: edu.location ?? '',
-    startDate: {
-      month: edu.start.month ?? 1,
-      year: edu.start.year ?? 2018,
-      present: false,
-    },
-    endDate: {
-      month: edu.end.month ?? 1,
-      year: edu.end.year ?? (edu.isCurrent ? new Date().getFullYear() : 2022),
-      present: edu.isCurrent,
-    },
+    startDate: (edu.start.month == null || edu.start.year == null)
+      ? unknownStart
+      : { month: edu.start.month, year: edu.start.year, present: false },
+    endDate: (edu.end.month == null || edu.end.year == null)
+      ? { ...unknownEnd, present: edu.isCurrent }
+      : { month: edu.end.month, year: edu.end.year, present: edu.isCurrent },
   }));
 
   return data;

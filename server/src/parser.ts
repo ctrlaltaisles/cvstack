@@ -224,6 +224,9 @@ export function parseResumeText(text: string): ParsedResume {
 
 export function toResumeData(parsed: ParsedResume): ResumeData {
   const resume = defaultResumeData(parsed.email);
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
   resume.name = parsed.name || resume.name;
   resume.contact.phone = parsed.phone || '';
 
@@ -247,7 +250,7 @@ export function toResumeData(parsed: ParsedResume): ResumeData {
       company: 'Imported Company',
       role: expSection.lines[0] ?? 'Imported Role',
       startDate: { month: 1, year: 2020, present: false },
-      endDate: { month: 1, year: 2026, present: true },
+      endDate: { month: currentMonth, year: currentYear, present: true },
       bullets: parsed.bulletPoints.slice(0, 6),
     }];
   }
