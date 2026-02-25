@@ -408,7 +408,22 @@ function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, c
 function applyChange(change: AIChange, d: ResumeData): ResumeData {
   if (change.field === 'bio') return { ...d, bio: change.suggested };
   if (change.field === 'bullet' && change.expId && change.bulletIdx !== undefined) {
-    return { ...d, workExperience: d.workExperience.map(exp => { if (exp.id !== change.expId) return exp; const bullets = [...exp.bullets]; bullets[change.bulletIdx!] = change.suggested; return { ...exp, bullets }; }) };
+    return {
+      ...d,
+      workExperience: d.workExperience.map((exp) => {
+        if (exp.id !== change.expId) return exp;
+        const bullets = [...exp.bullets];
+        const idx = change.bulletIdx!;
+        const next = change.suggested.trim();
+        if (!next) {
+          if (idx >= 0 && idx < bullets.length) bullets.splice(idx, 1);
+          return { ...exp, bullets };
+        }
+        if (idx >= bullets.length) bullets.splice(idx, 0, next);
+        else bullets[idx] = next;
+        return { ...exp, bullets };
+      }),
+    };
   }
   return d;
 }
@@ -434,14 +449,16 @@ function buildPendingAIChangesFromCuration(version: ResumeVersion, result: Await
     const exp = version.data.workExperience.find((item) => item.id === suggestion.expId);
     if (!exp) continue;
     const bullet = exp.bullets[suggestion.bulletIdx];
-    if (!bullet || suggestion.suggested.trim() === bullet.trim()) continue;
+    const suggested = suggestion.suggested.trim();
+    if (bullet === undefined && !suggested) continue;
+    if (bullet !== undefined && suggested === bullet.trim()) continue;
     nextChanges.push({
       id: `c-ai-bullet-${seed}-${idx}`,
       field: 'bullet',
       expId: suggestion.expId,
       bulletIdx: suggestion.bulletIdx,
-      original: bullet,
-      suggested: suggestion.suggested.trim(),
+      original: bullet ?? '',
+      suggested,
       status: 'pending',
     });
   }
@@ -734,6 +751,9 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
   const handleDrop = (toIdx: number) => { if (dragFrom === null || dragFrom === toIdx) { setDragFrom(null); setDragTarget(null); return; } const next = [...exp.bullets]; const [moved] = next.splice(dragFrom, 1); next.splice(toIdx, 0, moved); updateBullets(next); setDragFrom(null); setDragTarget(null); };
   const duration = calcDurationFromDates(exp.startDate, exp.endDate);
   const hasPending = pendingBulletChanges.size > 0;
+  const pendingAdditions = [...pendingBulletChanges.entries()]
+    .filter(([idx, change]) => idx >= exp.bullets.length && change.suggested.trim())
+    .sort((a, b) => a[0] - b[0]);
   return (
     <div className={`flex gap-10 group/exp transition-all duration-300 ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
       <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
@@ -765,7 +785,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
                 {pendingChange ? (
                   <div className="flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-1.5 bg-[#F7F7F7]">
                     <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
-                    <p className="text-sm text-[#2B2B2B] leading-relaxed">{showOriginal ? pendingChange.original : pendingChange.suggested}</p>
+                    <p className="text-sm text-[#2B2B2B] leading-relaxed">{showOriginal ? pendingChange.original || '(new bullet)' : pendingChange.suggested || '(remove this bullet)'}</p>
                   </div>
                 ) : (
                   <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={false} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} isReviewLocked={isReviewLocked} />
@@ -773,6 +793,14 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
               </li>
             );
           })}
+          {pendingAdditions.map(([idx, change]) => (
+            <li key={`pending-add-${idx}`} className="border-t-2 border-transparent">
+              <div className="flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-1.5 bg-[#F2FAF5]">
+                <span className="text-[#9DC5A8] shrink-0 mt-px select-none text-sm">+</span>
+                <p className="text-sm text-[#2B2B2B] leading-relaxed">{showOriginal ? '(new bullet)' : change.suggested}</p>
+              </div>
+            </li>
+          ))}
         </ul>
         {hasPending && (
           <div className="flex gap-2 mt-4">
@@ -1608,6 +1636,8 @@ export default function Workspace() {
             resumeData: nextVersion.data,
             targetRole: nextVersion.jobTitle || nextVersion.data.title,
             jdText: nextVersion.jobDescription,
+            jobCompany: nextVersion.jobCompany,
+            jobLink: nextVersion.jobLink,
           });
           const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
           if (changes.length > 0) {
@@ -1649,6 +1679,8 @@ export default function Workspace() {
         resumeData: snapshot.data,
         targetRole: snapshot.jobTitle || snapshot.data.title,
         jdText: snapshot.jobDescription,
+        jobCompany: snapshot.jobCompany,
+        jobLink: snapshot.jobLink,
       });
       const fallbackReason = getCurationFallbackReason(result);
       if (fallbackReason) {
@@ -1822,6 +1854,8 @@ export default function Workspace() {
       resumeData: activeVersion.data,
       targetRole: activeVersion.jobTitle || activeVersion.data.title,
       jdText: activeVersion.jobDescription,
+      jobCompany: activeVersion.jobCompany,
+      jobLink: activeVersion.jobLink,
     })
       .then((result) => {
         if (cancelled) return;

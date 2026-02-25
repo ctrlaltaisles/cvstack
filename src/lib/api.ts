@@ -90,6 +90,8 @@ export interface CurateResumeRequest {
   resumeData: unknown;
   targetRole?: string;
   jdText?: string;
+  jobCompany?: string;
+  jobLink?: string;
 }
 
 export interface CurateResumeResponse {
@@ -101,6 +103,12 @@ export interface CurateResumeResponse {
     roleAsks: string;
     candidateNeeds: string;
     keyFocusAreas: string[];
+  };
+  companyContext?: {
+    company: string;
+    focus: string;
+    stellarProfile: string[];
+    evidence: string[];
   };
   suggestions: Array<{
     field: 'bio' | 'bullet';

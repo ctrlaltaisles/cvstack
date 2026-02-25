@@ -53,6 +53,13 @@ export interface ElevateQuality {
   notes: string;
 }
 
+export interface CompanyContext {
+  company: string;
+  focus: string;
+  stellarProfile: string[];
+  evidence: string[];
+}
+
 export interface CurateResumeOutput {
   changeSummary: string[];
   redFlags: string[];
@@ -63,6 +70,7 @@ export interface CurateResumeOutput {
     candidateNeeds: string;
     keyFocusAreas: string[];
   };
+  companyContext?: CompanyContext;
   suggestions: CurateSuggestion[];
   improved: {
     about: string;
@@ -80,6 +88,15 @@ export interface CurateResumeOutput {
   };
 }
 
+interface CurateResumeInput {
+  resumeData: ResumeData;
+  targetRole?: string;
+  jdText?: string;
+  seniority?: SeniorityLevel;
+  jobCompany?: string;
+  jobLink?: string;
+}
+
 export class TailorResumeError extends Error {
   statusCode: number;
 
@@ -95,6 +112,8 @@ const CURATE_TIMEOUT_MS = Number(process.env.OPENAI_CURATE_TIMEOUT_MS ?? process
 const SECOND_PASS_MIN_REMAINING_MS = Number(process.env.OPENAI_SECOND_PASS_MIN_REMAINING_MS ?? 45000);
 const CURATE_SECOND_PASS_ENABLED = String(process.env.OPENAI_CURATE_SECOND_PASS ?? 'false').trim().toLowerCase() === 'true';
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
+const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
+const COMPANY_RESEARCH_TIMEOUT_MS = Number(process.env.COMPANY_RESEARCH_TIMEOUT_MS ?? 4500);
 const CURATION_ROLE_CLUSTERS = [
   'Product Manager',
   'Software Developer',
@@ -253,6 +272,167 @@ function parseModelJson(text: string): unknown {
     }
   }
   throw new TailorResumeError('Model returned non-JSON response', 502);
+}
+
+function compactResumeDataForCuration(resumeData: ResumeData): ResumeData {
+  const clamp = (value: string, max: number) => String(value ?? '').trim().slice(0, max);
+  return {
+    ...resumeData,
+    name: clamp(resumeData.name, 80),
+    title: clamp(resumeData.title, 80),
+    bio: clamp(resumeData.bio, 700),
+    workExperience: (resumeData.workExperience ?? []).slice(0, 8).map((exp) => ({
+      ...exp,
+      company: clamp(exp.company, 80),
+      role: clamp(exp.role, 80),
+      bullets: (exp.bullets ?? []).slice(0, 7).map((bullet) => clamp(bullet, 260)),
+    })),
+    education: (resumeData.education ?? []).slice(0, 5),
+    certifications: (resumeData.certifications ?? []).slice(0, 5),
+    skills: (resumeData.skills ?? []).slice(0, 40).map((skill) => clamp(skill, 40)),
+  };
+}
+
+function truncate(value: string, max: number): string {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+    if (!out.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
+      out.push(normalized);
+    }
+  }
+  return out;
+}
+
+function normalizeCompanyName(company?: string, jobLink?: string): string {
+  const explicit = truncate(company ?? '', 120);
+  if (explicit) return explicit;
+  try {
+    const parsed = new URL(String(jobLink ?? '').trim());
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const firstPart = host.split('.').filter(Boolean)[0] ?? '';
+    return firstPart
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: { 'User-Agent': 'CVStackBot/1.0 (+company-context)' },
+      signal: controller.signal,
+    });
+    if (!response.ok) return '';
+    return await response.text();
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function htmlToText(input: string): string {
+  return String(input ?? '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildCompanyFocusSummary(text: string, targetRole: string): string {
+  const normalized = text.toLowerCase();
+  const focusSignals = [
+    ['growth', 'growth and demand generation'],
+    ['customer', 'customer value and user-centric execution'],
+    ['ai', 'applied AI and intelligent product capabilities'],
+    ['platform', 'platform reliability and scalable systems'],
+    ['enterprise', 'enterprise-grade delivery and stakeholder alignment'],
+    ['design', 'design quality and user experience'],
+    ['data', 'data-driven decisions and analytics rigor'],
+    ['experiment', 'experimentation and measurable optimization'],
+    ['security', 'security and trust standards'],
+    ['performance', 'performance, quality, and execution speed'],
+  ] as const;
+
+  const matched = uniqueStrings(
+    focusSignals
+      .filter(([needle]) => normalized.includes(needle))
+      .map(([, label]) => label),
+  ).slice(0, 3);
+
+  if (matched.length === 0) {
+    return targetRole
+      ? `${targetRole} at this company is likely evaluated on ownership, execution quality, and measurable outcomes.`
+      : 'This company likely evaluates talent on ownership, execution quality, and measurable outcomes.';
+  }
+  return `Current emphasis appears to be ${matched.join(', ')}.`;
+}
+
+function buildStellarProfile(targetRole: string, focus: string): string[] {
+  const role = truncate(targetRole || 'this role', 80) || 'this role';
+  return [
+    `Owns priorities end-to-end in ${role}, not just task execution.`,
+    'Translates ambiguity into clear plans with measurable business or user outcomes.',
+    'Communicates decisions crisply across product, engineering, design, and commercial stakeholders.',
+    `Demonstrates strong tooling fluency and execution aligned to company focus: ${focus}`,
+  ].map((line) => truncate(line, 220));
+}
+
+async function researchCompanyContext(input: CurateResumeInput): Promise<CompanyContext | undefined> {
+  const company = normalizeCompanyName(input.jobCompany, input.jobLink);
+  const jdText = truncate(input.jdText ?? '', 5000);
+  const targetRole = truncate(input.targetRole ?? input.resumeData.title ?? '', 120);
+
+  const evidence: string[] = [];
+  if (jdText) evidence.push(`JD highlights: ${truncate(htmlToText(jdText), 320)}`);
+
+  const jobLink = String(input.jobLink ?? '').trim();
+  if (jobLink) {
+    const jobPage = await fetchTextWithTimeout(jobLink, COMPANY_RESEARCH_TIMEOUT_MS);
+    const jobPageText = truncate(htmlToText(jobPage), 1200);
+    if (jobPageText) evidence.push(`Job posting text: ${jobPageText}`);
+  }
+
+  if (company) {
+    const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(company)}`;
+    const wikiRaw = await fetchTextWithTimeout(wikiUrl, COMPANY_RESEARCH_TIMEOUT_MS);
+    if (wikiRaw) {
+      try {
+        const wiki = JSON.parse(wikiRaw) as { extract?: string };
+        const extract = truncate(wiki.extract ?? '', 420);
+        if (extract) evidence.push(`Company background: ${extract}`);
+      } catch {
+        // Ignore parsing errors and continue with available signals.
+      }
+    }
+  }
+
+  const combinedEvidence = uniqueStrings(evidence).slice(0, 4);
+  if (!company && combinedEvidence.length === 0) return undefined;
+
+  const focus = buildCompanyFocusSummary(combinedEvidence.join(' '), targetRole);
+  return {
+    company: company || 'Target company',
+    focus,
+    stellarProfile: buildStellarProfile(targetRole, focus).slice(0, 4),
+    evidence: combinedEvidence.map((line) => truncate(line, 340)),
+  };
 }
 
 function sanitizeOutput(payload: unknown): TailorResumeOutput {
@@ -417,10 +597,11 @@ function deriveSuggestionsFromImproved(resumeData: ResumeData, improved: CurateR
   for (const exp of improved.experience) {
     const originalExp = resumeData.workExperience.find((item) => item.id === exp.expId);
     if (!originalExp) continue;
-    for (let idx = 0; idx < Math.min(originalExp.bullets.length, exp.bullets.length); idx += 1) {
-      const before = originalExp.bullets[idx]?.trim();
-      const after = exp.bullets[idx]?.trim();
-      if (!after || !before || before === after) continue;
+    const maxLen = Math.max(originalExp.bullets.length, exp.bullets.length);
+    for (let idx = 0; idx < maxLen; idx += 1) {
+      const before = originalExp.bullets[idx]?.trim() ?? '';
+      const after = exp.bullets[idx]?.trim() ?? '';
+      if (before === after) continue;
       const reason = changes.find((item) => item.before.trim() === before && item.after.trim() === after)?.reason;
       suggestions.push({
         field: 'bullet',
@@ -609,6 +790,7 @@ async function runCurateModel(client: OpenAI, systemPrompt: string, userPrompt: 
     {
       model: DEFAULT_MODEL,
       temperature: 0.2,
+      max_tokens: CURATE_MAX_TOKENS,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -617,6 +799,25 @@ async function runCurateModel(client: OpenAI, systemPrompt: string, userPrompt: 
     },
     signal ? { signal } : undefined,
   );
+}
+
+async function runCurateModelParsed(
+  client: OpenAI,
+  systemPrompt: string,
+  userPrompt: string,
+  signal?: AbortSignal,
+): Promise<{ parsed: unknown; raw: string }> {
+  const completion = await runCurateModel(client, systemPrompt, userPrompt, signal);
+  const raw = completion.choices[0]?.message?.content ?? '';
+  try {
+    return { parsed: parseModelJson(raw), raw };
+  } catch (error) {
+    if (!(error instanceof TailorResumeError) || !/non-JSON|empty response/i.test(error.message)) throw error;
+    const retryPrompt = `${userPrompt}\n\nIMPORTANT: Return ONLY one valid JSON object. No markdown, no prose, no code fences.`;
+    const retryCompletion = await runCurateModel(client, systemPrompt, retryPrompt, signal);
+    const retryRaw = retryCompletion.choices[0]?.message?.content ?? '';
+    return { parsed: parseModelJson(retryRaw), raw: retryRaw };
+  }
 }
 
 export async function tailorResumeWithAI(input: TailorResumeInput, requestId: string): Promise<TailorResumeOutput> {
@@ -692,6 +893,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
   const jdKeywords = extractJDKeywords(input.jdText ?? '', targetRole);
 
   const systemPrompt = CURATION_SYSTEM_PROMPT;
+  const compactResumeData = compactResumeDataForCuration(input.resumeData);
 
   const basePayload = {
     task: 'Recruiter-grade elevate of current resume content using intent-over-rephrase behavior',
@@ -708,7 +910,12 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
     },
-    resumeData: input.resumeData,
+    editing_rules: [
+      'You may rewrite, add, or remove bullets when it improves clarity and impact.',
+      'Keep each role to 3-7 bullets and prioritize strongest evidence.',
+      'For removals, use empty string in improved bullets at that index.',
+    ],
+    resumeData: compactResumeData,
     output_schema: {
       improved: {
         about: 'string',
@@ -734,8 +941,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
   try {
     console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${(input.jdText ?? '').length}`);
 
-    let completion = await runCurateModel(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
-    let parsed = parseModelJson(completion.choices[0]?.message?.content ?? '');
+    let { parsed } = await runCurateModelParsed(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
     let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
 
     if (output.suggestions.length === 0) {
@@ -755,8 +961,7 @@ export async function curateResumeWithAI(input: { resumeData: ResumeData; target
             correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics.',
             firstPassQuality: quality,
           });
-          completion = await runCurateModel(client, systemPrompt, secondPassPrompt, curateSignal);
-          parsed = parseModelJson(completion.choices[0]?.message?.content ?? '');
+          ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
           output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
           if (output.suggestions.length === 0) {
             output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);

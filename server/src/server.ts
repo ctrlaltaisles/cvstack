@@ -58,6 +58,8 @@ app.post('/api/ai/curate-resume', async (req, res) => {
   const resumeData = req.body?.resumeData as ResumeData | undefined;
   const targetRole = String(req.body?.targetRole ?? '').trim() || undefined;
   const jdText = String(req.body?.jdText ?? '').trim() || undefined;
+  const jobCompany = String(req.body?.jobCompany ?? '').trim() || undefined;
+  const jobLink = String(req.body?.jobLink ?? '').trim() || undefined;
 
   if (!resumeData || typeof resumeData !== 'object') {
     res.status(400).json({ error: 'resumeData is required', requestId });
@@ -65,7 +67,7 @@ app.post('/api/ai/curate-resume', async (req, res) => {
   }
 
   try {
-    const result = await curateResumeWithAI({ resumeData, targetRole, jdText }, requestId);
+    const result = await curateResumeWithAI({ resumeData, targetRole, jdText, jobCompany, jobLink }, requestId);
     res.json(result);
   } catch (error) {
     if (error instanceof TailorResumeError) {
