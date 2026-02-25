@@ -103,7 +103,7 @@ const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
 
 const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|specialist|consultant|architect|developer|coach|instructor|trainer|assistant|marketing)\b/i;
 const COMPANY_HINT = /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|university|college|institute|labs?)/i;
-const DEGREE_HINT = /(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?s\.?|m\.?a\.?|m\.?s\.?|mba)/i;
+const DEGREE_HINT = /\b(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?sc\.?|bsc|bs|bba|m\.?a\.?|m\.?sc\.?|msc|m\.?s\.?|mba|hons)\b/i;
 const SCHOOL_HINT = /(university|college|polytechnic|school|institute|academy)/i;
 const AWARD_HINT = /(award|awards|recognition|achievement|certification|certificate|medal|honou?r|finalist|winner)/i;
 const COUNTRY_TOKEN_REGEX = /\b(singapore|malaysia|indonesia|thailand|vietnam|philippines|united kingdom|uk|united states|usa|australia|india|china|japan|canada)\b/i;
@@ -184,9 +184,45 @@ function cleanLineText(text: string): string {
   });
   out = out.replace(/\s*-\s*/g, '-');
   out = out.replace(/([a-z])-([A-Z])/g, '$1 - $2');
-  out = out.replace(/\s*-\s*/g, ' - ');
   out = out.replace(/\s+/g, ' ').trim();
   return out;
+}
+
+export function normalizeOutputText(text: string): string {
+  return cleanLineText(text)
+    .replace(/\b([A-Za-z0-9]+)\s*-\s*([A-Za-z0-9]+)\b/g, '$1-$2')
+    .replace(/\byofSingapore\b/gi, 'y of Singapore')
+    .replace(/\byof([A-Z][a-z]+)/g, 'y of $1')
+    .replace(/\bUniv\s*ersit\s*y\s*of\b/gi, 'University of')
+    .replace(/\bUniv\s*ersit\s*y\b/gi, 'University')
+    .replace(/\bSinga\s*pore\b/gi, 'Singapore')
+    .replace(/\bTemase\s*kPolytechnic\b/gi, 'Temasek Polytechnic')
+    .replace(/\bTemase\s*k\b/gi, 'Temasek')
+    .replace(/\bPoly\s*technic\b/gi, 'Polytechnic')
+    .replace(/\bDiplo\s*ma\b/gi, 'Diploma')
+    .replace(/\bProgra\s*mme\b/gi, 'Programme')
+    .replace(/\bofArts\b/g, 'of Arts')
+    .replace(/\bGSuite\b/g, 'G Suite')
+    .replace(/\bke yboard\b/gi, 'keyboard')
+    .replace(/\bke ycap\b/gi, 'keycap')
+    .replace(/\bpre vious\b/gi, 'previous')
+    .replace(/\bre vie ws\b/gi, 'reviews')
+    .replace(/\bde vice\b/gi, 'device')
+    .replace(/\binter vie ws\b/gi, 'interviews')
+    .replace(/\bfore valuations\b/gi, 'for evaluations')
+    .replace(/\bbuildc ycles\b/gi, 'build cycles')
+    .replace(/\bergonomice valuation\b/gi, 'ergonomic evaluation')
+    .replace(/\bCADform\b/g, 'CAD form')
+    .replace(/\bahybrid\b/gi, 'a hybrid')
+    .replace(/\baDell\b/g, 'a Dell')
+    .replace(/\btr yDell\b/gi, 'try Dell')
+    .replace(/\bIfind\b/g, 'I find')
+    .replace(/\bAsa\b/g, 'As a')
+    .replace(/\s+,/g, ',')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function headingKey(text: string): string {
@@ -935,8 +971,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     const parts = firstHeader.split(/\s+at\s+/i);
     role = parts[0]?.trim() || null;
     company = parts[1]?.trim() || null;
-  } else if ((!role || !company) && firstHeader.includes(' - ')) {
-    const parts = firstHeader.split(' - ');
+  } else if ((!role || !company) && /\s-\s/.test(firstHeader)) {
+    const parts = firstHeader.split(/\s-\s/);
     role = parts[0]?.trim() || null;
     company = parts[1]?.trim() || null;
   }
@@ -1035,6 +1071,13 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
 
   if (!school && texts.length > 0) school = texts[0] ?? null;
   if (!degree && texts.length > 1) degree = texts[1] ?? null;
+  if (!degree) {
+    const degreeLike = texts.find((t) =>
+      /\b(bsc|b\.?sc\.?|bachelor|hons|marketing|management|engineering|design|science|arts|business)\b/i.test(t)
+      && !SCHOOL_HINT.test(t),
+    ) ?? null;
+    if (degreeLike) degree = degreeLike;
+  }
 
   school = school ? removeDateFragments(school) : null;
   degree = degree ? removeDateFragments(degree) : null;
@@ -1092,7 +1135,7 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     .filter((s) => !/(19|20)\d{2}/.test(s))
     .filter((s) => !/^[+\-]/.test(s));
 
-  return unique(tokens).slice(0, 40);
+  return unique(tokens).slice(0, 8);
 }
 
 function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): string | null {
@@ -1107,21 +1150,22 @@ function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): stri
     return text || null;
   }
 
-  const firstStructured = sections.find((s) => s.type === 'experience' || s.type === 'education' || s.type === 'skills' || s.type === 'projects' || s.type === 'other');
-  const contactSection = sections.find((s) => s.type === 'contact');
-  const startIdx = contactSection ? contactSection.startIdx : 0;
-  const endIdx = firstStructured ? firstStructured.startIdx - 1 : Math.min(lines.length - 1, 26);
-  if (endIdx < startIdx) return null;
+  const firstStructured = sections.find((s) =>
+    s.type === 'experience' || s.type === 'education' || s.type === 'skills' || s.type === 'projects' || s.type === 'other',
+  );
+  if (!firstStructured || firstStructured.startIdx <= 1) return null;
 
-  const text = lines
-    .slice(startIdx, endIdx + 1)
+  const intro = lines
+    .slice(0, firstStructured.startIdx)
     .map((l) => l.text)
     .filter((t) => !/@|https?:\/\/|linkedin/i.test(t))
-    .filter((t) => !COUNTRY_TOKEN_REGEX.test(t) || t.split(/\s+/).length >= 5)
-    .filter((t) => t.length >= 30)
-    .join(' ')
-    .trim();
-  return text || null;
+    .filter((t) => !looksDateAnchor({ ...lines[0], text: t }))
+    .filter((t) => t.length >= 40);
+
+  const introText = intro.join(' ').trim();
+  // Only accept strong paragraph-like intros; avoids pulling work lines as About.
+  if (intro.length >= 3 && introText.length >= 220) return introText;
+  return null;
 }
 
 function sortRecentFirst<T extends { start: MonthYear; end: MonthYear; isCurrent: boolean }>(items: T[]): T[] {
@@ -1242,8 +1286,32 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     }
   }
 
+  const normalizedData: ParsedResume = {
+    ...data,
+    name: data.name ? normalizeOutputText(data.name) : null,
+    phone: data.phone ? normalizeOutputText(data.phone) : null,
+    email: data.email ? normalizeOutputText(data.email) : null,
+    linkedin: data.linkedin ? normalizeOutputText(data.linkedin) : null,
+    website: data.website ? normalizeOutputText(data.website) : null,
+    country: data.country ? normalizeOutputText(data.country) : null,
+    currentTitle: data.currentTitle ? normalizeOutputText(data.currentTitle) : null,
+    experiences: data.experiences.map((exp) => ({
+      ...exp,
+      role: exp.role ? normalizeOutputText(exp.role) : null,
+      company: exp.company ? normalizeOutputText(exp.company) : null,
+      description: exp.description.map((d) => normalizeOutputText(d)).filter(Boolean),
+    })),
+    education: data.education.map((edu) => ({
+      ...edu,
+      degree: edu.degree ? normalizeOutputText(edu.degree) : null,
+      school: edu.school ? normalizeOutputText(edu.school) : null,
+      location: edu.location ? normalizeOutputText(edu.location) : null,
+    })),
+    skills: unique(data.skills.map((s) => normalizeOutputText(s)).filter(Boolean)).slice(0, 8),
+  };
+
   return {
-    data,
+    data: normalizedData,
     warnings: unique(warnings),
     ...(opts.debug ? { debug: { lines, sections, blocks } } : {}),
   };
@@ -1260,22 +1328,14 @@ export async function parseResumePdf(buffer: Buffer, opts: ParseOptions = {}): P
 
 export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
   const data = defaultResumeData(parsed.email ?? '');
+  data.bio = '';
   data.name = parsed.name ?? data.name;
   data.title = parsed.currentTitle ?? data.title;
   data.contact.phone = parsed.phone ?? '';
   data.contact.location = parsed.country ?? '';
   data.contact.linkedin = parsed.linkedin ?? '';
   data.contact.website = parsed.website ?? '';
-  data.skills = parsed.skills;
-  if (!data.bio || /^write a concise professional summary here\.$/i.test(data.bio)) {
-    const summaryFromCurrent = parsed.experiences
-      .flatMap((exp) => exp.description)
-      .slice(0, 2)
-      .join(' ')
-      .slice(0, 600);
-    if (summaryFromCurrent) data.bio = summaryFromCurrent;
-  }
-
+  data.skills = parsed.skills.slice(0, 8);
   data.workExperience = parsed.experiences.map((exp, idx) => ({
     id: `exp-${idx + 1}`,
     company: exp.company ?? 'Unknown Company',
@@ -1315,5 +1375,6 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
 
 export function inferResumeSummaryFromDebug(debug: { lines: ExtractedLine[]; sections: DetectedSection[] } | undefined): string | null {
   if (!debug) return null;
-  return inferSummary(debug.lines, debug.sections);
+  const summary = inferSummary(debug.lines, debug.sections);
+  return summary ? normalizeOutputText(summary) : null;
 }

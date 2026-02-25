@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
@@ -234,23 +235,26 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
   fs.writeFileSync(filePath, req.body);
 
   const parsedPayload = await parseResumePdf(req.body, { debug: true });
+  const parsedData = parsedPayload.data;
+  const warnings = parsedPayload.warnings;
+
   const extractedText = [
-    parsedPayload.data.name,
-    parsedPayload.data.currentTitle,
-    ...(parsedPayload.data.experiences ?? []).flatMap((exp) => [exp.role, exp.company, ...exp.description]),
-    ...(parsedPayload.data.education ?? []).flatMap((edu) => [edu.degree, edu.school]),
-    ...(parsedPayload.data.skills ?? []),
+    parsedData.name,
+    parsedData.currentTitle,
+    ...(parsedData.experiences ?? []).flatMap((exp) => [exp.role, exp.company, ...exp.description]),
+    ...(parsedData.education ?? []).flatMap((edu) => [edu.degree, edu.school]),
+    ...(parsedData.skills ?? []),
   ]
     .filter((v): v is string => Boolean(v))
     .join('\n')
     .slice(0, 5000);
 
-  if (!parsedPayload.data.name && parsedPayload.data.experiences.length === 0 && parsedPayload.data.education.length === 0 && parsedPayload.data.skills.length === 0) {
+  if (!parsedData.name && parsedData.experiences.length === 0 && parsedData.education.length === 0 && parsedData.skills.length === 0) {
     res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
     return;
   }
 
-  const data = toResumeDataFromParsedResume(parsedPayload.data);
+  const data = toResumeDataFromParsedResume(parsedData);
   const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
   if (inferredSummary) {
     data.bio = inferredSummary.slice(0, 1200);
@@ -263,11 +267,16 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     filePath,
     fileName,
     extractedText,
-    parsed: parsedPayload.data,
+    parsed: parsedData,
     data,
   });
 
-  res.status(201).json({ ...created, parsed: parsedPayload.data, warnings: parsedPayload.warnings, extractedTextPreview: extractedText.slice(0, 1200) });
+  res.status(201).json({
+    ...created,
+    parsed: parsedData,
+    warnings,
+    extractedTextPreview: extractedText.slice(0, 1200),
+  });
 });
 
 app.get('/api/resumes', async (req, res) => {

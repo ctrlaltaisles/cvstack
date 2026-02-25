@@ -103,7 +103,7 @@ export function createResume(payload: { title?: string; source?: 'manual' | 'lin
 
 export function uploadResumePdf(file: File, title = 'Imported Resume') {
   const query = new URLSearchParams({ filename: file.name, title }).toString();
-  return request<{ resumeId: string; versionId: string; parsed: unknown; extractedTextPreview: string }>(`/api/resumes/upload?${query}`, {
+  return request<{ resumeId: string; versionId: string; parsed: unknown; extractedTextPreview: string; warnings?: string[] }>(`/api/resumes/upload?${query}`, {
     method: 'POST',
     auth: true,
     headers: { 'Content-Type': 'application/pdf' },

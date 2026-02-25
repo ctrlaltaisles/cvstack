@@ -164,12 +164,22 @@ function SkillPill({ skill, onDelete }: { skill: string; onDelete: () => void })
 }
 function SkillsEditor({ skills, onUpdate }: { skills: string[]; onUpdate: (s: string[]) => void }) {
   const [adding, setAdding] = useState(false); const [input, setInput] = useState(''); const ref = useRef<HTMLInputElement>(null);
+  const maxSkills = 8;
   useEffect(() => { if (adding) ref.current?.focus(); }, [adding]);
-  const submit = () => { const t = input.trim(); if (t) onUpdate([...skills, t]); setInput(''); setAdding(false); };
+  const submit = () => {
+    const t = input.trim();
+    if (t && skills.length < maxSkills && !skills.some((s) => s.toLowerCase() === t.toLowerCase())) {
+      onUpdate([...skills, t].slice(0, maxSkills));
+    }
+    setInput('');
+    setAdding(false);
+  };
   return (
     <div className="flex flex-wrap gap-2">
       {skills.map((s, i) => <SkillPill key={i} skill={s} onDelete={() => onUpdate(skills.filter((_, j) => j !== i))} />)}
-      {adding ? <input ref={ref} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } if (e.key === 'Backspace' && input === '') setAdding(false); if (e.key === 'Escape') { setInput(''); setAdding(false); } }} onBlur={submit} placeholder="Type a skill…" className="px-3 py-1.5 bg-[#F0F0F0] rounded-[8px] text-sm text-[#2B2B2B] outline-none min-w-[120px]" /> : <button onClick={() => setAdding(true)} className="px-3 py-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add Skill</button>}
+      {adding && skills.length < maxSkills
+        ? <input ref={ref} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } if (e.key === 'Backspace' && input === '') setAdding(false); if (e.key === 'Escape') { setInput(''); setAdding(false); } }} onBlur={submit} placeholder="Type a skill…" className="px-3 py-1.5 bg-[#F0F0F0] rounded-[8px] text-sm text-[#2B2B2B] outline-none min-w-[120px]" />
+        : <button onClick={() => setAdding(true)} disabled={skills.length >= maxSkills} className="px-3 py-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{skills.length >= maxSkills ? 'Max 8 skills' : '+ Add Skill'}</button>}
     </div>
   );
 }
@@ -242,15 +252,15 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
-function ExperienceBlock({ exp, onUpdateExp, highlightedSectionKey, registerBulletRef, onShowToast }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; highlightedSectionKey: string | null; registerBulletRef: (key: string, el: HTMLElement | null) => void; onShowToast: (msg: string) => void }) {
+function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, highlightedSectionKey, registerBulletRef, onShowToast }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; highlightedSectionKey: string | null; registerBulletRef: (key: string, el: HTMLElement | null) => void; onShowToast: (msg: string) => void }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const updateBullets = (bullets: string[]) => onUpdateExp({ ...exp, bullets });
   const handleDrop = (toIdx: number) => { if (dragFrom === null || dragFrom === toIdx) { setDragFrom(null); setDragTarget(null); return; } const next = [...exp.bullets]; const [moved] = next.splice(dragFrom, 1); next.splice(toIdx, 0, moved); updateBullets(next); setDragFrom(null); setDragTarget(null); };
   const duration = calcDurationFromDates(exp.startDate, exp.endDate);
   return (
-    <div className="flex gap-10">
-      <div className="w-44 shrink-0 pt-0.5 relative" ref={dateColRef}>
+    <div className="flex gap-10 group/exp">
+      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
         <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={exp.startDate} endDate={exp.endDate} onChangeStart={v => onUpdateExp({ ...exp, startDate: v })} onChangeEnd={v => onUpdateExp({ ...exp, endDate: v })} onClose={() => setEditingDate(false)} />}
       </div>
@@ -274,6 +284,7 @@ function ExperienceBlock({ exp, onUpdateExp, highlightedSectionKey, registerBull
           })}
         </ul>
         <button onClick={() => updateBullets([...exp.bullets, ''])} className="mt-3 text-xs text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add bullet</button>
+        <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>
       </div>
     </div>
   );
@@ -287,7 +298,7 @@ function EducationBlock({ edu, onUpdateEdu, onDeleteEdu }: { edu: EducationEntry
   const duration = calcDurationFromDates(edu.startDate, edu.endDate);
   return (
     <div className="flex gap-10 group/edu">
-      <div className="w-44 shrink-0 pt-0.5 relative" ref={dateColRef}>
+      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
         <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(edu.startDate, edu.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={edu.startDate} endDate={edu.endDate} onChangeStart={v => onUpdateEdu({ ...edu, startDate: v })} onChangeEnd={v => onUpdateEdu({ ...edu, endDate: v })} onClose={() => setEditingDate(false)} />}
       </div>
@@ -309,7 +320,7 @@ function CertificationBlock({ cert, onUpdateCert, onDeleteCert }: { cert: Certif
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; onUpdateCert({ ...cert, fileUrl: URL.createObjectURL(file), fileName: file.name, fileType: file.type }); };
   return (
     <div className="flex gap-10 group/cert">
-      <div className="w-44 shrink-0 pt-0.5 relative" ref={dateColRef}>
+      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
         <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatMonthYear(cert.issuedMonth, cert.issuedYear)}</p></div>
         {editingDate && <MonthYearEditor month={cert.issuedMonth} year={cert.issuedYear} onChange={(m, y) => onUpdateCert({ ...cert, issuedMonth: m, issuedYear: y })} onClose={() => setEditingDate(false)} />}
       </div>
@@ -441,7 +452,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
         {/* Work Experience */}
         <div className="mb-10">
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Work Experience</p>
-          <div className="space-y-8">{(data.workExperience ?? []).map(exp => <ExperienceBlock key={exp.id} exp={exp} onUpdateExp={u => update({ workExperience: data.workExperience.map(e => e.id === exp.id ? u : e) })} highlightedSectionKey={highlightedSectionKey} registerBulletRef={registerRef} onShowToast={onShowToast} />)}</div>
+          <div className="space-y-8">{(data.workExperience ?? []).map(exp => <ExperienceBlock key={exp.id} exp={exp} onUpdateExp={u => update({ workExperience: data.workExperience.map(e => e.id === exp.id ? u : e) })} onDeleteExp={() => update({ workExperience: data.workExperience.filter(e => e.id !== exp.id) })} highlightedSectionKey={highlightedSectionKey} registerBulletRef={registerRef} onShowToast={onShowToast} />)}</div>
           <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Experience</button>
         </div>
         <div className="h-px bg-[#EFEFEF] mb-10" />
