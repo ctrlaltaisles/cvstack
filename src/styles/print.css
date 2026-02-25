@@ -1,3 +1,24 @@
+body.export-mode .print-hide {
+  display: none !important;
+}
+
+body.export-mode .resume-section[data-empty='true'] {
+  display: none !important;
+}
+
+body.export-mode #print-resume-root {
+  overflow: visible !important;
+}
+
+body.export-mode .resume-print-root {
+  background: #fff !important;
+}
+
+body.export-mode .resume-print-root button,
+body.export-mode .resume-print-root [draggable='true'] {
+  display: none !important;
+}
+
 @media print {
   @page {
     size: A4;

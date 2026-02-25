@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion } from 'motion/react';
+import { jsPDF } from 'jspdf';
+import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
   Copy, GripVertical, MoreHorizontal, RefreshCw, FileText, Upload,
@@ -43,6 +45,297 @@ function buildTextResume(data: ResumeData): string {
   (data.education ?? []).forEach(edu => { lines.push('', `${edu.degree} — ${edu.school}`); if (edu.location) lines.push(edu.location); });
   lines.push('', 'SKILLS', (data.skills ?? []).join(', '));
   return lines.join('\n');
+}
+function sanitizeFileName(input: string): string {
+  const cleaned = input.trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/_+/g, '_');
+  return cleaned || 'resume';
+}
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function heading(text: string) {
+  return new Paragraph({
+    children: [new TextRun({ text, size: 18, bold: false, color: 'A0A0A0' })],
+    spacing: { before: 280, after: 140 },
+  });
+}
+function bodyText(text: string, opts?: { bold?: boolean; color?: string; after?: number }) {
+  return new Paragraph({
+    children: [new TextRun({ text, size: 20, bold: opts?.bold, color: opts?.color ?? '222222' })],
+    spacing: { after: opts?.after ?? 80 },
+  });
+}
+function buildWordDocument(data: ResumeData): Document {
+  const children: (Paragraph | Table)[] = [];
+  children.push(
+    new Paragraph({ children: [new TextRun({ text: data.name || 'Name', size: 36, bold: false, color: '1A1A1A' })], spacing: { after: 80 } }),
+    new Paragraph({ children: [new TextRun({ text: data.title || '', size: 24, color: '666666' })], spacing: { after: 180 } }),
+  );
+  const contacts = [data.contact.email, data.contact.phone, data.contact.location, data.contact.website, data.contact.linkedin].filter(Boolean).join('  •  ');
+  if (contacts) children.push(new Paragraph({ children: [new TextRun({ text: contacts, size: 20, color: '666666' })], spacing: { after: 220 } }));
+  if (data.bio.trim()) {
+    children.push(heading('ABOUT'));
+    children.push(new Paragraph({ children: [new TextRun({ text: data.bio.trim(), size: 20, color: '2B2B2B' })], spacing: { after: 120 } }));
+  }
+  if (data.workExperience.length > 0) {
+    children.push(heading('WORK EXPERIENCE'));
+    data.workExperience.forEach((exp) => {
+      const duration = calcDurationFromDates(exp.startDate, exp.endDate);
+      const left = [
+        new Paragraph({ children: [new TextRun({ text: formatDateRange(exp.startDate, exp.endDate), size: 20, color: '9B9B9B' })], spacing: { after: duration ? 40 : 120 } }),
+      ];
+      if (duration) left.push(new Paragraph({ children: [new TextRun({ text: duration, size: 18, color: 'C4C4C4' })], spacing: { after: 120 } }));
+      const right: Paragraph[] = [
+        bodyText(exp.role || '', { bold: true, color: '1A1A1A', after: 40 }),
+        bodyText(exp.company || '', { color: '666666', after: 100 }),
+      ];
+      exp.bullets.filter((b) => b.trim()).forEach((bullet) => {
+        right.push(new Paragraph({
+          children: [new TextRun({ text: bullet.trim(), size: 20, color: '2B2B2B' })],
+          bullet: { level: 0 },
+          spacing: { after: 60 },
+        }));
+      });
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+        rows: [new TableRow({
+          children: [
+            new TableCell({ width: { size: 23, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: left }),
+            new TableCell({ width: { size: 77, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: right }),
+          ],
+        })],
+      }));
+      children.push(new Paragraph({ text: '', spacing: { after: 120 } }));
+    });
+  }
+  if (data.education.length > 0) {
+    children.push(heading('EDUCATION'));
+    data.education.forEach((edu) => {
+      const duration = calcDurationFromDates(edu.startDate, edu.endDate);
+      const left = [
+        new Paragraph({ children: [new TextRun({ text: formatDateRange(edu.startDate, edu.endDate), size: 20, color: '9B9B9B' })], spacing: { after: duration ? 40 : 120 } }),
+      ];
+      if (duration) left.push(new Paragraph({ children: [new TextRun({ text: duration, size: 18, color: 'C4C4C4' })], spacing: { after: 120 } }));
+      const right: Paragraph[] = [
+        bodyText(edu.degree || '', { bold: true, color: '1A1A1A', after: 40 }),
+        bodyText(edu.school || '', { color: '666666', after: 40 }),
+      ];
+      if (edu.location?.trim()) right.push(bodyText(edu.location.trim(), { color: '9B9B9B', after: 80 }));
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+        rows: [new TableRow({
+          children: [
+            new TableCell({ width: { size: 23, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: left }),
+            new TableCell({ width: { size: 77, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: right }),
+          ],
+        })],
+      }));
+      children.push(new Paragraph({ text: '', spacing: { after: 100 } }));
+    });
+  }
+  if (data.skills.length > 0) {
+    children.push(heading('SKILLS'));
+    children.push(new Paragraph({
+      children: [new TextRun({ text: data.skills.join(' • '), size: 20, color: '2B2B2B' })],
+      spacing: { after: 120 },
+      alignment: AlignmentType.LEFT,
+    }));
+  }
+  return new Document({
+    sections: [{
+      properties: {
+        page: {
+          margin: {
+            top: 720,
+            right: 720,
+            bottom: 720,
+            left: 720,
+          },
+        },
+      },
+      children,
+    }],
+  });
+}
+function buildPdfDocument(data: ResumeData): jsPDF {
+  const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+  const pageW = 210;
+  const pageH = 297;
+  const marginLeft = 22;
+  const marginRight = 22;
+  const marginY = 14;
+  const leftColW = 38;
+  const gutter = 10;
+  const contentX = marginLeft + leftColW + gutter;
+  // Extra right-side safety buffer to prevent any clipping at page edges.
+  const contentW = pageW - marginRight - contentX - 4;
+  const fullWidth = pageW - marginLeft - marginRight - 4;
+  const maxContentH = pageH - (marginY * 2);
+  let y = marginY;
+
+  const PT_TO_MM = 0.3528;
+  const BODY_SIZE = 10;
+  const LINE_HEIGHT = 1.2; // strict 120% line-height
+  const lineStep = (fontSize: number) => fontSize * PT_TO_MM * LINE_HEIGHT;
+  const fontList = pdf.getFontList();
+  const availableFonts = Object.keys(fontList).map((f) => f.toLowerCase());
+  const preferredFont = availableFonts.includes('inter')
+    ? 'Inter'
+    : availableFonts.includes('calibri')
+      ? 'Calibri'
+      : 'helvetica';
+  const applyFont = (style: 'normal' | 'bold') => {
+    pdf.setFont(preferredFont, style);
+  };
+  const wrap = (text: string, maxW: number, size: number, style: 'normal' | 'bold' = 'normal') => {
+    applyFont(style);
+    pdf.setFontSize(size);
+    return pdf.splitTextToSize(text || '', maxW, { fontSize: size }) as string[];
+  };
+  const textHeight = (lines: string[], size: number, gap = 1.2) => (lineStep(size) * Math.max(1, lines.length)) + gap;
+
+  const ensureSpace = (needed = 8) => {
+    if (y + needed <= pageH - marginY) return;
+    pdf.addPage();
+    y = marginY;
+  };
+  const writeParagraph = (text: string, opts?: { x?: number; size?: number; color?: [number, number, number]; bold?: boolean; maxW?: number; gap?: number }) => {
+    const x = opts?.x ?? marginLeft;
+    const size = opts?.size ?? BODY_SIZE;
+    const color = opts?.color ?? [34, 34, 34];
+    const maxW = opts?.maxW ?? fullWidth;
+    const style = opts?.bold ? 'bold' : 'normal';
+    const split = wrap(text, maxW, size, style);
+    const step = lineStep(size);
+    ensureSpace(textHeight(split, size, opts?.gap ?? 1.2));
+    applyFont(style);
+    pdf.setFontSize(size);
+    pdf.setTextColor(color[0], color[1], color[2]);
+    pdf.text(split.length ? split : [''], x, y);
+    y += (step * Math.max(1, split.length)) + (opts?.gap ?? 1.2);
+  };
+  const drawParagraphAt = (
+    startY: number,
+    text: string,
+    opts?: { x?: number; size?: number; color?: [number, number, number]; bold?: boolean; maxW?: number; gap?: number },
+  ) => {
+    const x = opts?.x ?? marginLeft;
+    const size = opts?.size ?? 10;
+    const color = opts?.color ?? [34, 34, 34];
+    const maxW = opts?.maxW ?? fullWidth;
+    const style = opts?.bold ? 'bold' : 'normal';
+    const split = wrap(text, maxW, size, style);
+    const step = lineStep(size);
+    applyFont(style);
+    pdf.setFontSize(size);
+    pdf.setTextColor(color[0], color[1], color[2]);
+    pdf.text(split.length ? split : [''], x, startY);
+    return startY + (step * Math.max(1, split.length)) + (opts?.gap ?? 1.2);
+  };
+  const section = (label: string) => {
+    y += 3.2;
+    ensureSpace(12);
+    pdf.setDrawColor(239, 239, 239);
+    pdf.line(marginLeft, y, pageW - marginRight, y);
+    y += 5.6;
+    writeParagraph(label, { x: marginLeft, size: 8.8, color: [160, 160, 160], maxW: fullWidth, gap: 3.2 });
+  };
+  const row = (leftText: string[], rightText: string[], rightBullets: string[]) => {
+    const leftHeights = leftText.map((t, idx) => {
+      const size = idx === 0 ? BODY_SIZE : 8;
+      return textHeight(wrap(t, leftColW, size, 'normal'), size, 0.8);
+    });
+    const rightHeights = [
+      ...rightText.map((t, idx) => {
+        const size = idx === 0 ? 11.8 : BODY_SIZE;
+        const style = idx === 0 ? 'bold' : 'normal';
+        return textHeight(wrap(t, contentW, size, style), size, 0.8);
+      }),
+      ...rightBullets.map((b) => textHeight(wrap(`• ${b}`, contentW, BODY_SIZE, 'normal'), BODY_SIZE, 0.8)),
+    ];
+    const rowHeight = Math.max(
+      leftHeights.reduce((a, b) => a + b, 0),
+      rightHeights.reduce((a, b) => a + b, 0),
+    ) + 3.4;
+
+    // Normal case: keep each row together to avoid orphaned date lines / awkward blank pages.
+    if (rowHeight <= maxContentH) {
+      ensureSpace(rowHeight);
+      const rowStart = y;
+      let leftY = rowStart;
+      let rightY = rowStart;
+      leftText.forEach((t, idx) => {
+      leftY = drawParagraphAt(leftY, t, { x: marginLeft, size: idx === 0 ? BODY_SIZE : 8, color: idx === 0 ? [155, 155, 155] : [196, 196, 196], maxW: leftColW, gap: 1.1 });
+      });
+      rightText.forEach((t, idx) => {
+        rightY = drawParagraphAt(rightY, t, { x: contentX, size: idx === 0 ? 11.8 : BODY_SIZE, bold: idx === 0, color: idx === 0 ? [26, 26, 26] : [102, 102, 102], maxW: contentW, gap: idx === 1 ? 3 : 1.1 });
+      });
+      rightBullets.forEach((b) => {
+        rightY = drawParagraphAt(rightY, `• ${b}`, { x: contentX, size: BODY_SIZE, color: [43, 43, 43], maxW: contentW, gap: 1.1 });
+      });
+      y = Math.max(leftY, rightY) + 6;
+      return;
+    }
+
+    // Fallback for extra-long entries: allow paginated flow (prevents clipping).
+    ensureSpace(12);
+    leftText.forEach((t, idx) => {
+      writeParagraph(t, { x: marginLeft, size: idx === 0 ? BODY_SIZE : 8, color: idx === 0 ? [155, 155, 155] : [196, 196, 196], maxW: leftColW, gap: 1.1 });
+    });
+    rightText.forEach((t, idx) => {
+      writeParagraph(t, { x: contentX, size: idx === 0 ? 11.8 : BODY_SIZE, bold: idx === 0, color: idx === 0 ? [26, 26, 26] : [102, 102, 102], maxW: contentW, gap: idx === 1 ? 3 : 1.1 });
+    });
+    rightBullets.forEach((b) => {
+      writeParagraph(`• ${b}`, { x: contentX, size: BODY_SIZE, color: [43, 43, 43], maxW: contentW, gap: 1.1 });
+    });
+    y += 5;
+  };
+
+  writeParagraph(data.name || 'Name', { x: marginLeft, size: 20, bold: true, color: [26, 26, 26], maxW: fullWidth, gap: 1 });
+  writeParagraph(data.title || '', { x: marginLeft, size: 12.5, color: [102, 102, 102], maxW: fullWidth, gap: 2.3 });
+  const contact = [data.contact.email, data.contact.phone, data.contact.location, data.contact.website, data.contact.linkedin].filter(Boolean).join('  •  ');
+  if (contact) writeParagraph(contact, { x: marginLeft, size: BODY_SIZE, color: [102, 102, 102], maxW: fullWidth, gap: 2.4 });
+
+  if (data.bio.trim()) {
+    section('ABOUT');
+    writeParagraph(data.bio.trim(), { x: marginLeft, size: BODY_SIZE, color: [43, 43, 43], maxW: fullWidth, gap: 2.2 });
+  }
+  if (data.workExperience.length > 0) {
+    section('WORK EXPERIENCE');
+    data.workExperience.forEach((exp) => {
+      const duration = calcDurationFromDates(exp.startDate, exp.endDate);
+      row(
+        [formatDateRange(exp.startDate, exp.endDate), ...(duration ? [duration] : [])],
+        [exp.role || '', exp.company || ''],
+        exp.bullets.filter((b) => b.trim()),
+      );
+    });
+  }
+  if (data.education.length > 0) {
+    section('EDUCATION');
+    data.education.forEach((edu) => {
+      const duration = calcDurationFromDates(edu.startDate, edu.endDate);
+      row(
+        [formatDateRange(edu.startDate, edu.endDate), ...(duration ? [duration] : [])],
+        [edu.degree || '', edu.school || '', ...(edu.location?.trim() ? [edu.location.trim()] : [])],
+        [],
+      );
+    });
+  }
+  if (data.skills.length > 0) {
+    section('SKILLS');
+    writeParagraph(data.skills.join(' • '), { x: marginLeft, size: BODY_SIZE, color: [43, 43, 43], maxW: fullWidth, gap: 2 });
+  }
+  return pdf;
 }
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────────
@@ -484,7 +777,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
 
   return (
     <div ref={containerRef} className="relative">
-      <div className={`print-main-content ${hasSuggestions ? 'mr-[288px]' : ''}`}>
+      <div className={`print-main-content text-[13px] leading-[1.55] ${hasSuggestions ? 'mr-[288px]' : ''}`}>
         {/* Header */}
         <div className="flex items-start gap-5 mb-5">
           <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>AJ</div>
@@ -495,18 +788,18 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
           {contactItems.flatMap((item, idx) => [idx > 0 ? <span key={`d-${item.key}`} className="text-[#D8D8D8] text-sm">•</span> : null, <ContactInlineField key={item.key} value={data.contact[item.key]} onChange={v => update({ contact: { ...data.contact, [item.key]: v } })} placeholder={item.placeholder} />])}
         </div>
         {/* About */}
-        <div className="resume-section mb-10" data-empty={!hasAbout}>
-          <div className="h-px bg-[#EFEFEF] mb-10" />
+        <div className="resume-section mb-7" data-empty={!hasAbout}>
+          <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-4">About</p>
           <div ref={el => registerRef('bio', el)} className={`rounded-[8px] transition-colors duration-500 ${highlightedSectionKey === 'bio' ? 'bg-[#F5F5F5]' : ''} ${bioChange ? 'border-l-2 pl-3 -ml-3 border-[#E0E0E0]' : ''}`}>
             <InlineArea value={data.bio} onChange={v => update({ bio: v })} className="text-sm text-[#2B2B2B]" />
           </div>
         </div>
         {/* Work Experience */}
-        <div className="resume-section mb-10" data-empty={!hasWorkExperience}>
-          <div className="h-px bg-[#EFEFEF] mb-10" />
+        <div className="resume-section mb-7" data-empty={!hasWorkExperience}>
+          <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Work Experience</p>
-          <div className="space-y-8">
+          <div className="space-y-6">
             {(data.workExperience ?? []).map((exp, idx) => (
               <div
                 key={exp.id}
@@ -556,22 +849,22 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
           <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Experience</button>
         </div>
         {/* Education */}
-        <div className="resume-section mb-10" data-empty={!hasEducation}>
-          <div className="h-px bg-[#EFEFEF] mb-10" />
+        <div className="resume-section mb-7" data-empty={!hasEducation}>
+          <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Education</p>
-          <div className="space-y-6">{(data.education ?? []).map(edu => <EducationBlock key={edu.id} edu={edu} onUpdateEdu={u => update({ education: data.education.map(e => e.id === edu.id ? u : e) })} onDeleteEdu={() => update({ education: data.education.filter(e => e.id !== edu.id) })} />)}</div>
+          <div className="space-y-5">{(data.education ?? []).map(edu => <EducationBlock key={edu.id} edu={edu} onUpdateEdu={u => update({ education: data.education.map(e => e.id === edu.id ? u : e) })} onDeleteEdu={() => update({ education: data.education.filter(e => e.id !== edu.id) })} />)}</div>
           <button onClick={() => update({ education: [...data.education, { id: `edu-${Date.now()}`, school: 'School Name', degree: 'Degree', location: '', startDate: { month: 9, year: 2020, present: false }, endDate: { month: 5, year: 2024, present: false } }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Education</button>
         </div>
         {/* Certifications */}
-        <div className="resume-section mb-10" data-empty={!hasCertifications}>
-          <div className="h-px bg-[#EFEFEF] mb-10" />
+        <div className="resume-section mb-7" data-empty={!hasCertifications}>
+          <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Certifications</p>
           <div className="space-y-6">{(data.certifications ?? []).map(cert => <CertificationBlock key={cert.id} cert={cert} onUpdateCert={u => update({ certifications: data.certifications.map(c => c.id === cert.id ? u : c) })} onDeleteCert={() => update({ certifications: data.certifications.filter(c => c.id !== cert.id) })} />)}</div>
           <button onClick={() => update({ certifications: [...data.certifications, { id: `cert-${Date.now()}`, name: 'Certificate Name', organization: 'Issuing Organization', issuedMonth: 1, issuedYear: 2024, credentialId: '' }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Certification</button>
         </div>
         {/* Skills */}
         <div className="resume-section" data-empty={!hasSkills}>
-          <div className="h-px bg-[#EFEFEF] mb-10" />
+          <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-5">Skills</p>
           <SkillsEditor skills={data.skills ?? []} onUpdate={s => update({ skills: s })} />
         </div>
@@ -780,6 +1073,7 @@ export default function Workspace() {
   const [showModal, setShowModal] = useState(false);
   const [showJDPanel, setShowJDPanel] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '' });
   const avatarRef = useRef<HTMLDivElement>(null);
   const currentUser = userStore.get();
@@ -909,6 +1203,35 @@ export default function Workspace() {
     showToast('Base resume updated');
   };
   const hasPendingChanges = activeVersion?.aiChanges.some(c => c.status === 'pending') ?? false;
+  const handleExportPdf = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const pdf = buildPdfDocument(activeVersion.data);
+      pdf.save(`${sanitizeFileName(activeVersion.name)}.pdf`);
+      showToast('PDF downloaded');
+    } catch (error) {
+      console.error('PDF export failed', error);
+      showToast('Failed to export PDF');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  const handleExportWord = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const doc = buildWordDocument(activeVersion.data);
+      const blob = await Packer.toBlob(doc);
+      downloadBlob(blob, `${sanitizeFileName(activeVersion.name)}.docx`);
+      showToast('Word document downloaded');
+    } catch (error) {
+      console.error('Word export failed', error);
+      showToast('Failed to export Word document');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">Loading workspace...</div>;
@@ -1021,8 +1344,8 @@ export default function Workspace() {
                 onAddNew={() => requireAuth(() => setShowModal(true))}
                 onJDClick={() => setShowJDPanel(p => !p)}
                 onCurate={handleCurate}
-                onExportPDF={() => { window.print(); showToast('Opening print dialog...'); }}
-                onExportWord={() => { window.print(); showToast('Opening print dialog...'); }}
+                onExportPDF={handleExportPdf}
+                onExportWord={handleExportWord}
               />
             </div>
           </div>
