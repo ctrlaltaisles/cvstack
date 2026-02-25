@@ -17,6 +17,7 @@ import { useAuthGate } from '../components/AuthGate';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PRODUCT_DESIGNER_TITLE = 'Product Designer';
 const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
+const MIN_JD_CURATION_LENGTH = 40;
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,9 @@ function composeRoleCompanyTitle(roleName: string, companyName: string): string 
   const company = compactText(companyName);
   if (role && company) return `${role} @ ${company}`;
   return role;
+}
+function hasMeaningfulJobDescription(value?: string): boolean {
+  return (value ?? '').trim().length >= MIN_JD_CURATION_LENGTH;
 }
 function getHeaderTitleForVersion(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>): string {
   if (version.isAI) {
@@ -527,6 +531,12 @@ function getCurationFallbackReason(result: Awaited<ReturnType<typeof curateResum
   if (/timed out|abort/i.test(baseReason)) return 'AI curation timed out. Please try again in a moment.';
   if (/api[_\s-]?key|unauthorized|forbidden|auth/i.test(baseReason)) return 'AI curation is not configured correctly. Please verify your OpenAI API key.';
   return `AI curation fallback: ${baseReason}`;
+}
+function getCurationNoChangeMessage(result: Awaited<ReturnType<typeof curateResume>>): string {
+  if ((result.questions ?? []).length > 0) {
+    return 'No direct changes yet. Add metrics, scope, and tools to unlock stronger curation.';
+  }
+  return 'No new changes suggested. Try a fuller JD or a more specific target role.';
 }
 function applyAllChanges(data: ResumeData, changes: AIChange[]): ResumeData {
   return changes.reduce((acc, change) => applyChange(change, acc), data);
@@ -1074,7 +1084,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
 
 // ─── FloatingToolbar — Granola/Awwwards style capsule ────────────────────────
 
-function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, onAcceptAll, onRejectAll, onUpdateAllVariations, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
+function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, onAcceptAll, onRejectAll, onUpdateAllVariations, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; canCurate: boolean; curateHint?: string; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
   const CURATING_LOADING_MESSAGES = [
     'I swear we’re doing something…',
     'Not just copy-pasting, promise.',
@@ -1242,7 +1252,12 @@ function FloatingToolbar({ isBaseResume, hasJD, pendingCount, isCurating, jdPane
                   {hasJD && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A] ml-0.5" />}
                 </button>
                 <div className="w-px bg-white/55 my-2.5 shrink-0" />
-                <button onClick={onCurate} className={`${segBase} ${segIdle}`}>
+                <button
+                  onClick={onCurate}
+                  disabled={!canCurate}
+                  title={!canCurate ? (curateHint ?? 'Add more job description details to curate.') : undefined}
+                  className={`${segBase} ${canCurate ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}
+                >
                   <Sparkles size={14} className="text-[#1A1A1A]" />
                   <span>Curate</span>
                 </button>
@@ -1838,18 +1853,28 @@ export default function Workspace() {
             jobCompany: nextVersion.jobCompany,
             jobLink: nextVersion.jobLink,
           });
-          const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
-          if (changes.length > 0) {
-            const curatedData = applyAllChanges(nextVersion.data, changes);
-            finalVersion = {
-              ...nextVersion,
-              data: curatedData,
-              variantContent: buildTextResume(curatedData),
-              aiChanges: [],
-            };
+          const fallbackReason = getCurationFallbackReason(curation);
+          if (fallbackReason) {
+            showToast(fallbackReason, 'info');
+            if (!hasMeaningfulJobDescription(nextVersion.jobDescription)) {
+              setShowJDPanel(true);
+            }
+          } else {
+            const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
+            if (changes.length > 0) {
+              const curatedData = applyAllChanges(nextVersion.data, changes);
+              finalVersion = {
+                ...nextVersion,
+                data: curatedData,
+                variantContent: buildTextResume(curatedData),
+                aiChanges: [],
+              };
+            } else {
+              showToast(getCurationNoChangeMessage(curation), 'info');
+            }
           }
         } catch {
-          // Intentionally silent for curate errors.
+          showToast('AI curation failed. Please try again.', 'error');
         } finally {
           setIsCurating(false);
         }
@@ -1871,6 +1896,12 @@ export default function Workspace() {
   const handleCurate = async () => {
     const versionId = selectedVersionId;
     const snapshot = activeVersion;
+    if (!snapshot) return;
+    if (!snapshot.isBase && !hasMeaningfulJobDescription(snapshot.jobDescription)) {
+      setShowJDPanel(true);
+      showToast('Add the full JD before curating so AI can make targeted changes.', 'info');
+      return;
+    }
     setIsCurating(true);
     try {
       const result = await curateResume({
@@ -1882,10 +1913,15 @@ export default function Workspace() {
       });
       const fallbackReason = getCurationFallbackReason(result);
       if (fallbackReason) {
+        showToast(fallbackReason, 'info');
+        if (!hasMeaningfulJobDescription(snapshot.jobDescription)) {
+          setShowJDPanel(true);
+        }
         return;
       }
       const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now());
       if (nextChanges.length === 0) {
+        showToast(getCurationNoChangeMessage(result), 'info');
         return;
       }
       setVersions((prev) => prev.map((v) => (
@@ -1893,8 +1929,9 @@ export default function Workspace() {
           ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter((c) => c.status !== 'rejected'), ...nextChanges] }
           : v
       )));
+      showToast(`${nextChanges.length} curation suggestion${nextChanges.length === 1 ? '' : 's'} ready to review.`);
     } catch (_error) {
-      // Intentionally silent for curate errors.
+      showToast('AI curation failed. Please try again.', 'error');
     } finally {
       setIsCurating(false);
     }
@@ -2079,6 +2116,8 @@ export default function Workspace() {
     };
   }, [showJDPanel, activeVersion?.id, activeVersion?.jobDescription, activeVersion?.jobTitle, jdTldrByVersion]);
   const pendingSuggestionCount = activeVersion?.aiChanges.filter(c => c.status === 'pending').length ?? 0;
+  const hasMeaningfulJD = hasMeaningfulJobDescription(activeVersion?.jobDescription);
+  const canCurateActiveVersion = activeVersion?.isBase ? true : hasMeaningfulJD;
   const activeHeaderTitle = activeVersion ? getHeaderTitleForVersion(activeVersion) : PRODUCT_DESIGNER_TITLE;
   const handleExportPdf = async () => {
     if (isExporting) return;
@@ -2284,6 +2323,8 @@ export default function Workspace() {
               <FloatingToolbar
                 isBaseResume={selectedVersionId === baseVersion.id}
                 hasJD={!!(activeVersion.jobDescription)}
+                canCurate={canCurateActiveVersion}
+                curateHint="Add at least a short JD (40+ characters) to unlock targeted curation."
                 pendingCount={pendingSuggestionCount}
                 isCurating={isCurating}
                 jdPanelOpen={showJDPanel}

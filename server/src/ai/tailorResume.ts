@@ -110,7 +110,10 @@ export class TailorResumeError extends Error {
 const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
 const REQUEST_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 60000);
 const CURATE_TIMEOUT_MS = Number(process.env.OPENAI_CURATE_TIMEOUT_MS ?? process.env.OPENAI_TIMEOUT_MS ?? 120000);
+const SECOND_PASS_MIN_REMAINING_MS = Number(process.env.OPENAI_SECOND_PASS_MIN_REMAINING_MS ?? 45000);
+const CURATE_SECOND_PASS_ENABLED = String(process.env.OPENAI_CURATE_SECOND_PASS ?? 'false').trim().toLowerCase() === 'true';
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
+const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
 const COMPANY_RESEARCH_TIMEOUT_MS = Number(process.env.COMPANY_RESEARCH_TIMEOUT_MS ?? 4500);
 const CURATION_ROLE_CLUSTERS = [
   'Product Manager',
@@ -128,6 +131,15 @@ const CURATION_HARD_RULES = [
   'Prioritize ownership, scope, outcomes, and business impact',
   'Position experience and skills to match expected responsibility of the target role level at the target company',
 ];
+const BASE_CURATION_HARD_RULES = [
+  'No fabricated metrics or tools',
+  'Do not invent new employers/projects/awards',
+  'If data is missing, ask concise questions (max 5)',
+  'Reject synonym-only rewrites',
+  'Improve existing experience bullets with stronger ownership, scope, outcomes, and tool clarity using source facts only',
+  'Draft a personable, credible About section that reflects profile strengths and working style from existing experience',
+  'Expand skills into meaningful skill blocks inferred from demonstrated experience (without inventing tools)',
+];
 const CURATION_GENERIC_PHRASES_TO_REDUCE = [
   'helped',
   'worked on',
@@ -135,7 +147,7 @@ const CURATION_GENERIC_PHRASES_TO_REDUCE = [
   'assisted with',
   'various tasks',
 ];
-const CURATION_SYSTEM_PROMPT = [
+const CURATION_VARIANT_SYSTEM_PROMPT = [
   'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
   'Specialize in Product Manager, Software Developer, Front-End Developer, Product Designer, Business Development, and Data Analytics hiring.',
   'Your edits must sound sharp, distinct, and impact-first, aligned with what employers screen for in tech hiring loops.',
@@ -150,6 +162,19 @@ const CURATION_SYSTEM_PROMPT = [
   'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
   'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
   'Optimize keyword placement across About, Experience, and Skills without keyword stuffing.',
+].join(' ');
+const CURATION_BASE_SYSTEM_PROMPT = [
+  'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
+  'You are curating a base resume without a target JD. Focus on strengthening core recruiter signals from existing data.',
+  'Your edits must sound sharp, distinct, and impact-first, while staying faithful to source facts.',
+  'Prioritize: stronger impact wording in experience bullets, a personable About section, and expanded skills based on demonstrated work.',
+  'Return valid JSON only.',
+  'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
+  'Use impact-first bullets: [Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools].',
+  'If no metrics exist in source, do not invent them. Put metric placeholders only under questions.',
+  'Keep truthfulness: do not invent employers, products, metrics, awards, credentials, or tools.',
+  'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
+  'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
 ].join(' ');
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with', 'was', 'were', 'this', 'these', 'those',
@@ -734,6 +759,7 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
 
 function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, companyContext?: CompanyContext): CurateResumeOutput {
   const role = (input.targetRole || input.resumeData.title || 'this role').trim();
+  const hasJD = Boolean((input.jdText ?? '').trim());
   const jdFocusAreas = extractJDKeywords(input.jdText ?? '', role).slice(0, 3);
   const aboutPointers = [
     `Lead with your role identity and years of relevant experience for ${role}.`,
@@ -762,7 +788,9 @@ function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, com
     redFlags: [reason, 'Need more details; ask user for metrics, scope, tools, and ownership level.'],
     aboutPointers,
     jdFocusAreas,
-    positioningSummary: `Position for ${role} by showing ownership level, scope, and business outcomes relevant to ${companyContext?.company || 'the target company'}.`,
+    positioningSummary: hasJD
+      ? `Position for ${role} by showing ownership level, scope, and business outcomes relevant to ${companyContext?.company || 'the target company'}.`
+      : `Position for ${role} by showing ownership level, scope, tooling depth, and business outcomes from existing experience.`,
     jdTldr: {
       roleAsks: `Role focus for ${role}: execution quality, ownership, and business-relevant outcomes.`,
       candidateNeeds: companyContext?.focus
@@ -813,6 +841,7 @@ async function runCurateModel(client: OpenAI, systemPrompt: string, userPrompt: 
     {
       model: DEFAULT_MODEL,
       temperature: 0.2,
+      max_tokens: CURATE_MAX_TOKENS,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -912,30 +941,46 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
   const curateSignal = CURATE_TIMEOUT_DISABLED ? undefined : controller.signal;
   const started = Date.now();
   const targetRole = (input.targetRole || input.resumeData.title || '').trim();
+  const jdText = (input.jdText ?? '').trim();
+  const hasJD = jdText.length > 0;
   const jdKeywords = extractJDKeywords(input.jdText ?? '', targetRole);
-  const companyContext = await researchCompanyContext(input);
+  const companyContext = hasJD ? await researchCompanyContext(input) : undefined;
 
-  const systemPrompt = CURATION_SYSTEM_PROMPT;
+  const systemPrompt = hasJD ? CURATION_VARIANT_SYSTEM_PROMPT : CURATION_BASE_SYSTEM_PROMPT;
   const compactResumeData = compactResumeDataForCuration(input.resumeData);
 
   const basePayload = {
-    task: 'Recruiter-grade elevate of current resume content using intent-over-rephrase behavior',
+    task: hasJD
+      ? 'Recruiter-grade elevate of current resume content using intent-over-rephrase behavior aligned to JD'
+      : 'Recruiter-grade elevate of base resume using impact-first, ATS-friendly, role-aligned improvements without JD dependency',
+    curationMode: hasJD ? 'jd_aligned' : 'base_resume_optimization',
     curationPersona: 'Principal Tech Recruiter',
     roleClusters: CURATION_ROLE_CLUSTERS,
     roleTarget: targetRole,
-    company: companyContext?.company ?? input.jobCompany ?? '',
-    companyResearch: companyContext ?? null,
-    positioningQuestion: `If applying for ${targetRole || 'this role'} at ${companyContext?.company || input.jobCompany || 'this company'}, how should this profile present role-level responsibilities through experience and skills?`,
+    company: hasJD ? (companyContext?.company ?? input.jobCompany ?? '') : '',
+    companyResearch: hasJD ? (companyContext ?? null) : null,
+    positioningQuestion: hasJD
+      ? `If applying for ${targetRole || 'this role'} at ${companyContext?.company || input.jobCompany || 'this company'}, how should this profile present role-level responsibilities through experience and skills?`
+      : `How should this base resume be elevated for ${targetRole || 'this role'} to increase recruiter confidence through ownership, scope, tool fluency, and outcomes based only on existing facts?`,
+    baseResumeObjectives: hasJD
+      ? []
+      : [
+        'Improve wording of past work experience bullets with stronger impact, ownership, and recruiter-grade phrasing.',
+        'Infer candidate profile from prior experience and produce a personable, credible About section.',
+        'Add and organize skill blocks from demonstrated experience to improve ATS and recruiter scanability.',
+      ],
     seniority: input.seniority ?? '',
-    jdText: input.jdText ?? '',
+    jdText,
     jdKeywords,
-    hard_rules: CURATION_HARD_RULES,
+    hard_rules: hasJD ? CURATION_HARD_RULES : BASE_CURATION_HARD_RULES,
     recruiter_rubric: {
       bullet_formula: '[Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools]',
       required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
-      role_level_positioning: 'Experience and skills must reflect the responsibility level expected for the target role at the target company.',
+      role_level_positioning: hasJD
+        ? 'Experience and skills must reflect the responsibility level expected for the target role at the target company.'
+        : 'Experience and skills must reflect the responsibility level implied by the candidate history and current title.',
     },
     editing_rules: [
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
@@ -973,7 +1018,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
   };
 
   try {
-    console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${(input.jdText ?? '').length}`);
+    console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${jdText.length} mode=${hasJD ? 'jd' : 'base'}`);
 
     let { parsed } = await runCurateModelParsed(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
     let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
@@ -985,11 +1030,61 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     let quality = evaluateCurateQuality(input, output);
     output.quality = quality;
 
+    if (CURATE_SECOND_PASS_ENABLED && (!quality.passed || quality.similarityScore >= 0.86)) {
+      const elapsedBeforeSecondPass = Date.now() - started;
+      const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
+      if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
+        try {
+          const secondPassPrompt = JSON.stringify({
+            ...basePayload,
+            correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics.',
+            firstPassQuality: quality,
+          });
+          ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
+          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
+          if (output.suggestions.length === 0) {
+            output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
+          }
+          quality = evaluateCurateQuality(input, output);
+          output.quality = quality;
+          output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
+        } catch (secondPassError) {
+          const elapsedSecondPassMs = Date.now() - started;
+          console.warn(`[ai-curate][${requestId}] second-pass failed elapsedMs=${elapsedSecondPassMs} reason="${String((secondPassError as { message?: string }).message ?? 'unknown error')}"`);
+          output.redFlags = [
+            ...new Set([
+              ...output.redFlags,
+              `Second pass skipped after first-pass completion: ${isAbortLikeError(secondPassError) ? 'timed out' : 'model error'}.`,
+            ]),
+          ];
+        }
+      } else {
+        output.redFlags = [
+          ...new Set([
+            ...output.redFlags,
+            'Second pass skipped to preserve responsiveness within timeout budget.',
+          ]),
+        ];
+      }
+    }
+
     const meaningfulSuggestions = output.suggestions.filter((s) => s.suggested.trim()).length;
     const hasChangePayload = meaningfulSuggestions > 0 || output.changes.length > 0;
 
+    if (!output.quality.passed) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          'Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact.',
+        ]),
+      ];
+    }
+
     if (!hasChangePayload) {
-      return buildFallbackCurateOutput(input, 'Need more details; ask user for metrics, scope, tooling, and ownership signals.', companyContext);
+      const reason = hasJD
+        ? 'Need more details; ask user for metrics, scope, tooling, and ownership signals.'
+        : 'Need more details from existing resume content; add concrete ownership, scope, tools, and measurable outcomes to unlock stronger base curation.';
+      return buildFallbackCurateOutput(input, reason, companyContext);
     }
 
     const elapsedMs = Date.now() - started;
