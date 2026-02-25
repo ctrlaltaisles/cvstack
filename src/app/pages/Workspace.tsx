@@ -1,25 +1,18 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { motion } from 'motion/react';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
   Copy, GripVertical, MoreHorizontal, RefreshCw, FileText, Upload,
   Paperclip, ExternalLink,
 } from 'lucide-react';
+import { clearAuthStorage, createVersion, listResumes, listVersions, userStore, updateVersion } from '../../lib/api';
+import type { AIChange, Certification, ContactInfo, DateValue, EducationEntry, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
+import { useAuthGate } from '../components/AuthGate';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-interface DateValue { month: number; year: number; present: boolean; }
-type AIChangeField = 'bio' | 'bullet';
-interface AIChange { id: string; field: AIChangeField; expId?: string; bulletIdx?: number; original: string; suggested: string; status: 'pending' | 'accepted' | 'rejected'; }
-interface WorkExperience { id: string; company: string; role: string; startDate: DateValue; endDate: DateValue; bullets: string[]; }
-interface EducationEntry { id: string; school: string; degree: string; location: string; startDate: DateValue; endDate: DateValue; }
-interface Certification { id: string; name: string; organization: string; issuedMonth: number; issuedYear: number; credentialId: string; fileUrl?: string; fileName?: string; fileType?: string; }
-interface ContactInfo { email: string; phone: string; location: string; website: string; linkedin: string; }
-interface ResumeData { name: string; title: string; contact: ContactInfo; bio: string; workExperience: WorkExperience[]; education: EducationEntry[]; certifications: Certification[]; skills: string[]; }
-interface ResumeVersion { id: string; name: string; isAI: boolean; matchScore?: number; jobTitle?: string; jobCompany?: string; jobDescription?: string; jobLink?: string; data: ResumeData; aiChanges: AIChange[]; }
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -663,13 +656,19 @@ function CreateResumeModal({ onGenerate, onClose }: { onGenerate: (role: string,
 
 export default function Workspace() {
   const navigate = useNavigate();
-  const [versions, setVersions] = useState<ResumeVersion[]>(INITIAL_VERSIONS);
-  const [selectedVersionId, setSelectedVersionId] = useState('base');
+  const { requireAuth } = useAuthGate();
+  const [searchParams] = useSearchParams();
+  const [resumeId, setResumeId] = useState<string>(searchParams.get('resumeId') ?? '');
+  const [versions, setVersions] = useState<ResumeVersion[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showJDPanel, setShowJDPanel] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '' });
   const avatarRef = useRef<HTMLDivElement>(null);
+  const currentUser = userStore.get();
   const initialExpanded = INITIAL_VERSIONS.filter(v => v.isAI && v.jobTitle).map(v => v.jobTitle!);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(initialExpanded));
 
@@ -679,33 +678,97 @@ export default function Workspace() {
   }, []);
 
   const showToast = (msg: string) => { setToast({ visible: true, message: msg }); setTimeout(() => setToast({ visible: false, message: '' }), 2500); };
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setIsLoading(true);
+      setLoadError('');
+      try {
+        const targetResumeId = resumeId || (await listResumes()).resumes[0]?.id;
+        if (!targetResumeId) {
+          setVersions(INITIAL_VERSIONS);
+          setSelectedVersionId(INITIAL_VERSIONS[0].id);
+          return;
+        }
+        if (!resumeId) setResumeId(targetResumeId);
+        const response = await listVersions(targetResumeId);
+        const loadedVersions = response.versions as ResumeVersion[];
+        if (!mounted) return;
+        if (loadedVersions.length === 0) {
+          setVersions(INITIAL_VERSIONS);
+          setSelectedVersionId(INITIAL_VERSIONS[0].id);
+        } else {
+          setVersions(loadedVersions);
+          setSelectedVersionId(loadedVersions.find((v) => v.isBase)?.id ?? loadedVersions[0].id);
+        }
+      } catch (err) {
+        if (!mounted) return;
+        setLoadError(err instanceof Error ? err.message : 'Failed to load resume workspace');
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [resumeId]);
+
   const activeVersion = versions.find(v => v.id === selectedVersionId) || versions[0];
-  const isNonBase = selectedVersionId !== 'base';
-  const baseVersion = versions.find(v => v.id === 'base')!;
+  const baseVersion = versions.find(v => v.isBase) ?? versions[0];
+  const isNonBase = activeVersion ? activeVersion.id !== baseVersion?.id : false;
   const sidebarGroups = versions.filter(v => v.isAI).reduce((acc, v) => { const role = v.jobTitle || v.name; const g = acc.find(x => x.role === role); if (g) g.items.push(v); else acc.push({ role, items: [v] }); return acc; }, [] as { role: string; items: ResumeVersion[] }[]);
 
-  const updateVersionData = (data: ResumeData) => setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, data } : v));
+  const persistVersion = async (nextVersion: ResumeVersion) => {
+    if (!resumeId) return;
+    await updateVersion(resumeId, nextVersion.id, nextVersion);
+  };
+
+  const updateVersionData = (data: ResumeData) => setVersions(prev => prev.map(v => {
+    if (v.id !== selectedVersionId) return v;
+    const next = { ...v, data };
+    void persistVersion(next).catch(() => {});
+    return next;
+  }));
   const handleAcceptChange = (id: string) => setVersions(prev => prev.map(v => { if (v.id !== selectedVersionId) return v; const c = v.aiChanges.find(c => c.id === id); if (!c) return v; return { ...v, data: applyChange(c, v.data), aiChanges: v.aiChanges.map(ch => ch.id === id ? { ...ch, status: 'accepted' as const } : ch) }; }));
   const handleRejectChange = (id: string) => setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: v.aiChanges.map(c => c.id === id ? { ...c, status: 'rejected' as const } : c) } : v));
   const handleAcceptAll = () => setVersions(prev => prev.map(v => { if (v.id !== selectedVersionId) return v; let data = v.data; v.aiChanges.filter(c => c.status === 'pending').forEach(c => { data = applyChange(c, data); }); return { ...v, data, aiChanges: v.aiChanges.map(c => ({ ...c, status: 'accepted' as const })) }; }));
   const handleRejectAll = () => setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: v.aiChanges.map(c => ({ ...c, status: 'rejected' as const })) } : v));
 
   const handleGenerateVersion = (roleName: string, company: string, jd: string, link: string) => {
-    const nv = generateAIVersion(roleName || 'New Role', company, jd, link);
-    setVersions(prev => [...prev, nv]); setSelectedVersionId(nv.id); setShowModal(false);
-    if (nv.jobTitle) setExpandedGroups(prev => new Set([...prev, nv.jobTitle!]));
-    showToast(`Resume created for ${nv.name}`);
+    requireAuth(async () => {
+      const nv = generateAIVersion(roleName || 'New Role', company, jd, link);
+      try {
+        if (resumeId) {
+          const created = await createVersion(resumeId, nv);
+          const createdVersion = created.version as ResumeVersion;
+          setVersions(prev => [...prev, createdVersion]);
+          setSelectedVersionId(createdVersion.id);
+        } else {
+          setVersions(prev => [...prev, nv]);
+          setSelectedVersionId(nv.id);
+        }
+        setShowModal(false);
+        if (nv.jobTitle) setExpandedGroups(prev => new Set([...prev, nv.jobTitle!]));
+        showToast(`Resume created for ${nv.name}`);
+      } catch {
+        showToast('Failed to save generated version');
+      }
+    });
   };
 
   const handleCurate = () => {
-    const ts = Date.now();
-    const exp = activeVersion.data.workExperience?.[0];
-    const changes: AIChange[] = [];
-    if (activeVersion.data.bio) changes.push({ id: `c-bio-${ts}`, field: 'bio', original: activeVersion.data.bio, suggested: 'Strategic product designer with 8+ years shaping complex digital products. Known for building scalable design systems and leading cross-functional teams to deliver measurable business impact.', status: 'pending' });
-    if (exp?.bullets?.[0]) changes.push({ id: `c-b0-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 0, original: exp.bullets[0], suggested: exp.bullets[0].replace(/(\d+)%/, (_, n) => `${Math.min(parseInt(n) + 5, 99)}%`) + ', directly contributing to $2.4M in incremental ARR', status: 'pending' });
-    if (exp?.bullets?.[1]) changes.push({ id: `c-b1-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 1, original: exp.bullets[1], suggested: exp.bullets[1] + ', reducing design-to-dev handoff time by 40%', status: 'pending' });
-    setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter(c => c.status !== 'rejected'), ...changes] } : v));
-    showToast(`${changes.length} suggestions generated`);
+    requireAuth(() => {
+      const ts = Date.now();
+      const exp = activeVersion.data.workExperience?.[0];
+      const changes: AIChange[] = [];
+      if (activeVersion.data.bio) changes.push({ id: `c-bio-${ts}`, field: 'bio', original: activeVersion.data.bio, suggested: 'Strategic product designer with 8+ years shaping complex digital products. Known for building scalable design systems and leading cross-functional teams to deliver measurable business impact.', status: 'pending' });
+      if (exp?.bullets?.[0]) changes.push({ id: `c-b0-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 0, original: exp.bullets[0], suggested: exp.bullets[0].replace(/(\d+)%/, (_, n) => `${Math.min(parseInt(n) + 5, 99)}%`) + ', directly contributing to $2.4M in incremental ARR', status: 'pending' });
+      if (exp?.bullets?.[1]) changes.push({ id: `c-b1-${ts}`, field: 'bullet', expId: exp.id, bulletIdx: 1, original: exp.bullets[1], suggested: exp.bullets[1] + ', reducing design-to-dev handoff time by 40%', status: 'pending' });
+      setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter(c => c.status !== 'rejected'), ...changes] } : v));
+      showToast(`${changes.length} suggestions generated`);
+    });
   };
 
   const handleCurateAction = (action: string) => {
@@ -724,8 +787,26 @@ export default function Workspace() {
     showToast(`"${action.replace('-', ' ')}" applied`);
   };
 
-  const handleUpdateBase = () => { setVersions(prev => prev.map(v => v.id === 'base' ? { ...v, data: { ...activeVersion.data } } : v)); showToast('Base resume updated'); };
-  const hasPendingChanges = activeVersion.aiChanges.some(c => c.status === 'pending');
+  const handleUpdateBase = () => {
+    if (!baseVersion || !activeVersion) return;
+    const nextBase = { ...baseVersion, data: { ...activeVersion.data } };
+    setVersions(prev => prev.map(v => v.id === baseVersion.id ? nextBase : v));
+    void persistVersion(nextBase).catch(() => {});
+    showToast('Base resume updated');
+  };
+  const hasPendingChanges = activeVersion?.aiChanges.some(c => c.status === 'pending') ?? false;
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">Loading workspace...</div>;
+  }
+
+  if (loadError) {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-[#D14343]">{loadError}</div>;
+  }
+
+  if (!activeVersion || !baseVersion) {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">No resume found. Go back to start and import/create one.</div>;
+  }
 
   return (
     <motion.div 
@@ -753,7 +834,7 @@ export default function Workspace() {
               </div>
             );
           })}
-          <button onClick={() => setShowModal(true)} className="w-full text-left px-6 py-2 rounded-[8px] text-sm text-[#9B9B9B] hover:bg-[#F5F5F5] hover:text-[#6B6B6B] flex items-center gap-2 mt-2"><Plus size={13} /> Add new</button>
+          <button onClick={() => requireAuth(() => setShowModal(true))} className="w-full text-left px-6 py-2 rounded-[8px] text-sm text-[#9B9B9B] hover:bg-[#F5F5F5] hover:text-[#6B6B6B] flex items-center gap-2 mt-2"><Plus size={13} /> Add new</button>
         </div>
       </div>
 
@@ -770,14 +851,16 @@ export default function Workspace() {
           <div className="flex items-center gap-2">
             <div className="relative" ref={avatarRef}>
               <button onClick={() => setShowAvatarMenu(p => !p)} className="flex items-center gap-1 group">
-                <div className="w-8 h-8 rounded-full bg-[#2B2B2B] text-white flex items-center justify-center group-hover:bg-black select-none" style={{ fontSize: 12 }}>AJ</div>
+                <div className="w-8 h-8 rounded-full bg-[#2B2B2B] text-white flex items-center justify-center group-hover:bg-black select-none" style={{ fontSize: 12 }}>
+                  {(currentUser?.fullName || currentUser?.email || 'Guest').slice(0, 2).toUpperCase()}
+                </div>
                 <ChevronDown size={13} className="text-[#CBCBCB]" />
               </button>
               {showAvatarMenu && (
                 <div className="absolute right-0 top-11 w-40 bg-white border border-[#EBEBEB] rounded-[12px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]">
                   <button className="w-full text-left px-4 py-3 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] flex items-center gap-2.5"><Settings size={14} className="text-[#AAAAAA]" /> Settings</button>
                   <div className="h-px bg-[#F0F0F0]" />
-                  <button onClick={() => navigate('/')} className="w-full text-left px-4 py-3 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] flex items-center gap-2.5"><LogOut size={14} className="text-[#AAAAAA]" /> Log Out</button>
+                  <button onClick={() => { clearAuthStorage(); navigate('/start'); }} className="w-full text-left px-4 py-3 text-sm text-[#2B2B2B] hover:bg-[#F5F5F5] flex items-center gap-2.5"><LogOut size={14} className="text-[#AAAAAA]" /> Log Out</button>
                 </div>
               )}
             </div>
@@ -819,9 +902,9 @@ export default function Workspace() {
           <div className="absolute bottom-8 inset-x-0 flex justify-center z-20 pointer-events-none">
             <div className="pointer-events-auto">
               <FloatingToolbar
-                isBaseResume={selectedVersionId === 'base'}
+                isBaseResume={selectedVersionId === baseVersion.id}
                 hasJD={!!(activeVersion.jobDescription)}
-                onAddNew={() => setShowModal(true)}
+                onAddNew={() => requireAuth(() => setShowModal(true))}
                 onJDClick={() => setShowJDPanel(p => !p)}
                 onCurate={handleCurate}
                 onExportPDF={() => { window.print(); showToast('Opening print dialog...'); }}

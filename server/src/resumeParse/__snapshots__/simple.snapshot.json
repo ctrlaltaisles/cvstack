@@ -1,0 +1,70 @@
+{
+  "data": {
+    "name": "Jane Doe",
+    "phone": "+1 415 555 0101",
+    "email": "jane@demo.com",
+    "linkedin": "https://linkedin.com/in/janedoe",
+    "website": "https://demo.com",
+    "country": "United States",
+    "currentTitle": "Senior Product Designer",
+    "experiences": [
+      {
+        "start": {
+          "month": 1,
+          "year": 2022
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": true,
+        "role": "Product Designer",
+        "company": "Beta Labs",
+        "description": [
+          "Led redesign of onboarding flow",
+          "Increased conversion by 22%"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "National University of Singapore",
+        "school": "National University of Singapore",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": 2014
+        },
+        "end": {
+          "month": null,
+          "year": 2018
+        },
+        "isCurrent": false
+      },
+      {
+        "degree": null,
+        "school": "B.Des in Industrial Design",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": null
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": false
+      }
+    ],
+    "skills": [
+      "Figma",
+      "UX Research",
+      "Prototyping",
+      "Design Systems"
+    ]
+  },
+  "warnings": [
+    "Dropped low-confidence experience block #1.",
+    "Dropped low-confidence experience block #3."
+  ]
+}

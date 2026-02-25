@@ -1,0 +1,86 @@
+{
+  "data": {
+    "name": "Sam Lee",
+    "phone": "+44 7700 900123",
+    "email": "sam.lee@folio.me",
+    "linkedin": null,
+    "website": "https://sam.lee",
+    "country": "United Kingdom",
+    "currentTitle": "Lead Product Designer",
+    "experiences": [
+      {
+        "start": {
+          "month": null,
+          "year": 2022
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": true,
+        "role": "Lead Product Designer",
+        "company": null,
+        "description": [
+          "Built design ops playbook"
+        ]
+      },
+      {
+        "start": {
+          "month": null,
+          "year": 2019
+        },
+        "end": {
+          "month": null,
+          "year": 2021
+        },
+        "isCurrent": false,
+        "role": "Beta University",
+        "company": "Beta University",
+        "description": [
+          "Led campus innovation projects"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "University College London",
+        "school": "University College London",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": 2021
+        },
+        "end": {
+          "month": null,
+          "year": 2022
+        },
+        "isCurrent": false
+      },
+      {
+        "degree": "MSc Human Computer Interaction",
+        "school": "MSc Human Computer Interaction",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": null
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": false
+      }
+    ],
+    "skills": [
+      "Figma",
+      "Product Thinking",
+      "Workshop Facilitation",
+      "Storytelling"
+    ]
+  },
+  "warnings": [
+    "Dropped low-confidence experience block #1.",
+    "Could not confidently detect company line for experience #2.",
+    "Dropped low-confidence experience block #3."
+  ]
+}

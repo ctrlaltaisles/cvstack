@@ -1,0 +1,28 @@
+[
+  {"text":"Sam Lee","page":1,"x0":64,"y0":802,"x1":170,"y1":818,"fontSize":21},
+  {"text":"sam.lee@folio.me","page":1,"x0":64,"y0":782,"x1":200,"y1":794,"fontSize":11},
+  {"text":"+44 7700 900123","page":1,"x0":220,"y0":782,"x1":340,"y1":794,"fontSize":11},
+  {"text":"www.samlee.design","page":1,"x0":64,"y0":766,"x1":210,"y1":778,"fontSize":11},
+  {"text":"London, United Kingdom","page":1,"x0":64,"y0":750,"x1":230,"y1":762,"fontSize":11},
+  {"text":"PROFILE","page":1,"x0":64,"y0":716,"x1":130,"y1":730,"fontSize":13},
+  {"text":"Design leader across fintech and SaaS products.","page":1,"x0":64,"y0":700,"x1":350,"y1":712,"fontSize":11},
+  {"text":"WORK EXPERIENCE","page":1,"x0":64,"y0":670,"x1":200,"y1":684,"fontSize":14},
+
+  {"text":"Acme Technologies","page":1,"x0":64,"y0":652,"x1":220,"y1":664,"fontSize":12},
+  {"text":"Lead Product Designer","page":1,"x0":64,"y0":638,"x1":230,"y1":650,"fontSize":12},
+  {"text":"2022 - Present","page":1,"x0":430,"y0":646,"x1":540,"y1":658,"fontSize":11},
+  {"text":"- Built design ops playbook","page":1,"x0":76,"y0":622,"x1":280,"y1":634,"fontSize":11},
+
+  {"text":"Designer","page":1,"x0":64,"y0":596,"x1":130,"y1":608,"fontSize":12},
+  {"text":"Beta University","page":1,"x0":64,"y0":582,"x1":200,"y1":594,"fontSize":12},
+  {"text":"2019 - 2021","page":1,"x0":430,"y0":590,"x1":520,"y1":602,"fontSize":11},
+  {"text":"- Led campus innovation projects","page":1,"x0":76,"y0":566,"x1":300,"y1":578,"fontSize":11},
+
+  {"text":"EDUCATION","page":1,"x0":64,"y0":532,"x1":150,"y1":546,"fontSize":14},
+  {"text":"MSc Human Computer Interaction","page":1,"x0":64,"y0":514,"x1":300,"y1":526,"fontSize":12},
+  {"text":"University College London","page":1,"x0":64,"y0":500,"x1":260,"y1":512,"fontSize":12},
+  {"text":"2021 - 2022","page":1,"x0":430,"y0":506,"x1":520,"y1":518,"fontSize":11},
+
+  {"text":"SKILLS","page":1,"x0":64,"y0":468,"x1":122,"y1":482,"fontSize":14},
+  {"text":"Figma • Product Thinking • Workshop Facilitation • Storytelling","page":1,"x0":64,"y0":452,"x1":520,"y1":464,"fontSize":12}
+]

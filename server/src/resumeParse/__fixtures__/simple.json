@@ -1,0 +1,23 @@
+[
+  {"text":"Jane Doe","page":1,"x0":60,"y0":800,"x1":220,"y1":820,"fontSize":24},
+  {"text":"Senior Product Designer","page":1,"x0":60,"y0":778,"x1":300,"y1":792,"fontSize":14},
+  {"text":"jane@demo.com","page":1,"x0":60,"y0":758,"x1":180,"y1":770,"fontSize":12},
+  {"text":"+1 415 555 0101","page":1,"x0":220,"y0":758,"x1":330,"y1":770,"fontSize":12},
+  {"text":"linkedin.com/in/janedoe","page":1,"x0":60,"y0":742,"x1":280,"y1":754,"fontSize":12},
+  {"text":"San Francisco, United States","page":1,"x0":60,"y0":726,"x1":300,"y1":738,"fontSize":12},
+  {"text":"EXPERIENCE","page":1,"x0":60,"y0":690,"x1":170,"y1":704,"fontSize":14},
+  {"text":"Jan 2022 - Present","page":1,"x0":420,"y0":670,"x1":560,"y1":682,"fontSize":12},
+  {"text":"Senior Product Designer at Acme Inc","page":1,"x0":60,"y0":670,"x1":360,"y1":682,"fontSize":12},
+  {"text":"• Led redesign of onboarding flow","page":1,"x0":75,"y0":654,"x1":350,"y1":666,"fontSize":11},
+  {"text":"• Increased conversion by 22%","page":1,"x0":75,"y0":640,"x1":320,"y1":652,"fontSize":11},
+  {"text":"Mar 2019 - Dec 2021","page":1,"x0":420,"y0":620,"x1":560,"y1":632,"fontSize":12},
+  {"text":"Product Designer at Beta Labs","page":1,"x0":60,"y0":620,"x1":320,"y1":632,"fontSize":12},
+  {"text":"• Built component library","page":1,"x0":75,"y0":604,"x1":270,"y1":616,"fontSize":11},
+  {"text":"EDUCATION","page":1,"x0":60,"y0":560,"x1":150,"y1":574,"fontSize":14},
+  {"text":"2014 - 2018","page":1,"x0":420,"y0":542,"x1":510,"y1":554,"fontSize":12},
+  {"text":"B.Des in Industrial Design","page":1,"x0":60,"y0":542,"x1":280,"y1":554,"fontSize":12},
+  {"text":"National University of Singapore","page":1,"x0":60,"y0":528,"x1":300,"y1":540,"fontSize":12},
+  {"text":"Singapore","page":1,"x0":60,"y0":514,"x1":140,"y1":526,"fontSize":12},
+  {"text":"SKILLS","page":1,"x0":60,"y0":478,"x1":120,"y1":492,"fontSize":14},
+  {"text":"Figma, UX Research, Prototyping, Design Systems","page":1,"x0":60,"y0":460,"x1":420,"y1":472,"fontSize":12}
+]

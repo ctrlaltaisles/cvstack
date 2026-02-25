@@ -1,0 +1,29 @@
+[
+  {"text":"Alex Tan","page":1,"x0":70,"y0":800,"x1":190,"y1":818,"fontSize":22},
+  {"text":"Product Manager","page":1,"x0":70,"y0":780,"x1":220,"y1":792,"fontSize":13},
+  {"text":"alex@pm.dev","page":1,"x0":70,"y0":762,"x1":180,"y1":774,"fontSize":11},
+  {"text":"+65 9000 1000","page":1,"x0":220,"y0":762,"x1":330,"y1":774,"fontSize":11},
+  {"text":"linkedin.com/in/alextan","page":1,"x0":70,"y0":746,"x1":260,"y1":758,"fontSize":11},
+  {"text":"Singapore","page":1,"x0":70,"y0":730,"x1":140,"y1":742,"fontSize":11},
+  {"text":"EXPERIENCE","page":1,"x0":70,"y0":690,"x1":180,"y1":704,"fontSize":14},
+
+  {"text":"Grab","page":1,"x0":70,"y0":670,"x1":130,"y1":682,"fontSize":12},
+  {"text":"Senior Product Manager","page":1,"x0":70,"y0":654,"x1":250,"y1":666,"fontSize":12},
+  {"text":"• Owned marketplace growth roadmap","page":1,"x0":82,"y0":638,"x1":320,"y1":650,"fontSize":11},
+  {"text":"• Improved retention by 12%","page":1,"x0":82,"y0":624,"x1":290,"y1":636,"fontSize":11},
+  {"text":"Jan 2021 - Present","page":1,"x0":430,"y0":662,"x1":560,"y1":674,"fontSize":11},
+
+  {"text":"Shopee","page":1,"x0":70,"y0":600,"x1":140,"y1":612,"fontSize":12},
+  {"text":"Product Manager","page":1,"x0":70,"y0":584,"x1":210,"y1":596,"fontSize":12},
+  {"text":"• Led checkout optimization","page":1,"x0":82,"y0":568,"x1":290,"y1":580,"fontSize":11},
+  {"text":"Jul 2018 - Dec 2020","page":1,"x0":430,"y0":592,"x1":560,"y1":604,"fontSize":11},
+
+  {"text":"EDUCATION","page":1,"x0":70,"y0":530,"x1":160,"y1":544,"fontSize":14},
+  {"text":"NUS Business School","page":1,"x0":70,"y0":510,"x1":240,"y1":522,"fontSize":12},
+  {"text":"BBA","page":1,"x0":70,"y0":496,"x1":100,"y1":508,"fontSize":12},
+  {"text":"Singapore","page":1,"x0":70,"y0":482,"x1":140,"y1":494,"fontSize":12},
+  {"text":"2014 - 2018","page":1,"x0":430,"y0":504,"x1":520,"y1":516,"fontSize":11},
+
+  {"text":"SKILLS","page":1,"x0":70,"y0":446,"x1":130,"y1":460,"fontSize":14},
+  {"text":"Product Strategy | SQL | Experimentation | Stakeholder Management","page":1,"x0":70,"y0":430,"x1":520,"y1":442,"fontSize":12}
+]

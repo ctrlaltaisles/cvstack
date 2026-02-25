@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  profile      Profile?
+  resumes      Resume[]
+  files        UploadedFile[]
+}
+
+model Profile {
+  id          String   @id
+  userId      String   @unique
+  name        String
+  headline    String
+  summary     String
+  detailsJson Json?
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resume {
+  id         String          @id
+  userId     String
+  title      String
+  metaJson   Json?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions   ResumeVersion[]
+  files      UploadedFile[]
+
+  @@index([userId])
+}
+
+model ResumeVersion {
+  id            String   @id
+  resumeId      String
+  versionNumber Int
+  contentJson   Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  resume        Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  @@index([resumeId])
+  @@unique([resumeId, versionNumber])
+}
+
+model UploadedFile {
+  id           String   @id
+  userId       String
+  resumeId     String?
+  originalName String
+  mimeType     String
+  size         Int
+  storagePath  String
+  extractedText String?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume       Resume?  @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([resumeId])
+}

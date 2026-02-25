@@ -1,0 +1,74 @@
+{
+  "data": {
+    "name": "Alex Tan",
+    "phone": "65 9000 1000",
+    "email": "alex@pm.dev",
+    "linkedin": "https://linkedin.com/in/alextan",
+    "website": "https://pm.dev",
+    "country": "Singapore",
+    "currentTitle": "Product Manager",
+    "experiences": [
+      {
+        "start": {
+          "month": 1,
+          "year": 2021
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": true,
+        "role": "Senior Product Manager",
+        "company": null,
+        "description": [
+          "Owned marketplace growth roadmap",
+          "Improved retention by 12%"
+        ]
+      },
+      {
+        "start": {
+          "month": 7,
+          "year": 2018
+        },
+        "end": {
+          "month": 12,
+          "year": 2020
+        },
+        "isCurrent": false,
+        "role": "Product Manager",
+        "company": null,
+        "description": [
+          "Led checkout optimization"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "BBA",
+        "school": "NUS Business School",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": 2014
+        },
+        "end": {
+          "month": null,
+          "year": 2018
+        },
+        "isCurrent": false
+      }
+    ],
+    "skills": [
+      "Product Strategy",
+      "SQL",
+      "Experimentation",
+      "Stakeholder Management"
+    ]
+  },
+  "warnings": [
+    "Dropped low-confidence experience block #1.",
+    "Could not confidently detect company line for experience #2.",
+    "Dropped low-confidence experience block #3.",
+    "Could not confidently detect company line for experience #4."
+  ]
+}
