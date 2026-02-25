@@ -1,16 +1,10 @@
 import { type ChangeEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Linkedin, FileUp, PenLine } from 'lucide-react';
+import { FileUp, PenLine } from 'lucide-react';
 import { motion } from 'motion/react';
 import { createResume, uploadResumePdf } from '../../lib/api';
 
 const methods = [
-  {
-    id: 'linkedin',
-    icon: Linkedin,
-    title: 'Import from LinkedIn',
-    description: 'Placeholder import: creates a draft profile-backed resume',
-  },
   {
     id: 'upload',
     icon: FileUp,
@@ -31,13 +25,13 @@ export default function MethodSelection() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const startManualOrLinkedIn = async (source: 'manual' | 'linkedin') => {
+  const startManual = async () => {
     setError('');
     setLoading(true);
     try {
       const created = await createResume({
-        source,
-        title: source === 'linkedin' ? 'LinkedIn Import (Placeholder)' : 'Base Resume',
+        source: 'manual',
+        title: 'Base Resume',
       });
       navigate(`/workspace?resumeId=${created.resumeId}`);
     } catch (err) {
@@ -52,11 +46,7 @@ export default function MethodSelection() {
       fileRef.current?.click();
       return;
     }
-    if (id === 'linkedin') {
-      void startManualOrLinkedIn('linkedin');
-      return;
-    }
-    void startManualOrLinkedIn('manual');
+    void startManual();
   };
 
   const onFilePicked = async (event: ChangeEvent<HTMLInputElement>) => {

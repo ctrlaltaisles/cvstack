@@ -1249,7 +1249,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       .filter((b) => b.section === 'experience')
       .map((b, idx) => parseExperienceBlock(b, idx, warnings))
       .filter((v): v is ExperienceItem => Boolean(v)),
-  ).slice(0, 3);
+  ).slice(0, 5);
 
   const education = sortRecentFirst(
     blocks

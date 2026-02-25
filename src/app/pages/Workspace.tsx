@@ -135,13 +135,31 @@ function InlineArea({ value, onChange, className = '', placeholder = 'Click to e
 
 // ─── BulletInlineArea ─────────────────────────────────────────────────────────
 
-function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange }: { value: string; onChange: (v: string) => void; onDeleteOnEmpty?: () => void; onFocusChange?: (f: boolean) => void }) {
+function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onEnterNewBullet, autoEdit, onAutoEditConsumed }: { value: string; onChange: (v: string) => void; onDeleteOnEmpty?: () => void; onFocusChange?: (f: boolean) => void; onEnterNewBullet?: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void }) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => { if (editing && ref.current) { const el = ref.current; el.focus(); el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; const l = el.value.length; el.setSelectionRange(l, l); } }, [editing]);
+  useEffect(() => {
+    if (autoEdit) {
+      setEditing(true);
+      onFocusChange?.(true);
+      onAutoEditConsumed?.();
+    }
+  }, [autoEdit, onAutoEditConsumed, onFocusChange]);
   const resize = (el: HTMLTextAreaElement) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
   const save = () => { setEditing(false); onFocusChange?.(false); if (local !== value) onChange(local); };
-  if (editing) return <textarea ref={ref} value={local} rows={1} onChange={e => { setLocal(e.target.value); resize(e.target); }} onBlur={save} onKeyDown={e => { if (e.key === 'Escape') { setLocal(value); setEditing(false); onFocusChange?.(false); } if (e.key === 'Backspace' && local === '' && onDeleteOnEmpty) { e.preventDefault(); onDeleteOnEmpty(); } }} className="w-full bg-transparent outline-none resize-none overflow-hidden text-sm text-[#2B2B2B] leading-relaxed" style={{ fontFamily: 'inherit', minHeight: '1.5em' }} />;
+  if (editing) return <textarea ref={ref} value={local} rows={1} onChange={e => { setLocal(e.target.value); resize(e.target); }} onBlur={save} onKeyDown={e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (local !== value) onChange(local);
+      setEditing(false);
+      onFocusChange?.(false);
+      onEnterNewBullet?.();
+      return;
+    }
+    if (e.key === 'Escape') { setLocal(value); setEditing(false); onFocusChange?.(false); }
+    if (e.key === 'Backspace' && local === '' && onDeleteOnEmpty) { e.preventDefault(); onDeleteOnEmpty(); }
+  }} className="w-full bg-transparent outline-none resize-none overflow-hidden text-sm text-[#2B2B2B] leading-relaxed" style={{ fontFamily: 'inherit', minHeight: '1.5em' }} />;
   return <span onClick={() => { setEditing(true); onFocusChange?.(true); }} className="cursor-text inline-block w-full text-sm text-[#2B2B2B] leading-relaxed whitespace-pre-wrap break-words min-h-[1.5em]">{local || <span className="text-[#D0D0D0] not-italic">Add bullet text…</span>}</span>;
 }
 
@@ -188,17 +206,30 @@ function SkillsEditor({ skills, onUpdate }: { skills: string[]; onUpdate: (s: st
 
 function MonthGridPicker({ year, month, onSelect }: { year: number; month: number; onSelect: (m: number, y: number) => void }) {
   const [dy, setDy] = useState(year);
+  const [mode, setMode] = useState<'month' | 'year'>('month');
   useEffect(() => { setDy(year); }, [year]);
+  const yearBase = Math.floor(dy / 12) * 12;
   return (
     <div>
       <div className="flex items-center justify-between px-1 mb-3">
-        <button onClick={e => { e.stopPropagation(); setDy(y => y - 1); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>‹</button>
-        <span className="text-sm text-[#1A1A1A]">{dy}</span>
-        <button onClick={e => { e.stopPropagation(); setDy(y => y + 1); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>›</button>
+        <button onClick={e => { e.stopPropagation(); setDy(y => y + (mode === 'month' ? -1 : -12)); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>‹</button>
+        <button onClick={e => { e.stopPropagation(); setMode(m => m === 'month' ? 'year' : 'month'); }} className="text-sm text-[#1A1A1A] hover:text-black transition-colors">{dy}</button>
+        <button onClick={e => { e.stopPropagation(); setDy(y => y + (mode === 'month' ? 1 : 12)); }} className="w-6 h-6 flex items-center justify-center rounded-[4px] text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0] transition-colors select-none" style={{ fontSize: 16 }}>›</button>
       </div>
-      <div className="grid grid-cols-4 gap-1">
-        {MONTHS.map((m, i) => <button key={m} onClick={e => { e.stopPropagation(); onSelect(i + 1, dy); }} className={`py-2 text-xs rounded-[6px] transition-colors ${i + 1 === month && dy === year ? 'bg-[#1A1A1A] text-white' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}>{m}</button>)}
-      </div>
+      {mode === 'month' ? (
+        <div className="grid grid-cols-4 gap-1">
+          {MONTHS.map((m, i) => <button key={m} onClick={e => { e.stopPropagation(); onSelect(i + 1, dy); }} className={`py-2 text-xs rounded-[6px] transition-colors ${i + 1 === month && dy === year ? 'bg-[#1A1A1A] text-white' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}>{m}</button>)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-4 gap-1">
+          {Array.from({ length: 12 }).map((_, i) => {
+            const y = yearBase + i;
+            return (
+              <button key={y} onClick={e => { e.stopPropagation(); setDy(y); setMode('month'); }} className={`py-2 text-xs rounded-[6px] transition-colors ${y === year ? 'bg-[#1A1A1A] text-white' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}>{y}</button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -234,14 +265,14 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
 
 // ─── BulletRow ───────────────────────────────────────────────────────────────
 
-function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void }) {
+function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, autoEdit, onAutoEditConsumed }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void }) {
   const [rowHov, setRowHov] = useState(false); const [active, setActive] = useState(false); const [showMenu, setShowMenu] = useState(false); const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!showMenu) return; const h = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [showMenu]);
   return (
     <div className={`flex items-start gap-1 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => { if (!showMenu) setRowHov(false); }}>
       <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`shrink-0 mt-[3px] cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} /></div>
       <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
-      <div className="flex-1 min-w-0"><BulletInlineArea value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} /></div>
+      <div className="flex-1 min-w-0"><BulletInlineArea value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
       <div className="relative shrink-0" ref={menuRef}>
         <button onClick={() => setShowMenu(!showMenu)} className={`p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-opacity mt-0.5 ${rowHov || showMenu ? 'opacity-100' : 'opacity-0'}`}><MoreHorizontal size={13} /></button>
         {showMenu && <div className="absolute right-0 top-6 w-28 bg-white border border-[#EBEBEB] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.08)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]"><button onClick={() => { onDuplicate(); setShowMenu(false); setRowHov(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] hover:bg-[#F7F7F8]">Duplicate</button><div className="h-px bg-[#F0F0F0]" /><button onClick={() => { onDelete(); setShowMenu(false); }} className="w-full text-left px-3 py-2.5 text-sm text-red-500 hover:bg-red-50">Delete</button></div>}
@@ -252,14 +283,30 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
-function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, highlightedSectionKey, registerBulletRef, onShowToast }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; highlightedSectionKey: string | null; registerBulletRef: (key: string, el: HTMLElement | null) => void; onShowToast: (msg: string) => void }) {
-  const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const dateColRef = useRef<HTMLDivElement>(null);
+function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, highlightedSectionKey, registerBulletRef, onShowToast }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; highlightedSectionKey: string | null; registerBulletRef: (key: string, el: HTMLElement | null) => void; onShowToast: (msg: string) => void }) {
+  const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const [autoEditBulletIdx, setAutoEditBulletIdx] = useState<number | null>(null); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const updateBullets = (bullets: string[]) => onUpdateExp({ ...exp, bullets });
+  const insertBulletAfter = (idx: number) => {
+    const next = [...exp.bullets];
+    next.splice(idx + 1, 0, '');
+    updateBullets(next);
+    setAutoEditBulletIdx(idx + 1);
+  };
   const handleDrop = (toIdx: number) => { if (dragFrom === null || dragFrom === toIdx) { setDragFrom(null); setDragTarget(null); return; } const next = [...exp.bullets]; const [moved] = next.splice(dragFrom, 1); next.splice(toIdx, 0, moved); updateBullets(next); setDragFrom(null); setDragTarget(null); };
   const duration = calcDurationFromDates(exp.startDate, exp.endDate);
   return (
-    <div className="flex gap-10 group/exp">
+    <div className={`flex gap-10 group/exp transition-opacity ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
+      <div className="w-4 shrink-0 self-start pt-0.5">
+        <button
+          draggable
+          onDragStart={onDragStartExperience}
+          onDragEnd={onDragEndExperience}
+          className="opacity-0 group-hover/exp:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5 cursor-grab active:cursor-grabbing"
+        >
+          <GripVertical size={12} />
+        </button>
+      </div>
       <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
         <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={exp.startDate} endDate={exp.endDate} onChangeStart={v => onUpdateExp({ ...exp, startDate: v })} onChangeEnd={v => onUpdateExp({ ...exp, endDate: v })} onClose={() => setEditingDate(false)} />}
@@ -267,7 +314,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, highlightedSectionKey,
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2 group/role mb-0.5">
           <div className="flex-1 min-w-0"><InlineText value={exp.role} onChange={v => onUpdateExp({ ...exp, role: v })} className="text-sm text-[#1A1A1A]" /></div>
-          <div className="relative shrink-0 mt-0.5">
+          <div className="relative shrink-0 mt-0.5 flex items-center gap-1">
             <button onClick={() => { const text = [`${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate), '', ...exp.bullets.map(b => `• ${b}`)].join('\n'); navigator.clipboard.writeText(text).catch(() => {}); onShowToast('Copied to clipboard'); }} onMouseEnter={() => setShowCopyTip(true)} onMouseLeave={() => setShowCopyTip(false)} className="opacity-0 group-hover/role:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5"><Copy size={12} /></button>
             {showCopyTip && <div className="absolute right-0 top-6 bg-[#1A1A1A] text-white rounded-[6px] px-2 py-1 whitespace-nowrap pointer-events-none z-50" style={{ fontSize: 11 }}>Copy role</div>}
           </div>
@@ -278,7 +325,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, highlightedSectionKey,
             const key = `${exp.id}-${idx}`;
             return (
               <li key={idx} ref={el => registerBulletRef(key, el)} className={`border-t-2 transition-colors ${dragTarget === idx && dragFrom !== null && dragFrom !== idx ? 'border-[#BFBFBF]' : 'border-transparent'}`} onDragOver={e => { e.preventDefault(); if (dragFrom !== null && dragFrom !== idx) setDragTarget(idx); }} onDrop={() => handleDrop(idx)} onDragLeave={() => setDragTarget(null)}>
-                <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={highlightedSectionKey === key} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} />
+                <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={highlightedSectionKey === key} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} />
               </li>
             );
           })}
@@ -363,8 +410,15 @@ const CARD_GAP = 20; // Updated from 12 to 20 for better spacing (16-24px range)
 function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onAcceptAll, onRejectAll, onShowToast }: { version: ResumeVersion; onUpdateData: (d: ResumeData) => void; onAcceptChange: (id: string) => void; onRejectChange: (id: string) => void; onAcceptAll: () => void; onRejectAll: () => void; onShowToast: (msg: string) => void }) {
   const { data, aiChanges } = version;
   const update = (p: Partial<ResumeData>) => onUpdateData({ ...data, ...p });
+  const [dragExpFrom, setDragExpFrom] = useState<number | null>(null);
+  const [dragExpTarget, setDragExpTarget] = useState<number | null>(null);
   const pendingChanges = (aiChanges ?? []).filter(c => c.status === 'pending');
   const hasSuggestions = pendingChanges.length > 0;
+  const hasAbout = data.bio.trim().length > 0;
+  const hasWorkExperience = (data.workExperience ?? []).length > 0;
+  const hasEducation = (data.education ?? []).length > 0;
+  const hasCertifications = (data.certifications ?? []).length > 0;
+  const hasSkills = (data.skills ?? []).length > 0;
   const containerRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
   // idealTop[id] = card top such that card CENTER aligns to element CENTER
@@ -430,7 +484,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
 
   return (
     <div ref={containerRef} className="relative">
-      <div className={hasSuggestions ? 'mr-[288px]' : ''}>
+      <div className={`print-main-content ${hasSuggestions ? 'mr-[288px]' : ''}`}>
         {/* Header */}
         <div className="flex items-start gap-5 mb-5">
           <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>AJ</div>
@@ -440,43 +494,92 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onA
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 mb-10">
           {contactItems.flatMap((item, idx) => [idx > 0 ? <span key={`d-${item.key}`} className="text-[#D8D8D8] text-sm">•</span> : null, <ContactInlineField key={item.key} value={data.contact[item.key]} onChange={v => update({ contact: { ...data.contact, [item.key]: v } })} placeholder={item.placeholder} />])}
         </div>
-        <div className="h-px bg-[#EFEFEF] mb-10" />
         {/* About */}
-        <div className="mb-10">
+        <div className="resume-section mb-10" data-empty={!hasAbout}>
+          <div className="h-px bg-[#EFEFEF] mb-10" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-4">About</p>
           <div ref={el => registerRef('bio', el)} className={`rounded-[8px] transition-colors duration-500 ${highlightedSectionKey === 'bio' ? 'bg-[#F5F5F5]' : ''} ${bioChange ? 'border-l-2 pl-3 -ml-3 border-[#E0E0E0]' : ''}`}>
             <InlineArea value={data.bio} onChange={v => update({ bio: v })} className="text-sm text-[#2B2B2B]" />
           </div>
         </div>
-        <div className="h-px bg-[#EFEFEF] mb-10" />
         {/* Work Experience */}
-        <div className="mb-10">
+        <div className="resume-section mb-10" data-empty={!hasWorkExperience}>
+          <div className="h-px bg-[#EFEFEF] mb-10" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Work Experience</p>
-          <div className="space-y-8">{(data.workExperience ?? []).map(exp => <ExperienceBlock key={exp.id} exp={exp} onUpdateExp={u => update({ workExperience: data.workExperience.map(e => e.id === exp.id ? u : e) })} onDeleteExp={() => update({ workExperience: data.workExperience.filter(e => e.id !== exp.id) })} highlightedSectionKey={highlightedSectionKey} registerBulletRef={registerRef} onShowToast={onShowToast} />)}</div>
+          <div className="space-y-8">
+            {(data.workExperience ?? []).map((exp, idx) => (
+              <div
+                key={exp.id}
+                className={`border-t-2 transition-colors ${dragExpTarget === idx && dragExpFrom !== null && dragExpFrom !== idx ? 'border-[#BFBFBF]' : 'border-transparent'}`}
+                onDragOver={(e) => {
+                  if (dragExpFrom === null) return;
+                  e.preventDefault();
+                  if (dragExpFrom !== idx) setDragExpTarget(idx);
+                }}
+                onDrop={() => {
+                  if (dragExpFrom === null || dragExpFrom === idx) {
+                    setDragExpFrom(null);
+                    setDragExpTarget(null);
+                    return;
+                  }
+                  const next = [...data.workExperience];
+                  const [moved] = next.splice(dragExpFrom, 1);
+                  next.splice(idx, 0, moved);
+                  update({ workExperience: next });
+                  setDragExpFrom(null);
+                  setDragExpTarget(null);
+                }}
+                onDragLeave={() => {
+                  if (dragExpFrom !== null) setDragExpTarget(null);
+                }}
+              >
+                <ExperienceBlock
+                  exp={exp}
+                  onUpdateExp={u => update({ workExperience: data.workExperience.map(e => e.id === exp.id ? u : e) })}
+                  onDeleteExp={() => update({ workExperience: data.workExperience.filter(e => e.id !== exp.id) })}
+                  onDragStartExperience={(e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDragExpFrom(idx);
+                  }}
+                  onDragEndExperience={() => {
+                    setDragExpFrom(null);
+                    setDragExpTarget(null);
+                  }}
+                  isDraggingExperience={dragExpFrom === idx}
+                  highlightedSectionKey={highlightedSectionKey}
+                  registerBulletRef={registerRef}
+                  onShowToast={onShowToast}
+                />
+              </div>
+            ))}
+          </div>
           <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Experience</button>
         </div>
-        <div className="h-px bg-[#EFEFEF] mb-10" />
         {/* Education */}
-        <div className="mb-10">
+        <div className="resume-section mb-10" data-empty={!hasEducation}>
+          <div className="h-px bg-[#EFEFEF] mb-10" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Education</p>
           <div className="space-y-6">{(data.education ?? []).map(edu => <EducationBlock key={edu.id} edu={edu} onUpdateEdu={u => update({ education: data.education.map(e => e.id === edu.id ? u : e) })} onDeleteEdu={() => update({ education: data.education.filter(e => e.id !== edu.id) })} />)}</div>
           <button onClick={() => update({ education: [...data.education, { id: `edu-${Date.now()}`, school: 'School Name', degree: 'Degree', location: '', startDate: { month: 9, year: 2020, present: false }, endDate: { month: 5, year: 2024, present: false } }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Education</button>
         </div>
-        <div className="h-px bg-[#EFEFEF] mb-10" />
         {/* Certifications */}
-        <div className="mb-10">
+        <div className="resume-section mb-10" data-empty={!hasCertifications}>
+          <div className="h-px bg-[#EFEFEF] mb-10" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Certifications</p>
           <div className="space-y-6">{(data.certifications ?? []).map(cert => <CertificationBlock key={cert.id} cert={cert} onUpdateCert={u => update({ certifications: data.certifications.map(c => c.id === cert.id ? u : c) })} onDeleteCert={() => update({ certifications: data.certifications.filter(c => c.id !== cert.id) })} />)}</div>
           <button onClick={() => update({ certifications: [...data.certifications, { id: `cert-${Date.now()}`, name: 'Certificate Name', organization: 'Issuing Organization', issuedMonth: 1, issuedYear: 2024, credentialId: '' }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} /> Add Certification</button>
         </div>
-        <div className="h-px bg-[#EFEFEF] mb-10" />
         {/* Skills */}
-        <div><p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-5">Skills</p><SkillsEditor skills={data.skills ?? []} onUpdate={s => update({ skills: s })} /></div>
+        <div className="resume-section" data-empty={!hasSkills}>
+          <div className="h-px bg-[#EFEFEF] mb-10" />
+          <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-5">Skills</p>
+          <SkillsEditor skills={data.skills ?? []} onUpdate={s => update({ skills: s })} />
+        </div>
       </div>
 
       {/* ── Suggestion cards — right gutter, center-to-center aligned with connectors ── */}
       {hasSuggestions && (
-        <div className="absolute top-0 right-0 w-[264px]">
+        <div className="absolute top-0 right-0 w-[264px] print-hide">
           {/* Header */}
           <div className="flex items-center justify-between" style={{ height: HEADER_H }}>
             <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA]">{pendingChanges.length} suggestion{pendingChanges.length !== 1 ? 's' : ''}</p>
@@ -594,7 +697,7 @@ function FloatingToolbar({ isBaseResume, hasJD, onAddNew, onJDClick, onCurate, o
 
 function JDSidePanel({ version, onClose, onCopy }: { version: ResumeVersion; onClose: () => void; onCopy: () => void }) {
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out]">
+    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out] print-hide">
       {/* Header */}
       <div className="px-6 py-4 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
         <div>
@@ -825,11 +928,11 @@ export default function Workspace() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="h-screen flex bg-white overflow-hidden"
+      className="h-screen flex bg-white overflow-hidden workspace-shell"
     >
 
       {/* ── Sidebar ── */}
-      <div className="w-[220px] shrink-0 border-r border-[#F0F0F0] flex flex-col">
+      <div className="w-[220px] shrink-0 border-r border-[#F0F0F0] flex flex-col print-hide">
         <div className="px-6 py-5 border-b border-[#F0F0F0]"><span className="text-base tracking-tight text-[#1A1A1A]">CVStack</span></div>
         <div className="flex-1 overflow-y-auto py-3">
           <button onClick={() => setSelectedVersionId(baseVersion.id)} className={`w-full text-left px-6 py-2 rounded-[8px] mb-1 text-sm transition-colors ${selectedVersionId === baseVersion.id ? 'bg-[#F0F0F0] text-[#111]' : 'text-[#6B6B6B] hover:bg-[#F5F5F5]'}`}>Base Resume</button>
@@ -853,7 +956,7 @@ export default function Workspace() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* Top bar */}
-        <div className="h-14 border-b border-[#F0F0F0] px-6 flex items-center justify-between shrink-0">
+        <div className="h-14 border-b border-[#F0F0F0] px-6 flex items-center justify-between shrink-0 print-hide">
           <div className="flex items-center gap-2 min-w-0 text-sm">
             <span className="text-[#CBCBCB]">Resumes</span><span className="text-[#E0E0E0]">/</span>
             <span className="text-[#1A1A1A] truncate">{activeVersion.name}</span>
@@ -882,10 +985,10 @@ export default function Workspace() {
         <div className="flex-1 relative overflow-hidden">
 
           {/* Scrollable resume content */}
-          <div className="absolute inset-0 overflow-y-auto bg-white" id="resume-scroll">
-            <div className="max-w-[960px] mx-auto py-14 px-12 pb-32">
+          <div className="absolute inset-0 overflow-y-auto bg-white" id="print-resume-root">
+            <div className="max-w-[960px] mx-auto py-14 px-12 pb-32 print-page resume-print-root">
               {hasPendingChanges && (
-                <div className="mb-8 flex items-center gap-3 px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px]">
+                <div className="mb-8 flex items-center gap-3 px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px] print-hide">
                   <Sparkles size={12} className="text-[#9B9B9B] shrink-0" />
                   <span className="text-sm text-[#6B6B6B]">AI suggestions for <span className="text-[#1A1A1A]">{activeVersion.jobTitle} @ {activeVersion.jobCompany}</span></span>
                   <span className="text-[#D0D0D0]">·</span>
@@ -893,13 +996,13 @@ export default function Workspace() {
                 </div>
               )}
               {isNonBase && (
-                <div className="mb-8 flex items-center justify-between px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px]">
+                <div className="mb-8 flex items-center justify-between px-4 py-2.5 bg-[#FAFAFA] border border-[#F0F0F0] rounded-[10px] print-hide">
                   <span className="text-xs text-[#9B9B9B]">Editing <span className="text-[#6B6B6B]">{activeVersion.name}</span>. Changes apply to this version only.</span>
                   <button onClick={handleUpdateBase} className="flex items-center gap-1.5 text-xs text-[#2B2B2B] hover:text-black ml-4 shrink-0"><RefreshCw size={11} /> Update Base</button>
                 </div>
               )}
               <ResumeView version={activeVersion} onUpdateData={updateVersionData} onAcceptChange={handleAcceptChange} onRejectChange={handleRejectChange} onAcceptAll={handleAcceptAll} onRejectAll={handleRejectAll} onShowToast={showToast} />
-              <p className="text-center mt-12" style={{ fontSize: 12, color: '#D4D4D4' }}>Click dates to edit · Click any text to edit · Drag bullets to reorder</p>
+              <p className="text-center mt-12 print-hide" style={{ fontSize: 12, color: '#D4D4D4' }}>Click dates to edit · Click any text to edit · Drag bullets to reorder</p>
             </div>
           </div>
 
@@ -910,7 +1013,7 @@ export default function Workspace() {
           )}
 
           {/* ── Floating toolbar — centered at bottom, above scroll ── */}
-          <div className="absolute bottom-8 inset-x-0 flex justify-center z-20 pointer-events-none">
+          <div className="absolute bottom-8 inset-x-0 flex justify-center z-20 pointer-events-none print-hide">
             <div className="pointer-events-auto">
               <FloatingToolbar
                 isBaseResume={selectedVersionId === baseVersion.id}
