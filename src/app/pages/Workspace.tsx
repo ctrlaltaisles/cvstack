@@ -566,8 +566,10 @@ function buildPendingAIChangesFromCuration(version: ResumeVersion, result: Await
     if (!exp) continue;
     const bullet = exp.bullets[suggestion.bulletIdx];
     const suggested = suggestion.suggested.trim();
+    const currentBulletText = bullet ?? '';
     if (bullet === undefined && !suggested) continue;
     if (bullet !== undefined && suggested === bullet.trim()) continue;
+    if (isAcceptedAiBulletUnchanged(version, suggestion.expId, suggestion.bulletIdx, currentBulletText)) continue;
     nextChanges.push({
       id: `c-ai-bullet-${seed}-${idx}`,
       field: 'bullet',
@@ -618,6 +620,40 @@ function getCurationNoChangeMessage(result: Awaited<ReturnType<typeof curateResu
 }
 function applyAllChanges(data: ResumeData, changes: AIChange[]): ResumeData {
   return changes.reduce((acc, change) => applyChange(change, acc), data);
+}
+
+function isAcceptedAiBulletUnchanged(version: ResumeVersion, expId: string, bulletIdx: number, bulletText: string): boolean {
+  const normalized = bulletText.trim();
+  return (version.aiChanges ?? []).some((change) => (
+    change.field === 'bullet'
+    && change.expId === expId
+    && change.bulletIdx === bulletIdx
+    && change.status === 'accepted'
+    && change.suggested.trim() === normalized
+  ));
+}
+
+function hasCuratableBullets(version: ResumeVersion): boolean {
+  for (const exp of version.data.workExperience ?? []) {
+    for (const [idx, bullet] of exp.bullets.entries()) {
+      const text = bullet.trim();
+      if (!text) continue;
+      if (!isAcceptedAiBulletUnchanged(version, exp.id, idx, text)) return true;
+    }
+  }
+  return false;
+}
+
+function mergeAIChangesWithoutRepeats(existing: AIChange[], incoming: AIChange[]): AIChange[] {
+  const seen = new Set(existing.map((change) => `${change.field}|${change.expId ?? ''}|${change.bulletIdx ?? ''}|${change.original.trim()}|${change.suggested.trim()}`));
+  const merged = [...existing];
+  for (const change of incoming) {
+    const key = `${change.field}|${change.expId ?? ''}|${change.bulletIdx ?? ''}|${change.original.trim()}|${change.suggested.trim()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(change);
+  }
+  return merged;
 }
 
 function normalizeRoleKey(exp: WorkExperience): string {
@@ -2224,31 +2260,35 @@ export default function Workspace() {
 
         let finalVersion = nextVersion;
         try {
-          const curation = await curateResume({
-            resumeData: nextVersion.data,
-            targetRole: nextVersion.jobTitle || nextVersion.data.title,
-            jdText: nextVersion.jobDescription,
-            jobCompany: nextVersion.jobCompany,
-            jobLink: nextVersion.jobLink,
-          });
-          const fallbackReason = getCurationFallbackReason(curation);
-          if (fallbackReason) {
-            showToast(fallbackReason, 'info');
-            if (!hasMeaningfulJobDescription(nextVersion.jobDescription)) {
-              setShowJDPanel(true);
-            }
+          if (!hasCuratableBullets(nextVersion)) {
+            showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
           } else {
-            const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
-            if (changes.length > 0) {
-              const curatedData = applyAllChanges(nextVersion.data, changes);
-              finalVersion = {
-                ...nextVersion,
-                data: curatedData,
-                variantContent: buildTextResume(curatedData),
-                aiChanges: [],
-              };
+            const curation = await curateResume({
+              resumeData: nextVersion.data,
+              targetRole: nextVersion.jobTitle || nextVersion.data.title,
+              jdText: nextVersion.jobDescription,
+              jobCompany: nextVersion.jobCompany,
+              jobLink: nextVersion.jobLink,
+            });
+            const fallbackReason = getCurationFallbackReason(curation);
+            if (fallbackReason) {
+              showToast(fallbackReason, 'info');
+              if (!hasMeaningfulJobDescription(nextVersion.jobDescription)) {
+                setShowJDPanel(true);
+              }
             } else {
-              showToast(getCurationNoChangeMessage(curation), 'info');
+              const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
+              if (changes.length > 0) {
+                const curatedData = applyAllChanges(nextVersion.data, changes);
+                finalVersion = {
+                  ...nextVersion,
+                  data: curatedData,
+                  variantContent: buildTextResume(curatedData),
+                  aiChanges: [],
+                };
+              } else {
+                showToast(getCurationNoChangeMessage(curation), 'info');
+              }
             }
           }
         } catch {
@@ -2282,6 +2322,10 @@ export default function Workspace() {
     }
     setIsCurating(true);
     try {
+      if (!hasCuratableBullets(snapshot)) {
+        showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
+        return;
+      }
       const result = await curateResume({
         resumeData: snapshot.data,
         targetRole: snapshot.jobTitle || snapshot.data.title,
@@ -2304,7 +2348,7 @@ export default function Workspace() {
       }
       setVersions((prev) => prev.map((v) => (
         v.id === versionId
-          ? { ...v, aiChanges: [...(v.aiChanges ?? []).filter((c) => c.status !== 'rejected'), ...nextChanges] }
+          ? { ...v, aiChanges: mergeAIChangesWithoutRepeats(v.aiChanges ?? [], nextChanges) }
           : v
       )));
       showToast(`${nextChanges.length} curation suggestion${nextChanges.length === 1 ? '' : 's'} ready to review.`);
