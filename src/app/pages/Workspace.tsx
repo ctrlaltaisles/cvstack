@@ -17,6 +17,7 @@ import { useAuthGate } from '../components/AuthGate';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PRODUCT_DESIGNER_TITLE = 'Product Designer';
 const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
+const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|principal|staff|head|chief|vp|director|associate)\s+)+/i;
 const MIN_JD_CURATION_LENGTH = 40;
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
@@ -36,6 +37,17 @@ function composeRoleCompanyTitle(roleName: string, companyName: string): string 
   const company = compactText(companyName);
   if (role && company) return `${role} @ ${company}`;
   return role;
+}
+function normalizeRoleFamilyTitle(value: string): string {
+  const clean = compactText(value);
+  if (!clean) return PRODUCT_DESIGNER_TITLE;
+  const withoutLevel = clean.replace(ROLE_LEVEL_PREFIX_PATTERN, '').trim() || clean;
+  return normalizeProductDesignerTitle(withoutLevel) || withoutLevel;
+}
+function formatSidebarRoleLabel(roleFamily: string, count: number): string {
+  if (count <= 1) return roleFamily;
+  if (/designer$/i.test(roleFamily)) return roleFamily.replace(/designer$/i, 'Designers');
+  return roleFamily;
 }
 function hasMeaningfulJobDescription(value?: string): boolean {
   return (value ?? '').trim().length >= MIN_JD_CURATION_LENGTH;
@@ -1702,7 +1714,9 @@ export default function Workspace() {
   const currentUser = userStore.get();
   const activeVersionRef = useRef<ResumeVersion | null>(null);
   const autoSavedSigRef = useRef<Record<string, string>>({});
-  const initialExpanded = INITIAL_VERSIONS.filter(v => v.isAI && v.jobTitle).map(v => v.jobTitle!);
+  const initialExpanded = INITIAL_VERSIONS
+    .filter((v) => v.isAI)
+    .map((v) => normalizeRoleFamilyTitle(v.jobTitle || v.name).toLowerCase());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(initialExpanded));
   const localStoreKey = storageKeyForResume(resumeId);
 
@@ -1804,7 +1818,17 @@ export default function Workspace() {
   const baseVersion = versions.find(v => v.isBase) ?? versions[0];
   const canPreviewUploadedResume = Boolean(resumeId && resumeMeta?.source === 'upload' && resumeMeta.file_name);
   const hasUpdatableVariants = versions.some((version) => version.isAI && hasSyncDiffForVariant(baseVersion.data, version.data));
-  const sidebarGroups = versions.filter(v => v.isAI).reduce((acc, v) => { const role = v.jobTitle || v.name; const g = acc.find(x => x.role === role); if (g) g.items.push(v); else acc.push({ role, items: [v] }); return acc; }, [] as { role: string; items: ResumeVersion[] }[]);
+  const sidebarGroups = versions.filter((v) => v.isAI).reduce((acc, v) => {
+    const roleFamily = normalizeRoleFamilyTitle(v.jobTitle || v.name);
+    const key = roleFamily.toLowerCase();
+    const existing = acc.find((group) => group.key === key);
+    if (existing) {
+      existing.items.push(v);
+      return acc;
+    }
+    acc.push({ key, roleFamily, items: [v] });
+    return acc;
+  }, [] as { key: string; roleFamily: string; items: ResumeVersion[] }[]);
 
   const persistVersion = async (nextVersion: ResumeVersion) => {
     if (!resumeId) return;
@@ -1916,7 +1940,8 @@ export default function Workspace() {
           });
         }
         setShowModal(false);
-        if (nextVersion.jobTitle) setExpandedGroups(prev => new Set([...prev, nextVersion.jobTitle!]));
+        const nextGroupKey = normalizeRoleFamilyTitle(nextVersion.jobTitle || nextVersion.name).toLowerCase();
+        setExpandedGroups((prev) => new Set([...prev, nextGroupKey]));
         setVersions((prev) => [...prev, nextVersion]);
         setSelectedVersionId(nextVersion.id);
         setIsCurating(true);
@@ -2284,12 +2309,13 @@ export default function Workspace() {
             )}
           </div>
           {sidebarGroups.map(group => {
-            const isOpen = expandedGroups.has(group.role);
+            const isOpen = expandedGroups.has(group.key);
+            const groupLabel = formatSidebarRoleLabel(group.roleFamily, group.items.length);
             return (
-              <div key={group.role} className="mb-1">
-                <button onClick={() => setExpandedGroups(prev => { const n = new Set(prev); n.has(group.role) ? n.delete(group.role) : n.add(group.role); return n; })} className="w-[calc(100%-16px)] mx-2 text-left px-4 py-2 flex items-center gap-2 rounded-[10px] hover:bg-[#ECECEC] group">
+              <div key={group.key} className="mb-1">
+                <button onClick={() => setExpandedGroups(prev => { const n = new Set(prev); n.has(group.key) ? n.delete(group.key) : n.add(group.key); return n; })} className="w-[calc(100%-16px)] mx-2 text-left px-4 py-2 flex items-center gap-2 rounded-[10px] hover:bg-[#ECECEC] group">
                   <ChevronRight size={13} strokeWidth={1.8} className={`text-[#AAAAAA] group-hover:text-[#6B6B6B] transition-all duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
-                  <span className="text-[13px] text-[#2B2B2B] truncate" style={{ fontWeight: 500 }}>{group.role}</span>
+                  <span className="text-[13px] text-[#2B2B2B] truncate" style={{ fontWeight: 500 }}>{groupLabel}</span>
                 </button>
                 {isOpen && (
                   <div className="mt-0.5 mb-1 animate-[fadeIn_150ms_ease-out]">
