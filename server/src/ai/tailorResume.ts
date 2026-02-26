@@ -131,7 +131,10 @@ const CURATION_HARD_RULES = [
   'Prioritize ownership, scope, outcomes, and business impact',
   'Position experience and skills to match expected responsibility of the target role level at the target company',
   'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
+  'When projectNotes exist for a role, do not preserve prior bullet taxonomy by default; rebuild that role from notes-first evidence',
   'Do not discard transferable skills in projectNotes (e.g., design, visual communication, motion, storytelling) when they are relevant to the target JD',
+  'If source evidence shows scope beyond nominal title level, position by demonstrated scope and ownership, not title seniority bias',
+  'You may re-architect bullet structure (merge, replace, reorder) when needed to surface strategic signal hidden in task-level wording',
 ];
 const BASE_CURATION_HARD_RULES = [
   'No fabricated metrics or tools',
@@ -142,7 +145,10 @@ const BASE_CURATION_HARD_RULES = [
   'Draft a personable, credible About section that reflects profile strengths and working style from existing experience',
   'Expand skills into meaningful skill blocks inferred from demonstrated experience (without inventing tools)',
   'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
+  'When projectNotes exist for a role, do not preserve prior bullet taxonomy by default; rebuild that role from notes-first evidence',
   'Preserve transferable skills and side responsibilities from projectNotes when they add credible capability signal',
+  'If source evidence shows scope beyond nominal title level, position by demonstrated scope and ownership, not title seniority bias',
+  'You may re-architect bullet structure (merge, replace, reorder) when needed to surface strategic signal hidden in task-level wording',
 ];
 const CURATION_GENERIC_PHRASES_TO_REDUCE = [
   'helped',
@@ -167,6 +173,9 @@ const CURATION_VARIANT_SYSTEM_PROMPT = [
   'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
   'Optimize keyword placement across About, Experience, and Skills without keyword stuffing.',
   'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and ensure JD-relevant transferable signals are not lost.',
+  'CRITICAL: For any role with projectNotes, treat prior bullets as optional weak summaries; reconstruct bullets from projectNotes as the primary narrative source.',
+  'CRITICAL: Do not stay task-level. Reframe into transformation-level bullets when evidence supports ownership, systems thinking, risk mitigation, cross-functional leadership, or commercial influence.',
+  'CRITICAL: If title says Intern but scope evidence is higher, write to demonstrated scope while staying truthful.',
 ].join(' ');
 const CURATION_BASE_SYSTEM_PROMPT = [
   'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
@@ -181,6 +190,9 @@ const CURATION_BASE_SYSTEM_PROMPT = [
   'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
   'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
   'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and keep transferable capabilities visible.',
+  'CRITICAL: For any role with projectNotes, treat prior bullets as optional weak summaries; reconstruct bullets from projectNotes as the primary narrative source.',
+  'CRITICAL: Do not stay task-level. Reframe into transformation-level bullets when evidence supports ownership, systems thinking, risk mitigation, cross-functional leadership, or commercial influence.',
+  'CRITICAL: If title says Intern but scope evidence is higher, write to demonstrated scope while staying truthful.',
 ].join(' ');
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with', 'was', 'were', 'this', 'these', 'those',
@@ -265,6 +277,174 @@ function extractNumbers(text: string): string[] {
   return (matches ?? []).map((m) => m.trim().toLowerCase());
 }
 
+function extractProjectNoteSignals(projectNotes: string, limit = 12): string[] {
+  const raw = String(projectNotes ?? '').trim();
+  if (!raw) return [];
+  const clauses = raw
+    .replace(/[•\u2022]/g, '\n')
+    .replace(/^\s*-\s+/gm, '')
+    .split(/\n|[.;]|,\s+and\s+|,\s+but\s+|,\s+where\s+|,\s+which\s+/i)
+    .map((part) => part.trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
+
+  const signals: string[] = [];
+  for (const clause of clauses) {
+    const compact = clause.replace(/^[-–—]\s*/, '').trim();
+    if (!compact) continue;
+    const words = compact.split(/\s+/);
+    if (words.length < 2) continue;
+
+    const significant = tokenize(compact).filter((t) => t.length >= 3);
+    if (significant.length < 2) continue;
+
+    const normalized = significant.slice(0, 8).join(' ');
+    if (!signals.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
+      signals.push(normalized);
+    }
+    if (signals.length >= limit) break;
+  }
+  return signals;
+}
+
+function buildProjectNotesSignalMap(resumeData: ResumeData): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const exp of resumeData.workExperience ?? []) {
+    const signals = extractProjectNoteSignals(exp.projectNotes ?? '', 12);
+    if (signals.length > 0) map.set(exp.id, signals);
+  }
+  return map;
+}
+
+function containsSignal(text: string, signal: string): boolean {
+  const textTokens = new Set(tokenize(text).filter((token) => token.length >= 3));
+  const signalTokens = tokenize(signal).filter((token) => token.length >= 3);
+  if (signalTokens.length === 0) return false;
+  const overlap = signalTokens.filter((token) => textTokens.has(token)).length;
+  return overlap >= Math.max(2, Math.ceil(signalTokens.length * 0.65));
+}
+
+function evaluateProjectNotesCoverage(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+): {
+  hasSignals: boolean;
+  coverageRatio: number;
+  newSignalRatio: number;
+  missingByExp: Array<{ expId: string; role: string; company: string; missingSignals: string[] }>;
+} {
+  const signalMap = buildProjectNotesSignalMap(resumeData);
+  if (signalMap.size === 0) {
+    return { hasSignals: false, coverageRatio: 1, newSignalRatio: 1, missingByExp: [] };
+  }
+
+  let totalSignals = 0;
+  let coveredSignals = 0;
+  let newlySurfacedSignals = 0;
+  let baselineSignals = 0;
+  const missingByExp: Array<{ expId: string; role: string; company: string; missingSignals: string[] }> = [];
+
+  for (const [expId, signals] of signalMap.entries()) {
+    const originalExp = resumeData.workExperience.find((item) => item.id === expId);
+    const improvedExp = improved.experience.find((item) => item.expId === expId);
+    const originalText = `${originalExp?.bullets.join(' ') ?? ''}`.trim();
+    const improvedText = `${improvedExp?.bullets.join(' ') ?? ''}`.trim();
+    const missingSignals: string[] = [];
+
+    for (const signal of signals) {
+      totalSignals += 1;
+      const presentInOriginal = containsSignal(originalText, signal);
+      const presentInImproved = containsSignal(improvedText, signal);
+
+      if (presentInImproved) coveredSignals += 1;
+      if (!presentInOriginal) {
+        baselineSignals += 1;
+        if (presentInImproved) newlySurfacedSignals += 1;
+      }
+      if (!presentInImproved) missingSignals.push(signal);
+    }
+
+    if (missingSignals.length > 0 && originalExp) {
+      missingByExp.push({
+        expId,
+        role: originalExp.role,
+        company: originalExp.company,
+        missingSignals: missingSignals.slice(0, 6),
+      });
+    }
+  }
+
+  return {
+    hasSignals: totalSignals > 0,
+    coverageRatio: totalSignals > 0 ? coveredSignals / totalSignals : 1,
+    newSignalRatio: baselineSignals > 0 ? newlySurfacedSignals / baselineSignals : 1,
+    missingByExp,
+  };
+}
+
+type StrategicTheme =
+  | 'ownership'
+  | 'system_design'
+  | 'risk_mitigation'
+  | 'commercial_influence'
+  | 'cross_functional_leadership';
+
+const STRATEGIC_THEME_RULES: Array<{ theme: StrategicTheme; pattern: RegExp }> = [
+  { theme: 'ownership', pattern: /\b(owned|ownership|took over|drove|led|orchestrated|architected|accountable|initiated)\b/i },
+  { theme: 'system_design', pattern: /\b(framework|system|model|pipeline|workflow|governance|architecture|operationali[sz]ed|standardi[sz]ed|lifecycle)\b/i },
+  { theme: 'risk_mitigation', pattern: /\b(risk|bottleneck|mitigat|compliance|policy|renewal tracking|audit|grey area|fallback|escalation)\b/i },
+  { theme: 'commercial_influence', pattern: /\b(cost|budget|savings|commercial|vendor|procurement|roi|efficiency|run rate|headcount planning)\b/i },
+  { theme: 'cross_functional_leadership', pattern: /\b(cross-functional|stakeholder|bridge|engineering|product|finance|operations|leadership|alignment|decision-making)\b/i },
+];
+
+function extractStrategicThemes(text: string): Set<StrategicTheme> {
+  const out = new Set<StrategicTheme>();
+  for (const rule of STRATEGIC_THEME_RULES) {
+    if (rule.pattern.test(String(text ?? ''))) out.add(rule.theme);
+  }
+  return out;
+}
+
+function evaluateStrategicThemeCoverage(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+): {
+  hasThemes: boolean;
+  coverageRatio: number;
+  missingByExp: Array<{ expId: string; role: string; company: string; missingThemes: StrategicTheme[] }>;
+} {
+  let total = 0;
+  let covered = 0;
+  const missingByExp: Array<{ expId: string; role: string; company: string; missingThemes: StrategicTheme[] }> = [];
+
+  for (const exp of resumeData.workExperience ?? []) {
+    const notesThemes = extractStrategicThemes(exp.projectNotes ?? '');
+    if (notesThemes.size === 0) continue;
+    const improvedExp = improved.experience.find((item) => item.expId === exp.id);
+    const improvedText = improvedExp ? improvedExp.bullets.join(' ') : '';
+    const improvedThemes = extractStrategicThemes(improvedText);
+    const missingThemes: StrategicTheme[] = [];
+    for (const theme of notesThemes) {
+      total += 1;
+      if (improvedThemes.has(theme)) covered += 1;
+      else missingThemes.push(theme);
+    }
+    if (missingThemes.length > 0) {
+      missingByExp.push({
+        expId: exp.id,
+        role: exp.role,
+        company: exp.company,
+        missingThemes,
+      });
+    }
+  }
+
+  return {
+    hasThemes: total > 0,
+    coverageRatio: total > 0 ? covered / total : 1,
+    missingByExp,
+  };
+}
+
 export function extractJDKeywords(jdText: string, targetRole?: string): string[] {
   const seed = [
     'product strategy', 'roadmap', 'stakeholder management', 'cross-functional', 'user research', 'design systems', 'accessibility',
@@ -324,6 +504,18 @@ function compactResumeDataForCuration(resumeData: ResumeData): ResumeData {
     education: (resumeData.education ?? []).slice(0, 5),
     certifications: (resumeData.certifications ?? []).slice(0, 5),
     skills: (resumeData.skills ?? []).slice(0, 40).map((skill) => clamp(skill, 40)),
+  };
+}
+
+function buildProjectNotesPrimaryResumeData(resumeData: ResumeData): ResumeData {
+  return {
+    ...resumeData,
+    workExperience: (resumeData.workExperience ?? []).map((exp) => {
+      const hasNotes = String(exp.projectNotes ?? '').trim().length > 0;
+      if (!hasNotes) return exp;
+      // De-anchor the model from legacy bullet taxonomy when richer raw notes exist.
+      return { ...exp, bullets: [] };
+    }),
   };
 }
 
@@ -700,6 +892,43 @@ export function detectLowValueRephrase(beforeAfterPairs: Array<{ before: string;
   return { lowValue, similarity: round2(avgSim), notes };
 }
 
+export function detectCategoryMirrorRisk(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+): { risky: boolean; mirrorRatio: number; compared: number } {
+  let compared = 0;
+  let mirrored = 0;
+
+  for (const exp of improved.experience) {
+    const original = resumeData.workExperience.find((item) => item.id === exp.expId);
+    if (!original) continue;
+    const originalBullets = original.bullets.map((b) => b.trim()).filter(Boolean);
+    const improvedBullets = exp.bullets.map((b) => b.trim()).filter(Boolean);
+    if (originalBullets.length === 0 || improvedBullets.length === 0) continue;
+
+    const minLen = Math.min(originalBullets.length, improvedBullets.length);
+    const lenDelta = Math.abs(originalBullets.length - improvedBullets.length);
+    if (lenDelta > 1) continue;
+
+    for (let i = 0; i < minLen; i += 1) {
+      const before = originalBullets[i];
+      const after = improvedBullets[i];
+      if (!before || !after) continue;
+      compared += 1;
+      const sim = lexicalSimilarity(before, after);
+      const beforeSignals = [hasScopeSignal(before), hasOwnershipSignal(before), hasOutcomeSignal(before), hasToolSignal(before), hasMetric(before)].filter(Boolean).length;
+      const afterSignals = [hasScopeSignal(after), hasOwnershipSignal(after), hasOutcomeSignal(after), hasToolSignal(after), hasMetric(after)].filter(Boolean).length;
+      if (sim >= 0.72 && afterSignals <= beforeSignals + 1) {
+        mirrored += 1;
+      }
+    }
+  }
+
+  const mirrorRatio = compared > 0 ? mirrored / compared : 0;
+  const risky = compared >= 3 && mirrorRatio >= 0.55;
+  return { risky, mirrorRatio: round2(mirrorRatio), compared };
+}
+
 export function detectMetricHallucination(beforeAfterPairs: Array<{ before: string; after: string }>): { suspicious: boolean; details: string[] } {
   const details: string[] = [];
   for (const pair of beforeAfterPairs) {
@@ -747,12 +976,25 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   const beforeText = [input.resumeData.bio, ...input.resumeData.workExperience.flatMap((exp) => exp.bullets)].join(' ');
   const afterText = [output.improved.about, ...output.improved.experience.flatMap((exp) => exp.bullets)].join(' ');
   const fillerImproved = genericFillerCount(afterText) <= genericFillerCount(beforeText);
+  const projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
+  const projectNotesPass = !projectNotesCoverage.hasSignals
+    || (projectNotesCoverage.coverageRatio >= 0.65 && projectNotesCoverage.newSignalRatio >= 0.25);
+  const strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
+  const strategicThemePass = !strategicThemeCoverage.hasThemes || strategicThemeCoverage.coverageRatio >= 0.6;
+  const mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
 
-  const passed = !lowValue.lowValue && !hallucination.suspicious && impactScore >= 0.45 && fillerImproved;
+  const passed = !lowValue.lowValue && !hallucination.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky;
   const notes = [
     lowValue.notes,
     hallucination.suspicious ? hallucination.details.join(' | ') : 'No fabricated metric pattern detected.',
     fillerImproved ? 'Generic filler reduced or unchanged.' : 'Generic filler increased.',
+    projectNotesCoverage.hasSignals
+      ? `Project-notes coverage=${Math.round(projectNotesCoverage.coverageRatio * 100)}%, new-signal lift=${Math.round(projectNotesCoverage.newSignalRatio * 100)}%.`
+      : 'No project-notes signals detected.',
+    strategicThemeCoverage.hasThemes
+      ? `Strategic-theme coverage=${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`
+      : 'No strategic themes detected in project notes.',
+    `Category-mirror risk=${mirrorRisk.risky ? 'high' : 'low'} (ratio=${Math.round(mirrorRisk.mirrorRatio * 100)}%, compared=${mirrorRisk.compared}).`,
   ].join(' ');
 
   return {
@@ -954,8 +1196,18 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
   const companyContext = hasJD ? await researchCompanyContext(input) : undefined;
 
   const systemPrompt = hasJD ? CURATION_VARIANT_SYSTEM_PROMPT : CURATION_BASE_SYSTEM_PROMPT;
-  const compactResumeData = compactResumeDataForCuration(input.resumeData);
-  const hasProjectNotes = compactResumeData.workExperience.some((exp) => String(exp.projectNotes ?? '').trim().length > 0);
+  const projectNotesPrimaryData = buildProjectNotesPrimaryResumeData(input.resumeData);
+  const compactResumeData = compactResumeDataForCuration(projectNotesPrimaryData);
+  const hasProjectNotes = input.resumeData.workExperience.some((exp) => String(exp.projectNotes ?? '').trim().length > 0);
+  const projectNotesSignals = [...buildProjectNotesSignalMap(compactResumeData).entries()].map(([expId, signals]) => {
+    const exp = compactResumeData.workExperience.find((item) => item.id === expId);
+    return {
+      expId,
+      role: exp?.role ?? '',
+      company: exp?.company ?? '',
+      signals: signals.slice(0, 10),
+    };
+  });
 
   const basePayload = {
     task: hasJD
@@ -985,31 +1237,53 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     recruiter_rubric: {
       bullet_formula: '[Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools]',
       required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
+      narrative_compression_target: 'Prefer 3-5 strategic bullets per role unless evidence strongly requires 6',
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
       role_level_positioning: hasJD
         ? 'Experience and skills must reflect the responsibility level expected for the target role at the target company.'
         : 'Experience and skills must reflect the responsibility level implied by the candidate history and current title.',
       transferable_signal_rule: 'If projectNotes include credible capabilities outside the formal job title, retain them when relevant to the target role instead of pruning them away.',
+      title_bias_override: 'Position by demonstrated scope. Nominal title (e.g., Intern) must not suppress proven ownership, system design, or leadership signals.',
     },
     source_priority: hasProjectNotes
       ? {
         primary: 'workExperience.projectNotes',
-        secondary: 'workExperience.bullets',
-        rationale: 'projectNotes are richer raw evidence and may contain role-transferable achievements omitted from prior summaries.',
+        secondary: 'JD + other resume sections',
+        tertiary: 'legacy bullets (fact-check only, not structure anchor)',
+        rationale: 'projectNotes are richer raw evidence and may contain role-transferable achievements omitted from prior summaries; legacy bullets can bias toward low-leverage categories.',
       }
       : {
         primary: 'workExperience.bullets',
         secondary: 'other resume sections',
       },
+    legacyBulletArchive: (input.resumeData.workExperience ?? []).map((exp) => ({
+      expId: exp.id,
+      role: exp.role,
+      company: exp.company,
+      legacyBullets: (exp.bullets ?? []).slice(0, 8),
+      usageRule: 'Use only for factual consistency checks. Do not mirror structure unless projectNotes are empty.',
+    })),
+    reconstruction_mode: hasProjectNotes ? 'project_notes_first_rebuild' : 'standard_elevate',
+    projectNotesSignalAudit: projectNotesSignals,
+    narrative_reframe_rules: [
+      'If projectNotes reveal deeper ownership, system design, risk mitigation, commercial influence, or cross-functional leadership not visible in existing bullets, re-architect bullet structure to surface those signals.',
+      'Elevate task descriptions into strategic themes when supported by source evidence.',
+      'You may consolidate, merge, or replace bullets if original structure hides higher-order capability.',
+      'Prefer transformation framing (problem -> intervention -> mechanism -> outcome -> business implication) over activity framing.',
+      'Avoid one-to-one mirroring of original bullet categories when notes support a more strategic narrative architecture.',
+      'Compress and elevate: combine overlapping task clusters into fewer, higher-leverage bullets with clearer strategic signal.',
+      'Project-notes-first rebuild: for roles with notes, start from a blank bullet canvas and reconstruct the narrative from notes before checking legacy bullets for factual consistency.',
+    ],
     editing_rules: [
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
-      'Keep each role to 3-7 bullets and prioritize strongest evidence.',
+      'Keep each role to 3-5 bullets in most cases (up to 6 only when truly necessary) and prioritize strongest evidence.',
       'For removals, use empty string in improved bullets at that index.',
       'Treat resumeData.workExperience[].projectNotes as private source context for bullet improvements.',
       'If projectNotes conflict with existing bullets, preserve truthfulness and ask concise clarification questions instead of inventing details.',
       'When projectNotes include JD-relevant transferable work that is missing in current bullets, re-introduce it into improved bullets or skills.',
       'Do not overfit to the current job title if projectNotes show additional credible capabilities useful for the target role.',
+      'Do not preserve original bullet structure if it obscures higher-order capability.',
     ],
     resumeData: compactResumeData,
     output_schema: {
@@ -1053,16 +1327,70 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
 
     let quality = evaluateCurateQuality(input, output);
     output.quality = quality;
+    let projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
+    let strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
+    let mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
+    const requiresProjectNotesRescue = projectNotesCoverage.hasSignals
+      && (projectNotesCoverage.coverageRatio < 0.65 || projectNotesCoverage.newSignalRatio < 0.25);
+    const requiresStrategicThemeRescue = strategicThemeCoverage.hasThemes && strategicThemeCoverage.coverageRatio < 0.6;
+    const requiresNarrativeRestructureRescue = mirrorRisk.risky;
+    if (requiresProjectNotesRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Project-notes rescue triggered: coverage ${Math.round(projectNotesCoverage.coverageRatio * 100)}%, new-signal lift ${Math.round(projectNotesCoverage.newSignalRatio * 100)}%.`,
+        ]),
+      ];
+    }
+    if (requiresStrategicThemeRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Strategic-theme rescue triggered: coverage ${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`,
+        ]),
+      ];
+    }
+    if (requiresNarrativeRestructureRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Narrative restructure rescue triggered: category-mirror ratio ${Math.round(mirrorRisk.mirrorRatio * 100)}%.`,
+        ]),
+      ];
+    }
 
-    if (CURATE_SECOND_PASS_ENABLED && (!quality.passed || quality.similarityScore >= 0.86)) {
+    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue);
+    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue) && shouldRunSecondPass) {
       const elapsedBeforeSecondPass = Date.now() - started;
       const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
       if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
         try {
+          const missingSignalList = projectNotesCoverage.missingByExp
+            .slice(0, 4)
+            .map((row) => ({
+              expId: row.expId,
+              role: row.role,
+              company: row.company,
+              mustRecoverSignals: row.missingSignals.slice(0, 5),
+            }));
+          const missingStrategicThemes = strategicThemeCoverage.missingByExp
+            .slice(0, 4)
+            .map((row) => ({
+              expId: row.expId,
+              role: row.role,
+              company: row.company,
+              mustRecoverThemes: row.missingThemes,
+            }));
           const secondPassPrompt = JSON.stringify({
             ...basePayload,
-            correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics. Re-check projectNotes and restore any missing JD-relevant transferable signals.',
+            correction: 'Second pass required. Reframe narrative at recruiter-grade level. Compress and elevate. Add stronger specificity, scope, outcomes, tooling, decision ownership, system thinking, risk mitigation, and commercial influence where evidenced. Avoid simple verb swaps and one-to-one category mirroring. No fabricated metrics.',
             firstPassQuality: quality,
+            projectNotesCoverage,
+            strategicThemeCoverage,
+            mirrorRisk,
+            missingSignalsToRecover: missingSignalList,
+            missingStrategicThemesToRecover: missingStrategicThemes,
+            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, and structure must avoid one-to-one category mirroring.',
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
           output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
@@ -1071,6 +1399,9 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           }
           quality = evaluateCurateQuality(input, output);
           output.quality = quality;
+          projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
+          strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
+          mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
           output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
         } catch (secondPassError) {
           const elapsedSecondPassMs = Date.now() - started;
