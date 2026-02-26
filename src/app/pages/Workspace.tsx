@@ -45,8 +45,6 @@ function normalizeRoleFamilyTitle(value: string): string {
   return normalizeProductDesignerTitle(withoutLevel) || withoutLevel;
 }
 function formatSidebarRoleLabel(roleFamily: string, count: number): string {
-  if (count <= 1) return roleFamily;
-  if (/designer$/i.test(roleFamily)) return roleFamily.replace(/designer$/i, 'Designers');
   return roleFamily;
 }
 function hasMeaningfulJobDescription(value?: string): boolean {
@@ -1612,9 +1610,9 @@ function CreateResumeModal({ onGenerate, onClose }: { onGenerate: (role: string,
           <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} /></div>
           <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label><input value={jobLink} onChange={e => setJobLink(e.target.value)} placeholder="https://…" className={fCls} /></div>
         </div>
-        <div className="px-8 py-5 border-t border-[#F0F0F0] flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-[#E8E8E8] rounded-[10px] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5]">Cancel</button>
-          <button onClick={() => { if (roleName.trim()) onGenerate(roleName, company, jobDesc, jobLink); }} disabled={!roleName.trim()} className="flex-[2] py-2.5 bg-[#1A1A1A] text-white rounded-[10px] text-sm hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+        <div className="px-8 py-5 border-t border-[#F0F0F0] flex items-center justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2.5 border border-[#E8E8E8] rounded-[10px] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5]">Cancel</button>
+          <button onClick={() => { if (roleName.trim()) onGenerate(roleName, company, jobDesc, jobLink); }} disabled={!roleName.trim()} className="px-4 py-2.5 bg-[#1A1A1A] text-white rounded-[10px] text-sm hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             <Sparkles size={13} /> Generate Resume
           </button>
         </div>
@@ -1626,6 +1624,7 @@ function CreateResumeModal({ onGenerate, onClose }: { onGenerate: (role: string,
 function BaseResumeFileModal({
   fileName,
   pdfUrl,
+  hasUploadedPdf,
   isLoading,
   isUploading,
   onClose,
@@ -1633,50 +1632,80 @@ function BaseResumeFileModal({
 }: {
   fileName: string;
   pdfUrl: string;
+  hasUploadedPdf: boolean;
   isLoading: boolean;
   isUploading: boolean;
   onClose: () => void;
   onReplace: (file: File) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const isEmptyState = !hasUploadedPdf;
   return (
     <div className="fixed inset-0 bg-black/20 z-[220] flex items-center justify-center p-6 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={onClose}>
-      <div className="bg-white rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.14)] w-full max-w-[920px] max-h-[94vh] overflow-hidden animate-[fadeInScale_200ms_ease-out] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
+      <div className={`bg-white rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.14)] w-full overflow-hidden animate-[fadeInScale_200ms_ease-out] flex flex-col ${isEmptyState ? 'max-w-[620px]' : 'max-w-[920px] max-h-[92vh]'}`} onClick={(e) => e.stopPropagation()}>
+        <div className="px-8 py-6 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
           <div>
-            <h3 className="text-base text-[#1A1A1A]" style={{ fontWeight: 500 }}>Uploaded Resume</h3>
-            <p className="text-xs text-[#9B9B9B] mt-0.5 truncate max-w-[520px]">{fileName || 'resume.pdf'}</p>
+            <h3 className="text-base text-[#1A1A1A]" style={{ fontWeight: 500 }}>
+              {isEmptyState ? 'Upload Resume' : 'Resume Preview'}
+            </h3>
+            <p className="text-xs text-[#9B9B9B] mt-0.5 truncate max-w-[620px]">
+              {isEmptyState ? 'Start building your base resume' : (fileName || 'resume.pdf')}
+            </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors"><X size={16} /></button>
         </div>
 
-        <div className="bg-[#FAFAFA] p-4">
-          {isLoading ? (
-            <div className="h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white flex items-center justify-center text-sm text-[#8B8B8B]">Loading PDF preview...</div>
-          ) : pdfUrl ? (
-            <iframe title="Uploaded resume preview" src={pdfUrl} className="block h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white" />
+        {isEmptyState ? (
+          <div className="px-8 py-8 flex items-center justify-center min-h-[220px]">
+            <div className="text-center max-w-[360px]">
+              <p className="text-sm text-[#8B8B8B]">No resume uploaded yet.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="px-8 py-6 flex-1 min-h-0 flex flex-col">
+            {isLoading ? (
+              <div className="flex-1 min-h-[56vh] w-full rounded-[12px] border border-[#ECECEC] bg-[#FAFAFA] flex items-center justify-center text-sm text-[#8B8B8B]">Loading PDF preview...</div>
+            ) : pdfUrl ? (
+              <iframe title="Uploaded resume preview" src={pdfUrl} className="block flex-1 min-h-[56vh] w-full rounded-[12px] border border-[#ECECEC] bg-white" />
+            ) : (
+              <div className="flex-1 min-h-[56vh] w-full rounded-[12px] border border-[#ECECEC] bg-[#FAFAFA] flex items-center justify-center text-sm text-[#8B8B8B]">
+                Unable to preview this PDF.
+              </div>
+            )}
+          </div>
+        )}
+        <div className="px-8 py-5 border-t border-[#F0F0F0] flex items-center justify-end gap-3 shrink-0">
+          {isEmptyState ? (
+            <button onClick={() => fileRef.current?.click()} disabled={isUploading} className="px-4 py-2.5 bg-[#1A1A1A] text-white rounded-[10px] text-sm transition-colors hover:bg-[#2A2A2A] disabled:opacity-60">
+              {isUploading ? 'Uploading...' : 'Upload'}
+            </button>
           ) : (
-            <div className="h-[72vh] min-h-[72vh] w-full rounded-[12px] border border-[#ECECEC] bg-white flex items-center justify-center text-sm text-[#8B8B8B]">Unable to preview this PDF.</div>
+            <div className="relative group/replace">
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={isUploading}
+                title="Replacing the PDF will reset your Base Resume content."
+                className="px-4 py-2.5 border border-[#DCDCDC] bg-white text-[#2B2B2B] rounded-[10px] text-sm transition-colors hover:bg-[#F8F8F8] disabled:opacity-60"
+              >
+                {isUploading ? 'Uploading...' : 'Replace Resume'}
+              </button>
+              <div className="pointer-events-none absolute right-0 bottom-[calc(100%+8px)] whitespace-nowrap rounded-[8px] bg-[#1A1A1A] px-3 py-2 text-xs text-white opacity-0 transition-opacity duration-150 group-hover/replace:opacity-100">
+                Replacing the PDF will reset your Base Resume content.
+              </div>
+            </div>
           )}
         </div>
-
-        <div className="px-6 py-4 border-t border-[#F0F0F0] flex gap-3 shrink-0">
-          <button onClick={() => fileRef.current?.click()} disabled={isUploading} className="px-4 py-2 rounded-[10px] border border-[#E2E2E2] text-sm text-[#3B3B3B] hover:bg-[#F5F5F5] disabled:opacity-60">
-            {isUploading ? 'Uploading...' : 'Replace Resume PDF'}
-          </button>
-          <button onClick={onClose} className="px-4 py-2 rounded-[10px] border border-[#E2E2E2] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5]">Close</button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) onReplace(file);
-              event.currentTarget.value = '';
-            }}
-          />
-        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) onReplace(file);
+            event.currentTarget.value = '';
+          }}
+        />
       </div>
     </div>
   );
@@ -1816,7 +1845,8 @@ export default function Workspace() {
 
   const activeVersion = versions.find(v => v.id === selectedVersionId) || versions[0];
   const baseVersion = versions.find(v => v.isBase) ?? versions[0];
-  const canPreviewUploadedResume = Boolean(resumeId && resumeMeta?.source === 'upload' && resumeMeta.file_name);
+  const hasUploadedResumePdf = Boolean(resumeMeta?.source === 'upload' && resumeMeta.file_name);
+  const canManageBaseResumePdf = Boolean(resumeId);
   const hasUpdatableVariants = versions.some((version) => version.isAI && hasSyncDiffForVariant(baseVersion.data, version.data));
   const sidebarGroups = versions.filter((v) => v.isAI).reduce((acc, v) => {
     const roleFamily = normalizeRoleFamilyTitle(v.jobTitle || v.name);
@@ -2098,6 +2128,11 @@ export default function Workspace() {
 
   useEffect(() => {
     if (!showBaseFileModal || !resumeId) return;
+    if (!hasUploadedResumePdf) {
+      setBasePdfUrl('');
+      setBasePdfLoading(false);
+      return;
+    }
     let revokedUrl: string | null = null;
     setBasePdfLoading(true);
     void getResumePdfBlob(resumeId)
@@ -2117,7 +2152,7 @@ export default function Workspace() {
     return () => {
       if (revokedUrl) URL.revokeObjectURL(revokedUrl);
     };
-  }, [showBaseFileModal, resumeId, basePdfRefreshKey]);
+  }, [showBaseFileModal, resumeId, basePdfRefreshKey, hasUploadedResumePdf]);
 
   const handleReplaceBasePdf = async (file: File) => {
     if (!resumeId) return;
@@ -2294,7 +2329,7 @@ export default function Workspace() {
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
             <button onClick={() => setSelectedVersionId(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
-            {canPreviewUploadedResume && (
+            {canManageBaseResumePdf && (
               <button
                 onClick={(event) => {
                   event.stopPropagation();
@@ -2451,6 +2486,7 @@ export default function Workspace() {
         <BaseResumeFileModal
           fileName={resumeMeta?.file_name || 'resume.pdf'}
           pdfUrl={basePdfUrl}
+          hasUploadedPdf={hasUploadedResumePdf}
           isLoading={basePdfLoading}
           isUploading={isReplacingBasePdf}
           onClose={() => setShowBaseFileModal(false)}
