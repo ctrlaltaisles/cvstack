@@ -130,6 +130,8 @@ const CURATION_HARD_RULES = [
   'Reject synonym-only rewrites',
   'Prioritize ownership, scope, outcomes, and business impact',
   'Position experience and skills to match expected responsibility of the target role level at the target company',
+  'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
+  'Do not discard transferable skills in projectNotes (e.g., design, visual communication, motion, storytelling) when they are relevant to the target JD',
 ];
 const BASE_CURATION_HARD_RULES = [
   'No fabricated metrics or tools',
@@ -139,6 +141,8 @@ const BASE_CURATION_HARD_RULES = [
   'Improve existing experience bullets with stronger ownership, scope, outcomes, and tool clarity using source facts only',
   'Draft a personable, credible About section that reflects profile strengths and working style from existing experience',
   'Expand skills into meaningful skill blocks inferred from demonstrated experience (without inventing tools)',
+  'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
+  'Preserve transferable skills and side responsibilities from projectNotes when they add credible capability signal',
 ];
 const CURATION_GENERIC_PHRASES_TO_REDUCE = [
   'helped',
@@ -162,6 +166,7 @@ const CURATION_VARIANT_SYSTEM_PROMPT = [
   'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
   'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
   'Optimize keyword placement across About, Experience, and Skills without keyword stuffing.',
+  'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and ensure JD-relevant transferable signals are not lost.',
 ].join(' ');
 const CURATION_BASE_SYSTEM_PROMPT = [
   'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
@@ -175,6 +180,7 @@ const CURATION_BASE_SYSTEM_PROMPT = [
   'Keep truthfulness: do not invent employers, products, metrics, awards, credentials, or tools.',
   'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
   'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
+  'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and keep transferable capabilities visible.',
 ].join(' ');
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with', 'was', 'were', 'this', 'these', 'those',
@@ -949,6 +955,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
 
   const systemPrompt = hasJD ? CURATION_VARIANT_SYSTEM_PROMPT : CURATION_BASE_SYSTEM_PROMPT;
   const compactResumeData = compactResumeDataForCuration(input.resumeData);
+  const hasProjectNotes = compactResumeData.workExperience.some((exp) => String(exp.projectNotes ?? '').trim().length > 0);
 
   const basePayload = {
     task: hasJD
@@ -983,13 +990,26 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       role_level_positioning: hasJD
         ? 'Experience and skills must reflect the responsibility level expected for the target role at the target company.'
         : 'Experience and skills must reflect the responsibility level implied by the candidate history and current title.',
+      transferable_signal_rule: 'If projectNotes include credible capabilities outside the formal job title, retain them when relevant to the target role instead of pruning them away.',
     },
+    source_priority: hasProjectNotes
+      ? {
+        primary: 'workExperience.projectNotes',
+        secondary: 'workExperience.bullets',
+        rationale: 'projectNotes are richer raw evidence and may contain role-transferable achievements omitted from prior summaries.',
+      }
+      : {
+        primary: 'workExperience.bullets',
+        secondary: 'other resume sections',
+      },
     editing_rules: [
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
       'Keep each role to 3-7 bullets and prioritize strongest evidence.',
       'For removals, use empty string in improved bullets at that index.',
       'Treat resumeData.workExperience[].projectNotes as private source context for bullet improvements.',
       'If projectNotes conflict with existing bullets, preserve truthfulness and ask concise clarification questions instead of inventing details.',
+      'When projectNotes include JD-relevant transferable work that is missing in current bullets, re-introduce it into improved bullets or skills.',
+      'Do not overfit to the current job title if projectNotes show additional credible capabilities useful for the target role.',
     ],
     resumeData: compactResumeData,
     output_schema: {
@@ -1041,7 +1061,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         try {
           const secondPassPrompt = JSON.stringify({
             ...basePayload,
-            correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics.',
+            correction: 'Second pass required. Make it sharper and more distinct. Add stronger specificity, scope, outcomes, tooling, and decision ownership signals. Reduce synonym-only edits. No fabricated metrics. Re-check projectNotes and restore any missing JD-relevant transferable signals.',
             firstPassQuality: quality,
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));

@@ -2521,7 +2521,7 @@ export default function Workspace() {
           )}
 
           <div
-            className={`absolute inset-0 z-30 bg-white/20 backdrop-blur-[3px] transition-all duration-400 ${isCurating ? 'opacity-100 pointer-events-auto cursor-progress' : 'opacity-0 pointer-events-none'}`}
+            className={`absolute inset-0 z-30 bg-white/20 backdrop-blur-[3px] transition-all duration-400 ${isCurating ? 'opacity-100 pointer-events-auto cursor-default' : 'opacity-0 pointer-events-none'}`}
           />
 
           {/* ── Floating toolbar — centered at bottom, above scroll ── */}
