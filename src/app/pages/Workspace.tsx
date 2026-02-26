@@ -6,7 +6,7 @@ import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCe
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
   Copy, GripVertical, MoreHorizontal, FileText, Share2, Trash2,
-  Paperclip, ExternalLink, AlertCircle, Info,
+  Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
@@ -87,6 +87,47 @@ function isInRange(v: { month: number; year: number }, minDate?: { month: number
   if (minDate && key < monthKey(minDate)) return false;
   if (maxDate && key > monthKey(maxDate)) return false;
   return true;
+}
+type SpeechRecognitionAlternativeLike = { transcript: string };
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: SpeechRecognitionAlternativeLike;
+};
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === 'undefined') return null;
+  const win = window as Window & {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
+}
+function appendDictatedText(existing: string, dictated: string): string {
+  const clean = dictated.trim();
+  if (!clean) return existing;
+  if (!existing.trim()) return clean;
+  const needsSpacing = /[.!?]$/.test(existing.trim()) ? '\n\n' : ' ';
+  return `${existing.trim()}${needsSpacing}${clean}`;
 }
 const PROJECT_NOTES_PROMPTS = [
   'What were the 2-3 biggest projects you owned in this role?',
@@ -664,7 +705,7 @@ function InlineArea({ value, onChange, className = '', placeholder = 'Click to e
     <div className={className}>
       {editing
         ? <textarea ref={ref} value={local} onChange={e => { setLocal(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onBlur={save} onKeyDown={e => { if (e.key === 'Escape') { setLocal(value); setEditing(false); } }} className="w-full bg-[#F5F5F5] outline-none resize-none overflow-hidden px-2 py-1.5 leading-relaxed rounded-[8px]" style={{ fontSize: 'inherit', fontFamily: 'inherit', color: 'inherit' }} />
-        : <p onClick={() => { if (!disabled) setEditing(true); }} className={`${disabled ? '' : 'cursor-text hover:bg-[#F5F5F5]'} rounded-[8px] px-2 -mx-2 py-1.5 -my-1.5 transition-colors leading-relaxed`}>{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</p>}
+        : <p onClick={() => { if (!disabled) setEditing(true); }} className={`${disabled ? '' : 'cursor-text hover:bg-[#F5F5F5]'} rounded-[8px] px-2 -mx-2 py-1.5 -my-1.5 transition-colors leading-relaxed whitespace-pre-wrap break-words`}>{local || <span className="text-[#D0D0D0]">{placeholder}</span>}</p>}
     </div>
   );
 }
@@ -890,16 +931,142 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 function ProjectNotesEditor({ value, onChange, disabled = false }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const [expanded, setExpanded] = useState(Boolean(value.trim()));
+  const [isRecording, setIsRecording] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [dictationError, setDictationError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const valueRef = useRef(value);
+  const supportsDictation = !disabled && Boolean(getSpeechRecognitionCtor());
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  const stopDictation = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsRecording(false);
+    setInterimTranscript('');
+  }, []);
+
+  const startDictation = useCallback(() => {
+    const RecognitionCtor = getSpeechRecognitionCtor();
+    if (!RecognitionCtor || disabled) {
+      setDictationError('Voice dictation is not supported in this browser.');
+      return;
+    }
+    setDictationError(null);
+    setInterimTranscript('');
+
+    const recognition = new RecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => {
+      setIsRecording(false);
+      setInterimTranscript('');
+      recognitionRef.current = null;
+    };
+    recognition.onerror = (event) => {
+      const err = event.error ?? 'unknown_error';
+      if (err !== 'aborted' && err !== 'no-speech') {
+        setDictationError('Microphone access was blocked or interrupted. Please try again.');
+      }
+      setIsRecording(false);
+      setInterimTranscript('');
+      recognitionRef.current = null;
+    };
+    recognition.onresult = (event) => {
+      let finalChunk = '';
+      let interimChunk = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0]?.transcript ?? '';
+        if (!transcript.trim()) continue;
+        if (event.results[i].isFinal) finalChunk += ` ${transcript}`;
+        else interimChunk += ` ${transcript}`;
+      }
+
+      if (finalChunk.trim()) {
+        const nextValue = appendDictatedText(valueRef.current, finalChunk);
+        valueRef.current = nextValue;
+        onChange(nextValue);
+      }
+      setInterimTranscript(interimChunk.trim());
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      setDictationError('Microphone is already in use. Please stop other recordings and try again.');
+      recognitionRef.current = null;
+      setIsRecording(false);
+    }
+  }, [disabled, onChange]);
+
   return (
     <div className="mt-6 rounded-[12px] bg-[#F8F8F8]">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className={`w-full pr-4 rounded-[12px] transition-colors flex items-center justify-between text-left ${expanded ? 'h-11 pt-1 pl-5 hover:bg-transparent' : 'h-10 pl-4 hover:bg-[#F1F1F1]'}`}
-      >
-        <span className="text-[#6B6B6B] text-sm">Projects & Tasks</span>
-        {expanded ? <ChevronDown size={16} className="text-[#7C7C7C]" /> : <ChevronRight size={16} className="text-[#7C7C7C]" />}
-      </button>
+      <div className={`w-full pr-4 rounded-[12px] transition-colors flex items-center justify-between text-left ${expanded ? 'h-11 pt-1 pl-5 hover:bg-transparent' : 'h-10 pl-4 hover:bg-[#F1F1F1]'}`}>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex-1 text-left"
+        >
+          <span className="text-[#6B6B6B] text-sm">Projects & Tasks</span>
+        </button>
+        <div className="flex items-center gap-2">
+          {!disabled && (
+            <div className="relative group/dictate">
+              <button
+                type="button"
+                onClick={isRecording ? stopDictation : startDictation}
+                disabled={!supportsDictation}
+                aria-label={isRecording ? 'Stop dictation' : 'Start dictation'}
+                className={`relative w-6 h-6 flex items-center justify-center rounded-[6px] transition-colors ${supportsDictation ? 'text-[#8D8D8D] hover:text-[#4D4D4D] hover:bg-[#F0F0F0]' : 'text-[#C6C6C6] cursor-not-allowed'}`}
+              >
+                {!isRecording && <Mic size={15} />}
+                {isRecording && (
+                  <>
+                    <span className="flex items-end gap-[2px] h-4 group-hover/dictate:opacity-0 transition-opacity">
+                      {Array.from({ length: 5 }).map((_, idx) => (
+                        <motion.span
+                          key={`dictate-wave-${idx}`}
+                          className="w-[2px] rounded-full bg-[#595959]"
+                          style={{ transformOrigin: 'bottom', height: 12 }}
+                          animate={{ scaleY: [0.35, 1, 0.5] }}
+                          transition={{ duration: 0.7, ease: 'easeInOut', repeat: Infinity, delay: idx * 0.06 }}
+                        />
+                      ))}
+                    </span>
+                    <Square size={12} className="absolute opacity-0 group-hover/dictate:opacity-100 transition-opacity text-[#4D4D4D]" />
+                  </>
+                )}
+              </button>
+              <div className="absolute right-0 top-[calc(100%+8px)] px-2 py-1 rounded-[8px] bg-[#121212] text-white text-xs whitespace-nowrap opacity-0 pointer-events-none group-hover/dictate:opacity-100 transition-opacity z-20">
+                {isRecording ? 'Stop recording' : 'Dictate'}
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="w-6 h-6 flex items-center justify-center text-[#7C7C7C] hover:text-[#5F5F5F] rounded-[6px] hover:bg-[#F0F0F0] transition-colors"
+            aria-label={expanded ? 'Collapse projects and tasks' : 'Expand projects and tasks'}
+          >
+            {expanded ? <ChevronDown size={16} className="text-[#7C7C7C]" /> : <ChevronRight size={16} className="text-[#7C7C7C]" />}
+          </button>
+        </div>
+      </div>
       {expanded && (
         <div className="px-4 pb-4 animate-[fadeInDown_150ms_ease-out]">
           <InlineArea
@@ -909,6 +1076,19 @@ function ProjectNotesEditor({ value, onChange, disabled = false }: { value: stri
             placeholder="Word-dump what you did. AI will convert this into recruiter-ready bullets."
             className="ml-1 text-[13px] text-[#767676]"
           />
+          {!disabled && isRecording && interimTranscript && (
+            <p className="mt-2 ml-1 text-[11px] text-[#7A7A7A] italic">
+              Listening: "{interimTranscript}"
+            </p>
+          )}
+          {!disabled && !supportsDictation && (
+            <p className="mt-2 ml-1 text-[11px] text-[#9A9A9A]">
+              Dictation works best in Chrome and Edge.
+            </p>
+          )}
+          {!disabled && dictationError && (
+            <p className="mt-2 ml-1 text-[11px] text-[#A6454A]">{dictationError}</p>
+          )}
           {!disabled && (
             <div className="flex flex-wrap gap-2 mt-3">
               {PROJECT_NOTES_PROMPTS.map((prompt) => (
