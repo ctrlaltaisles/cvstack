@@ -1353,6 +1353,7 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
       ? { ...unknownEnd, present: exp.isCurrent }
       : { month: exp.end.month, year: exp.end.year, present: exp.isCurrent },
     bullets: exp.description,
+    projectNotes: '',
   }));
 
   data.education = parsed.education.map((edu, idx) => ({

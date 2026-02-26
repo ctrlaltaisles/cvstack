@@ -58,9 +58,10 @@ function getHeaderTitleForVersion(version: Pick<ResumeVersion, 'isAI' | 'jobTitl
   return normalizeProductDesignerTitle(version.data.title) || PRODUCT_DESIGNER_TITLE;
 }
 function applyHeaderTitleToData(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>, data: ResumeData): ResumeData {
+  const normalizedData = normalizeResumeDataShape(data);
   const title = getHeaderTitleForVersion({ ...version, data });
-  if (data.title === title) return data;
-  return { ...data, title };
+  if (normalizedData.title === title) return normalizedData;
+  return { ...normalizedData, title };
 }
 function applyHeaderTitleToVersion(version: ResumeVersion): ResumeVersion {
   const nextData = applyHeaderTitleToData(version, version.data);
@@ -86,6 +87,24 @@ function isInRange(v: { month: number; year: number }, minDate?: { month: number
   if (minDate && key < monthKey(minDate)) return false;
   if (maxDate && key > monthKey(maxDate)) return false;
   return true;
+}
+const PROJECT_NOTES_PROMPTS = [
+  'What were the 2-3 biggest projects you owned in this role?',
+  'What tools, stack, or systems did you personally use?',
+  'What outcomes changed (time saved, revenue, cost, quality, speed)?',
+] as const;
+function normalizeWorkExperienceEntry(exp: WorkExperience): WorkExperience {
+  return {
+    ...exp,
+    bullets: Array.isArray(exp.bullets) ? exp.bullets : [],
+    projectNotes: typeof exp.projectNotes === 'string' ? exp.projectNotes : '',
+  };
+}
+function normalizeResumeDataShape(data: ResumeData): ResumeData {
+  return {
+    ...data,
+    workExperience: (data.workExperience ?? []).map(normalizeWorkExperienceEntry),
+  };
 }
 function buildTextResume(data: ResumeData): string {
   const lines: string[] = [data.name, data.title, [data.contact.email, data.contact.phone, data.contact.location].filter(Boolean).join(' | '), '', 'ABOUT', data.bio, '', 'WORK EXPERIENCE'];
@@ -406,7 +425,7 @@ const INITIAL_VERSIONS: ResumeVersion[] = [
 type LocalWorkspaceStore = { baseResume: BaseResumeModel | null; jdVariants: JDVariantModel[] };
 
 function cloneResumeData(data: ResumeData): ResumeData {
-  return JSON.parse(JSON.stringify(data)) as ResumeData;
+  return normalizeResumeDataShape(JSON.parse(JSON.stringify(data)) as ResumeData);
 }
 function storageKeyForResume(resumeId?: string): string {
   return `cvstack_workspace_variants_${resumeId || 'local'}`;
@@ -869,6 +888,46 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
+function ProjectNotesEditor({ value, onChange, disabled = false }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const [expanded, setExpanded] = useState(Boolean(value.trim()));
+  return (
+    <div className="mt-6 rounded-[12px] bg-[#F8F8F8]">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={`w-full pr-4 rounded-[12px] transition-colors flex items-center justify-between text-left ${expanded ? 'h-11 pt-1 pl-5 hover:bg-transparent' : 'h-10 pl-4 hover:bg-[#F1F1F1]'}`}
+      >
+        <span className="text-[#6B6B6B] text-sm">Projects & Tasks</span>
+        {expanded ? <ChevronDown size={16} className="text-[#7C7C7C]" /> : <ChevronRight size={16} className="text-[#7C7C7C]" />}
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 animate-[fadeInDown_150ms_ease-out]">
+          <InlineArea
+            disabled={disabled}
+            value={value}
+            onChange={onChange}
+            placeholder="Word-dump what you did. AI will convert this into recruiter-ready bullets."
+            className="ml-1 text-[13px] text-[#767676]"
+          />
+          {!disabled && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {PROJECT_NOTES_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => onChange(value.trim() ? `${value.trim()}\n\n${prompt}` : prompt)}
+                  className="text-xs px-2.5 py-1.5 rounded-full border border-[#E5E5E6] text-[#6E6E6E] hover:bg-white transition-colors"
+                >
+                  + {prompt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, isReviewLocked = false }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; isReviewLocked?: boolean }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const [autoEditBulletIdx, setAutoEditBulletIdx] = useState<number | null>(null); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
@@ -940,7 +999,12 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
             <button onClick={onToggleShowOriginal} className="px-3 py-1.5 border border-[#E0E0E0] text-[#6B6B6B] rounded-[7px] hover:bg-[#F5F5F5]" style={{ fontSize: 12 }}>{showOriginal ? 'Show Changed' : 'Show Original'}</button>
           </div>
         )}
-        {!isReviewLocked && <button onClick={() => updateBullets([...exp.bullets, ''])} className="mt-3 text-xs text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add bullet</button>}
+        {!isReviewLocked && <button onClick={() => updateBullets([...exp.bullets, ''])} className="mt-3 mb-1 text-xs text-[#CBCBCB] hover:text-[#9B9B9B] transition-colors">+ Add bullet</button>}
+        <ProjectNotesEditor
+          disabled={isReviewLocked}
+          value={exp.projectNotes ?? ''}
+          onChange={(projectNotes) => onUpdateExp({ ...exp, projectNotes })}
+        />
         {!isReviewLocked && <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>}
       </div>
     </div>
@@ -1141,7 +1205,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
               </div>
             ))}
           </div>
-          {!isReviewLocked && <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'] }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Experience</button>}
+          {!isReviewLocked && <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'], projectNotes: '' }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Experience</button>}
         </div>
         {/* Education */}
         <div className={`resume-section mb-7 ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasEducation}>
@@ -1791,7 +1855,9 @@ export default function Workspace() {
         const loadedVersions = response.versions as ResumeVersion[];
         if (!mounted) return;
         const localStore = loadLocalWorkspaceStore(storageKeyForResume(targetResumeId));
-        const nextVersions = (loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions).map(applyHeaderTitleToVersion);
+        const nextVersions = (loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions)
+          .map((version) => ({ ...version, data: normalizeResumeDataShape(version.data) }))
+          .map(applyHeaderTitleToVersion);
         const rootBaseVersion = nextVersions.find((v) => v.isBase) ?? nextVersions[0];
         const baseResumeId = localStore.baseResume?.id ?? rootBaseVersion.baseResumeId ?? `base-${targetResumeId}`;
         const nextBaseResume: BaseResumeModel = {
@@ -1962,7 +2028,7 @@ export default function Workspace() {
           nextVersion = applyHeaderTitleToVersion({
             ...nv,
             ...createdVersion,
-            data: (createdVersion.data as ResumeData) ?? nv.data,
+            data: normalizeResumeDataShape((createdVersion.data as ResumeData) ?? nv.data),
             aiChanges: (createdVersion.aiChanges as AIChange[]) ?? nv.aiChanges,
             jdVariantId: createdVersion.jdVariantId ?? nv.jdVariantId,
             variantContent: createdVersion.variantContent ?? nv.variantContent,
@@ -2163,7 +2229,10 @@ export default function Workspace() {
     setIsReplacingBasePdf(true);
     try {
       const response = await replaceResumePdf(resumeId, file, resumeMeta?.title || 'Uploaded Resume');
-      const incomingVersion = applyHeaderTitleToVersion(response.version as ResumeVersion);
+      const incomingVersion = applyHeaderTitleToVersion({
+        ...(response.version as ResumeVersion),
+        data: normalizeResumeDataShape((response.version as ResumeVersion).data),
+      });
       setVersions((prev) => prev.map((version) => (
         version.id === incomingVersion.id
           ? {
