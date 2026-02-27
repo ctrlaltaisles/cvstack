@@ -575,12 +575,15 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
     return uniq.size <= 3 || placeholderCount / cleaned.length > 0.4 || cleanWordCount / cleaned.length > 0.3;
   };
 
+  const shouldTryPdfKit = process.platform === 'darwin' && process.env.CVSTACK_DISABLE_PDFKIT !== '1';
   // Prefer native PDFKit on macOS for layout-heavy resumes exported from design tools.
-  try {
-    const fromPdfKit = await extractLinesWithPdfKit(buffer);
-    if (fromPdfKit.length > 0 && !isLowQuality(fromPdfKit)) return fromPdfKit;
-  } catch {
-    // fallback below
+  if (shouldTryPdfKit) {
+    try {
+      const fromPdfKit = await extractLinesWithPdfKit(buffer);
+      if (fromPdfKit.length > 0 && !isLowQuality(fromPdfKit)) return fromPdfKit;
+    } catch {
+      // fallback below
+    }
   }
 
   try {
