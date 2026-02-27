@@ -83,7 +83,7 @@ function versionFromContent(resumeId: string, id: string, createdAt: Date, updat
   return {
     id,
     resumeId,
-    versionName: String(content?.versionName ?? content?.name ?? 'Base Resume'),
+    versionName: String(content?.versionName ?? content?.name ?? 'Master Resume'),
     isBase: Boolean(content?.isBase),
     isAI: Boolean(content?.isAI),
     matchScore: typeof content?.matchScore === 'number' ? content.matchScore : null,
@@ -304,7 +304,7 @@ export async function withDb<T>(fn: (state: DbState) => Promise<T> | T): Promise
 
 function mapVersionContent(content: any) {
   return {
-    versionName: String(content?.versionName ?? content?.name ?? 'Base Resume'),
+    versionName: String(content?.versionName ?? content?.name ?? 'Master Resume'),
     isBase: Boolean(content?.isBase),
     isAI: Boolean(content?.isAI),
     matchScore: typeof content?.matchScore === 'number' ? content.matchScore : null,

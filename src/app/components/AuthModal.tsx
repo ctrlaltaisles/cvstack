@@ -27,6 +27,7 @@ export default function AuthModal({
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
   const magicLinkSentForCurrentEmail = Boolean(magicLinkSentTo && magicLinkSentTo === email.trim().toLowerCase());
+  const hasTypedEmail = email.trim().length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -47,11 +48,13 @@ export default function AuthModal({
   }, [open, onSuccess]);
 
   const submit = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return;
+
     setError('');
     setHint('');
     setLoading(true);
     try {
-      const normalizedEmail = email.trim().toLowerCase();
       setPendingSignInMethod('email');
       await requestEmailOtp(normalizedEmail);
       setMagicLinkSentTo(normalizedEmail);
@@ -79,7 +82,13 @@ export default function AuthModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/25 z-[250] flex items-center justify-center p-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[250] flex items-center justify-center bg-transparent p-6 backdrop-blur-[6px]"
+      onClick={() => {
+        if (hasTypedEmail) return;
+        onClose();
+      }}
+    >
       <div className="w-full max-w-md bg-white rounded-[16px] border border-[#EAEAEA] shadow-[0_24px_80px_rgba(0,0,0,0.18)]" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-[#F0F0F0] flex items-center justify-between">
           <div>
@@ -135,6 +144,12 @@ export default function AuthModal({
                 setError('');
                 setHint('');
               }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (loading || oauthLoading !== null || !hasTypedEmail) return;
+                void submit();
+              }}
               type="email"
               placeholder="Email"
               className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
@@ -153,7 +168,7 @@ export default function AuthModal({
                     .catch((err) => setError(err instanceof Error ? err.message : 'Failed to resend magic link'))
                     .finally(() => setLoading(false));
                 }}
-                disabled={loading || oauthLoading !== null || !email}
+                disabled={loading || oauthLoading !== null || !hasTypedEmail}
                 className="text-xs text-[#6B6B6B] hover:text-[#1A1A1A] underline underline-offset-2 text-left"
               >
                 Resend link
@@ -164,7 +179,7 @@ export default function AuthModal({
         <div className="px-6 py-5 border-t border-[#F0F0F0]">
           <button
             onClick={submit}
-            disabled={loading || oauthLoading !== null || !email}
+            disabled={loading || oauthLoading !== null || !hasTypedEmail}
             className="w-full bg-[#1A1A1A] text-white px-5 py-3 rounded-[12px] text-sm disabled:opacity-40"
           >
             {loading ? 'Please wait...' : 'Continue'}

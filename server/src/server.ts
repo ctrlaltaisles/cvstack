@@ -503,7 +503,7 @@ async function parseUploadOrRespond(buffer: Buffer, res: express.Response, fileN
     return {
       parsedData: blankParsedData,
       warnings: [
-        'Structured extraction failed for this PDF; opened editor with a blank base resume.',
+        'Structured extraction failed for this PDF; opened editor with a blank master resume.',
         `Parser detail: ${message}`,
       ],
       extractedText: '',
@@ -555,7 +555,7 @@ async function createResumeWithBaseVersion(params: {
   const version: VersionRecord = {
     id: versionId,
     resumeId,
-    versionName: 'Base Resume',
+    versionName: 'Master Resume',
     isBase: true,
     isAI: false,
     matchScore: null,
@@ -636,7 +636,7 @@ async function parseUploadedResumeBuffer(buffer: Buffer) {
 }
 
 app.post('/api/resumes', async (req, res) => {
-  const title = String(req.body?.title ?? 'Base Resume').trim() || 'Base Resume';
+  const title = String(req.body?.title ?? 'Master Resume').trim() || 'Master Resume';
   const source = (req.body?.source === 'linkedin' ? 'linkedin' : 'manual') as 'manual' | 'linkedin';
   const email = String(req.body?.email ?? '').trim();
   const data = (req.body?.data as ResumeData | undefined) ?? defaultResumeData(email);

@@ -22,7 +22,7 @@ const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
 const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|principal|staff|head|chief|vp|director|associate)\s+)+/i;
 const MIN_JD_CURATION_LENGTH = 40;
 const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
-const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Base Resume';
+const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Master Resume';
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -638,7 +638,7 @@ const EMPTY_DATA: ResumeData = {
   skills: [],
 };
 const INITIAL_VERSIONS: ResumeVersion[] = [
-  { id: 'base', name: 'Base Resume', isAI: false, isBase: true, data: EMPTY_DATA, aiChanges: [] },
+  { id: 'base', name: 'Master Resume', isAI: false, isBase: true, data: EMPTY_DATA, aiChanges: [] },
 ];
 type LocalWorkspaceStore = { baseResume: BaseResumeModel | null; jdVariants: JDVariantModel[] };
 
@@ -688,7 +688,6 @@ function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, c
     id: `ai-v-${ts}`,
     name: title,
     isAI: true,
-    matchScore: 82,
     jobTitle: roleName,
     jobCompany: company || 'Company',
     jobDescription: jd,
@@ -955,22 +954,45 @@ function mergeVariantProjectNotesIntoBase(baseData: ResumeData, variantData: Res
   return { data: { ...baseData, workExperience: mergedWorkExperience }, changed: true };
 }
 
-function syncVariantExperiencesWithBase(baseData: ResumeData, variantData: ResumeData): ResumeData {
-  const baseById = new Map(baseData.workExperience.map((exp) => [exp.id, exp]));
-  const baseByRoleKey = new Map(baseData.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
-  const syncedWorkExperience = variantData.workExperience.map((exp) => {
-    const byId = baseById.get(exp.id);
-    if (byId) return { ...(JSON.parse(JSON.stringify(byId)) as WorkExperience), projectNotes: exp.projectNotes ?? '' };
-    const byRole = baseByRoleKey.get(normalizeRoleKey(exp));
-    if (byRole) return { ...byRole, id: exp.id, projectNotes: exp.projectNotes ?? '' };
-    return exp;
-  });
-  return { ...variantData, workExperience: syncedWorkExperience };
+function mergeProjectNotesAcrossSources(primaryNotes: string, secondaryNotes: string): string {
+  const primarySections = parseProjectNotesSections(primaryNotes);
+  const secondarySections = parseProjectNotesSections(secondaryNotes);
+  if (secondarySections.length === 0) return serializeProjectNotesSections(primarySections);
+  if (primarySections.length === 0) return serializeProjectNotesSections(secondarySections);
+
+  const merged = [...primarySections];
+  for (const section of secondarySections) {
+    const source = normalizeProjectNotesSourceLabel(section.source);
+    const index = merged.findIndex((item) => normalizeProjectNotesSourceLabel(item.source).toLowerCase() === source.toLowerCase());
+    if (index >= 0) {
+      merged[index] = {
+        ...merged[index],
+        content: mergeProjectNotesPreservingStructure(merged[index].content, section.content),
+      };
+    } else {
+      merged.push({ source, content: section.content.trim() });
+    }
+  }
+  return serializeProjectNotesSections(merged);
 }
 
-function hasSyncDiffForVariant(baseData: ResumeData, variantData: ResumeData): boolean {
-  const synced = syncVariantExperiencesWithBase(baseData, variantData);
-  return JSON.stringify(synced.workExperience) !== JSON.stringify(variantData.workExperience);
+function buildResumeDataForCuration(version: ResumeVersion, baseVersion: ResumeVersion): ResumeData {
+  if (version.id === baseVersion.id) return version.data;
+  const baseById = new Map(baseVersion.data.workExperience.map((exp) => [exp.id, exp]));
+  const baseByRoleKey = new Map(baseVersion.data.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
+
+  const mergedWorkExperience = (version.data.workExperience ?? []).map((exp) => {
+    const baseExp = baseById.get(exp.id) ?? baseByRoleKey.get(normalizeRoleKey(exp));
+    if (!baseExp) return exp;
+    const mergedNotes = mergeProjectNotesAcrossSources(exp.projectNotes ?? '', baseExp.projectNotes ?? '');
+    if (mergedNotes === (exp.projectNotes ?? '')) return exp;
+    return { ...exp, projectNotes: mergedNotes };
+  });
+
+  return {
+    ...version.data,
+    workExperience: mergedWorkExperience,
+  };
 }
 
 // ─── Toast ──────────────────────────────────────────────────────────────────────
@@ -1835,7 +1857,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
 
 // ─── FloatingToolbar — Granola/Awwwards style capsule ────────────────────────
 
-function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, hasUploadedResumePdf, canManageBaseResumePdf, onAcceptAll, onRejectAll, onUpdateAllVariations, onOpenResumeModal, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; canCurate: boolean; curateHint?: string; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; hasUploadedResumePdf: boolean; canManageBaseResumePdf: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onOpenResumeModal: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
+function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCount, isCurating, jdPanelOpen, hasUploadedResumePdf, canManageBaseResumePdf, onAcceptAll, onRejectAll, onOpenResumeModal, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; canCurate: boolean; curateHint?: string; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; hasUploadedResumePdf: boolean; canManageBaseResumePdf: boolean; onAcceptAll: () => void; onRejectAll: () => void; onOpenResumeModal: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
   const CURATING_LOADING_MESSAGES = [
     'I swear we’re doing something…',
     'Not just copy-pasting, promise.',
@@ -1956,7 +1978,7 @@ function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCo
         {toolbarMode === 'jd_only' ? (
           <button onClick={onJDClick} className={`${segBase} ${segActive} min-w-[108px]`}>
             <Paperclip size={14} className={hasJD ? 'text-[#1A1A1A]' : 'text-[#9B9B9B]'} />
-            <span>JD</span>
+            <span>View Job</span>
             {hasJD && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A] ml-0.5" />}
           </button>
         ) : toolbarMode === 'curating' ? (
@@ -1987,6 +2009,7 @@ function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCo
             {isBaseResume ? (
               <>
                 <button onClick={onOpenResumeModal} disabled={!canManageBaseResumePdf} className={`${segBase} ${canManageBaseResumePdf ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}>
+                  {hasUploadedResumePdf && <Paperclip size={14} className="text-[#1A1A1A]" />}
                   <span>{hasUploadedResumePdf ? 'View Resume' : '+ Add Resume'}</span>
                 </button>
                 <div className="w-px bg-white/55 my-2.5 shrink-0" />
@@ -1994,16 +2017,12 @@ function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCo
                   <Sparkles size={14} className="text-[#1A1A1A]" />
                   <span>Curate</span>
                 </button>
-                <div className="w-px bg-white/55 my-2.5 shrink-0" />
-                <button onClick={onUpdateAllVariations} disabled={!canUpdateAllVariations} className={`${segBase} ${canUpdateAllVariations ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}>
-                  <span>Update All</span>
-                </button>
               </>
             ) : (
               <>
                 <button onClick={onJDClick} className={`${segBase} ${segIdle} ${hasJD ? '' : 'opacity-60'}`}>
                   <Paperclip size={14} className={hasJD ? 'text-[#1A1A1A]' : 'text-[#9B9B9B]'} />
-                  <span>JD</span>
+                  <span>View Job</span>
                   {hasJD && <span className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A] ml-0.5" />}
                 </button>
                 <div className="w-px bg-white/55 my-2.5 shrink-0" />
@@ -2328,7 +2347,7 @@ function BaseResumeFileModal({
               {isEmptyState ? 'Upload Resume' : 'Resume Preview'}
             </h3>
             <p className="text-xs text-[#9B9B9B] mt-0.5 truncate max-w-[620px]">
-              {isEmptyState ? 'Start building your base resume' : (fileName || 'resume.pdf')}
+              {isEmptyState ? 'Start building your master resume' : (fileName || 'resume.pdf')}
             </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors"><X size={16} /></button>
@@ -2363,13 +2382,13 @@ function BaseResumeFileModal({
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={isUploading}
-                title="Replacing the PDF will reset your Base Resume content."
+                title="Replacing the PDF will reset your Master Resume content."
                 className="px-4 py-2.5 border border-[#DCDCDC] bg-white text-[#2B2B2B] rounded-[10px] text-sm transition-colors hover:bg-[#F8F8F8] disabled:opacity-60"
               >
                 {isUploading ? 'Uploading...' : 'Replace Resume'}
               </button>
               <div className="pointer-events-none absolute right-0 bottom-[calc(100%+8px)] whitespace-nowrap rounded-[8px] bg-[#1A1A1A] px-3 py-2 text-xs text-white opacity-0 transition-opacity duration-150 group-hover/replace:opacity-100">
-                Replacing the PDF will reset your Base Resume content.
+                Replacing the PDF will reset your Master Resume content.
               </div>
             </div>
           )}
@@ -2569,7 +2588,6 @@ export default function Workspace() {
   const effectiveResumeId = resumeId || resumeMeta?.id || '';
   const hasUploadedResumePdf = Boolean(resumeMeta?.source === 'upload' && resumeMeta.file_name);
   const canManageBaseResumePdf = Boolean(effectiveResumeId);
-  const hasUpdatableVariants = versions.some((version) => version.isAI && hasSyncDiffForVariant(baseVersion.data, version.data));
   const sidebarGroups = versions.filter((v) => v.isAI).reduce((acc, v) => {
     const roleFamily = normalizeRoleFamilyTitle(v.jobTitle || v.name);
     const key = roleFamily.toLowerCase();
@@ -2731,7 +2749,7 @@ export default function Workspace() {
             showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
           } else {
             const curation = await curateResume({
-              resumeData: nextVersion.data,
+              resumeData: buildResumeDataForCuration(nextVersion, baseVersion),
               targetRole: nextVersion.jobTitle || nextVersion.data.title,
               jdText: nextVersion.jobDescription,
               jobCompany: nextVersion.jobCompany,
@@ -2802,7 +2820,7 @@ export default function Workspace() {
         return;
       }
       const result = await curateResume({
-        resumeData: snapshot.data,
+        resumeData: buildResumeDataForCuration(snapshot, baseVersion),
         targetRole: snapshot.jobTitle || snapshot.data.title,
         jdText: snapshot.jobDescription,
         jobCompany: snapshot.jobCompany,
@@ -2871,38 +2889,6 @@ export default function Workspace() {
     syncLocalStore(baseResumeModel, nextJDVariants);
     showToast('Variant deleted');
   };
-  const handleUpdateAllVariations = async () => {
-    if (!baseVersion || !hasUpdatableVariants) return;
-    const nextVersions = versions.map((version) => {
-      if (!version.isAI) return version;
-      if (!hasSyncDiffForVariant(baseVersion.data, version.data)) return version;
-      const syncedData = syncVariantExperiencesWithBase(baseVersion.data, version.data);
-      return {
-        ...version,
-        data: syncedData,
-        variantContent: buildTextResume(syncedData),
-      };
-    });
-    setVersions(nextVersions);
-
-    if (resumeId) {
-      await Promise.all(
-        nextVersions
-          .filter((version) => version.isAI)
-          .map((version) => updateVersion(resumeId, version.id, version).catch(() => null)),
-      );
-    }
-
-    const nextJDVariants = jdVariants.map((item) => {
-      const linkedVersion = nextVersions.find((version) => version.jdVariantId === item.id);
-      if (!linkedVersion) return item;
-      return { ...item, variantContent: linkedVersion.variantContent ?? item.variantContent };
-    });
-    syncLocalStore(baseResumeModel, nextJDVariants);
-
-    showToast('Updated matching role experience across variations');
-  };
-
   useEffect(() => {
     if (!showBaseFileModal || !effectiveResumeId) return;
     if (!hasUploadedResumePdf) {
@@ -2991,12 +2977,12 @@ export default function Workspace() {
     showToast('Job description updated');
   };
   useEffect(() => {
-    if (!showJDPanel || !activeVersion?.id || !activeVersion.jobDescription?.trim()) return;
+    if (!showJDPanel || !activeVersion?.id || !activeVersion.jobDescription?.trim() || !baseVersion) return;
     if (jdTldrByVersion[activeVersion.id]) return;
     let cancelled = false;
     setIsTldrLoading(true);
     void curateResume({
-      resumeData: activeVersion.data,
+      resumeData: buildResumeDataForCuration(activeVersion, baseVersion),
       targetRole: activeVersion.jobTitle || activeVersion.data.title,
       jdText: activeVersion.jobDescription,
       jobCompany: activeVersion.jobCompany,
@@ -3031,7 +3017,7 @@ export default function Workspace() {
     return () => {
       cancelled = true;
     };
-  }, [showJDPanel, activeVersion?.id, activeVersion?.jobDescription, activeVersion?.jobTitle, jdTldrByVersion]);
+  }, [showJDPanel, activeVersion?.id, activeVersion?.jobDescription, activeVersion?.jobTitle, jdTldrByVersion, baseVersion]);
   const pendingSuggestionCount = activeVersion?.aiChanges.filter(c => c.status === 'pending').length ?? 0;
   const hasMeaningfulJD = hasMeaningfulJobDescription(activeVersion?.jobDescription);
   const canCurateActiveVersion = activeVersion?.isBase ? true : hasMeaningfulJD;
@@ -3120,7 +3106,7 @@ export default function Workspace() {
         </div>
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
-            <button onClick={() => handleSidebarVersionSelect(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
+            <button onClick={() => handleSidebarVersionSelect(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Master Resume</button>
           </div>
           {sidebarGroups.map(group => {
             const isOpen = expandedGroups.has(group.key);
@@ -3177,7 +3163,6 @@ export default function Workspace() {
               </button>
               <span className="text-[#CBCBCB]">Resumes</span><span className="text-[#E0E0E0]">/</span>
               <span className="text-[#1A1A1A] truncate">{activeVersion.name}</span>
-              {activeVersion.matchScore && <span className="px-2 py-0.5 bg-[#F5F5F5] rounded-full text-[10px] text-[#9B9B9B] shrink-0">{activeVersion.matchScore}% match</span>}
             </div>
             <div className="flex items-center gap-2">
               <div className="relative" ref={avatarRef}>
@@ -3261,12 +3246,10 @@ export default function Workspace() {
                 pendingCount={pendingSuggestionCount}
                 isCurating={isCurating}
                 jdPanelOpen={showJDPanel}
-                canUpdateAllVariations={hasUpdatableVariants}
                 hasUploadedResumePdf={hasUploadedResumePdf}
                 canManageBaseResumePdf={canManageBaseResumePdf}
                 onAcceptAll={handleAcceptAll}
                 onRejectAll={handleRejectAll}
-                onUpdateAllVariations={() => { void handleUpdateAllVariations(); }}
                 onOpenResumeModal={() => setShowBaseFileModal(true)}
                 onJDClick={() => setShowJDPanel(p => !p)}
                 onCurate={handleCurate}

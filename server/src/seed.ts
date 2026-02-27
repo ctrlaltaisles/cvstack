@@ -52,7 +52,7 @@ async function run() {
   const version: VersionRecord = {
     id: versionId,
     resumeId,
-    versionName: 'Base Resume',
+    versionName: 'Master Resume',
     isBase: true,
     isAI: false,
     matchScore: null,

@@ -6,14 +6,14 @@ export default function LandingPage() {
   const navigate = useNavigate();
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="h-screen overflow-hidden bg-[#d8dce2] p-4 md:p-7"
+      className="h-screen overflow-hidden bg-[#d8dce2]"
     >
-      <div className="relative h-full overflow-hidden rounded-[28px] border border-white/70 bg-[#f3f5f8] shadow-[0_8px_44px_rgba(107,117,137,0.2)]">
+      <div className="relative h-full overflow-hidden border border-white/70 bg-[#f3f5f8] shadow-[0_8px_44px_rgba(107,117,137,0.2)]">
         <div className="pointer-events-none absolute inset-0 opacity-[0.55] [background-image:radial-gradient(rgba(255,255,255,0.92)_1px,transparent_1px)] [background-size:26px_26px]" />
         <div className="pointer-events-none absolute inset-0 opacity-[0.35] [background-image:linear-gradient(to_right,rgba(255,255,255,0.7)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.65)_1px,transparent_1px)] [background-size:46px_46px]" />
         <div className="pointer-events-none absolute -left-24 bottom-[-14%] h-[46%] w-[44%] rounded-full bg-[radial-gradient(circle,_rgba(255,146,208,0.82)_0%,_rgba(255,146,208,0)_72%)] blur-2xl" />
@@ -21,7 +21,7 @@ export default function LandingPage() {
         <div className="pointer-events-none absolute right-[-8%] bottom-[-16%] h-[62%] w-[48%] rounded-full bg-[radial-gradient(circle,_rgba(118,174,255,0.72)_0%,_rgba(118,174,255,0)_72%)] blur-2xl" />
 
         {/* Nav */}
-        <div className="relative z-20 px-6 py-5 md:px-9 md:py-6 flex items-center justify-between border-b border-white/70">
+        <div className="relative z-20 px-6 py-5 md:px-9 md:py-6 flex items-center justify-between">
           <img src={cvLogo} alt="CV Stack" className="w-6 h-6 object-contain" />
           <button
             onClick={() => navigate('/login')}
