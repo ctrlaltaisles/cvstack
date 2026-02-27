@@ -246,6 +246,29 @@ const TARGET_ROLE_MODE_HINTS: Array<{ mode: TargetRoleMode; hints: string[] }> =
   },
 ];
 
+interface CapabilityMarkerRule {
+  id: string;
+  label: string;
+  pattern: RegExp;
+  modes: TargetRoleMode[];
+}
+
+const CAPABILITY_MARKER_RULES: CapabilityMarkerRule[] = [
+  { id: 'requirements_modeling', label: 'requirements/spec modeling', pattern: /\b(requirements?|workflow spec|specification|state transitions?)\b/i, modes: ['pm', 'product', 'dev', 'ops'] },
+  { id: 'workflow_architecture', label: 'workflow architecture', pattern: /\b(end-to-end workflow|handoff|bottleneck|tracking logic|process map)\b/i, modes: ['pm', 'product', 'ops'] },
+  { id: 'cross_functional_facilitation', label: 'cross-functional facilitation', pattern: /\b(working session|facilitated|cross-functional|stakeholder alignment|coordinat(ed|ing) with)\b/i, modes: ['pm', 'product', 'ops', 'strategy', 'bizdev'] },
+  { id: 'discovery_interviews', label: 'discovery interviews', pattern: /\b(discovery interviews?|interview(ed|ing) .*managers?|friction points?)\b/i, modes: ['pm', 'product', 'designer', 'analyst'] },
+  { id: 'theme_synthesis', label: 'insight/theme synthesis', pattern: /\b(synthesi[sz](ed|ing) (themes|inputs|findings)|identified themes?)\b/i, modes: ['pm', 'product', 'designer', 'analyst', 'strategy'] },
+  { id: 'decision_frameworks', label: 'decision framework/template design', pattern: /\b(feedback template|structured feedback|reduc(ed|ing) subjective bias|decision[- ]making clarity)\b/i, modes: ['pm', 'product', 'designer', 'ops', 'strategy'] },
+  { id: 'journey_mapping', label: 'journey mapping', pattern: /\b(journey|touchpoints?|90-day milestone|experience journey|drop-off risks?)\b/i, modes: ['pm', 'product', 'designer', 'ops'] },
+  { id: 'experimentation', label: 'pilot/experimentation', pattern: /\b(pilot|tested|post-launch|experiment|validation)\b/i, modes: ['pm', 'product', 'designer', 'analyst', 'ops'] },
+  { id: 'analytics_interpretation', label: 'analytics interpretation', pattern: /\b(heatmap|analytics|conversion points?|time-on-page|engagement)\b/i, modes: ['pm', 'product', 'designer', 'analyst'] },
+  { id: 'scenario_modeling', label: 'scenario modeling', pattern: /\b(headcount planning|hiring velocity|growth trajectories?|scenario|cost implications?)\b/i, modes: ['pm', 'product', 'analyst', 'strategy', 'ops'] },
+  { id: 'sla_negotiation', label: 'SLA/risk mitigation', pattern: /\b(sla|provisioning delays?|escalated the issue|service level|turnaround times?)\b/i, modes: ['pm', 'ops', 'strategy'] },
+  { id: 'dashboard_visibility', label: 'tracking dashboard/operational visibility', pattern: /\b(tracking dashboard|monitor turnaround|visibility dashboard|operational visibility)\b/i, modes: ['pm', 'analyst', 'ops', 'strategy'] },
+  { id: 'integration_hypothesis', label: 'cross-domain integration hypothesis', pattern: /\b(integrat(e|ing).*(analytics|reporting)|correlat(e|ing).*(investment|velocity)|exploratory initiative)\b/i, modes: ['pm', 'product', 'analyst', 'strategy'] },
+];
+
 function isAbortLikeError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const maybe = error as { name?: string; message?: string };
@@ -373,6 +396,12 @@ function splitSentences(text: string): string[] {
     .split(/[\n.!?]+/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 10);
+}
+
+function extractCapabilityMarkers(text: string, mode: TargetRoleMode): CapabilityMarkerRule[] {
+  const source = String(text ?? '');
+  if (!source.trim()) return [];
+  return CAPABILITY_MARKER_RULES.filter((rule) => rule.modes.includes(mode) && rule.pattern.test(source));
 }
 
 function buildProjectNotesSignalMap(resumeData: ResumeData): Map<string, string[]> {
@@ -564,6 +593,52 @@ function evaluateNotesDrivenBulletLift(
     passedRoles,
     totalEligibleRoles,
     deficits,
+  };
+}
+
+function evaluateCapabilityElevationCoverage(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+  mode: TargetRoleMode,
+): {
+  hasMarkers: boolean;
+  coverageRatio: number;
+  missingByExp: Array<{ expId: string; role: string; company: string; missingCapabilities: string[] }>;
+} {
+  let total = 0;
+  let covered = 0;
+  const missingByExp: Array<{ expId: string; role: string; company: string; missingCapabilities: string[] }> = [];
+
+  for (const exp of resumeData.workExperience ?? []) {
+    const sourceText = `${exp.projectNotes ?? ''} ${(exp.bullets ?? []).join(' ')}`.trim();
+    const sourceMarkers = extractCapabilityMarkers(sourceText, mode);
+    if (sourceMarkers.length === 0) continue;
+
+    const improvedExp = improved.experience.find((item) => item.expId === exp.id);
+    const improvedText = (improvedExp?.bullets ?? []).join(' ');
+    const missingCapabilities: string[] = [];
+
+    for (const marker of sourceMarkers) {
+      total += 1;
+      const coveredInImproved = marker.pattern.test(improvedText);
+      if (coveredInImproved) covered += 1;
+      else missingCapabilities.push(marker.label);
+    }
+
+    if (missingCapabilities.length > 0) {
+      missingByExp.push({
+        expId: exp.id,
+        role: exp.role,
+        company: exp.company,
+        missingCapabilities: missingCapabilities.slice(0, 6),
+      });
+    }
+  }
+
+  return {
+    hasMarkers: total > 0,
+    coverageRatio: total > 0 ? covered / total : 1,
+    missingByExp,
   };
 }
 
@@ -1028,12 +1103,15 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
     || (projectNotesCoverage.coverageRatio >= 0.65 && projectNotesCoverage.newSignalRatio >= 0.25);
   const strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
   const strategicThemePass = !strategicThemeCoverage.hasThemes || strategicThemeCoverage.coverageRatio >= 0.6;
+  const targetRoleMode = inferTargetRoleMode(input.targetRole ?? input.resumeData.title ?? '');
+  const capabilityCoverage = evaluateCapabilityElevationCoverage(input.resumeData, output.improved, targetRoleMode);
+  const capabilityPass = !capabilityCoverage.hasMarkers || capabilityCoverage.coverageRatio >= 0.55;
   const mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
   const notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
   const notesLiftPass = !notesDrivenLift.hasEligibleRoles || notesDrivenLift.deficits.length === 0;
   const grounding = evaluateGroundingViolations(input.resumeData, output.improved, input.jdText ?? '');
 
-  const passed = !lowValue.lowValue && !hallucination.suspicious && !grounding.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky && notesLiftPass;
+  const passed = !lowValue.lowValue && !hallucination.suspicious && !grounding.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && capabilityPass && !mirrorRisk.risky && notesLiftPass;
   const notes = [
     lowValue.notes,
     hallucination.suspicious ? hallucination.details.join(' | ') : 'No fabricated metric pattern detected.',
@@ -1044,6 +1122,9 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
     strategicThemeCoverage.hasThemes
       ? `Strategic-theme coverage=${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`
       : 'No strategic themes detected in project notes.',
+    capabilityCoverage.hasMarkers
+      ? `Capability-elevation coverage=${Math.round(capabilityCoverage.coverageRatio * 100)}% for mode=${targetRoleMode}.`
+      : 'No capability markers detected for the active role lens.',
     `Category-mirror risk=${mirrorRisk.risky ? 'high' : 'low'} (ratio=${Math.round(mirrorRisk.mirrorRatio * 100)}%, compared=${mirrorRisk.compared}).`,
     notesDrivenLift.hasEligibleRoles
       ? `Notes-driven new-bullet lift=${notesDrivenLift.passedRoles}/${notesDrivenLift.totalEligibleRoles} eligible roles met >=2 new bullets.`
@@ -1260,6 +1341,15 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       signals: signals.slice(0, 10),
     };
   });
+  const capabilitySignalAudit = (compactResumeData.workExperience ?? []).map((exp) => {
+    const markers = extractCapabilityMarkers(`${exp.projectNotes ?? ''} ${(exp.bullets ?? []).join(' ')}`, targetRoleMode);
+    return {
+      expId: exp.id,
+      role: exp.role,
+      company: exp.company,
+      markers: markers.map((marker) => marker.label).slice(0, 8),
+    };
+  }).filter((row) => row.markers.length > 0);
 
   const basePayload = {
     task: hasJD
@@ -1331,7 +1421,18 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'Project-notes-first rebuild: for roles with notes, start from a blank bullet canvas and reconstruct the narrative from notes before checking legacy bullets for factual consistency.',
       'ROLE-LENS MODE (Level 3 Transformation): change framing of the same evidence into the recruiter signals expected for targetRoleMode; synonym-only rewrites fail.',
       'Every bullet must add at least one of: stronger ownership, clearer scope, clearer mechanism/how, or decision/impact signal (without fabricating).',
+      'Do not collapse high-signal mechanisms into generic labels like "process improvement", "reporting", or "optimization" when source evidence supports stronger capability framing.',
+      'Preserve mechanism nouns where present in evidence (e.g., workflow spec, state transitions, discovery interviews, synthesis themes, journey map, scenario model, SLA, dashboard).',
     ],
+    capabilityElevationRules: hasJD ? [
+      'Capability abstraction over operational summarization: map evidence -> capability signal -> recruiter-facing bullet.',
+      'If notes mention workflow spec/state transitions, frame as requirements modeling and process architecture (without claiming system build if not stated).',
+      'If notes mention discovery interviews/theme synthesis/template design, frame as discovery and decision-quality improvement.',
+      'If notes mention heatmaps/conversion/content repositioning, frame as analytics interpretation and intervention design.',
+      'If notes mention scenarios/velocity/cost assumptions, frame as scenario planning and decision support.',
+      'If notes mention SLA/escalation/dashboard, frame as risk mitigation and operational governance.',
+    ] : undefined,
+    capabilitySignalAudit,
     roleLensModeRules: hasJD ? {
       mode: targetRoleMode,
       sourceOfTruth: [
@@ -1460,12 +1561,14 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     output.quality = quality;
     let projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
     let strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
+    let capabilityCoverage = evaluateCapabilityElevationCoverage(input.resumeData, output.improved, targetRoleMode);
     let mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
     let notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
     let grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText);
     const requiresProjectNotesRescue = projectNotesCoverage.hasSignals
       && (projectNotesCoverage.coverageRatio < 0.65 || projectNotesCoverage.newSignalRatio < 0.25);
     const requiresStrategicThemeRescue = strategicThemeCoverage.hasThemes && strategicThemeCoverage.coverageRatio < 0.6;
+    const requiresCapabilityRescue = capabilityCoverage.hasMarkers && capabilityCoverage.coverageRatio < 0.55;
     const requiresNarrativeRestructureRescue = mirrorRisk.risky;
     const requiresNotesDrivenLiftRescue = notesDrivenLift.hasEligibleRoles && notesDrivenLift.deficits.length > 0;
     const requiresGroundingRescue = grounding.suspicious;
@@ -1482,6 +1585,14 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         ...new Set([
           ...output.redFlags,
           `Strategic-theme rescue triggered: coverage ${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`,
+        ]),
+      ];
+    }
+    if (requiresCapabilityRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Capability-elevation rescue triggered: coverage ${Math.round(capabilityCoverage.coverageRatio * 100)}% for mode=${targetRoleMode}.`,
         ]),
       ];
     }
@@ -1510,8 +1621,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       ];
     }
 
-    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue);
-    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue) && shouldRunSecondPass) {
+    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresCapabilityRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue);
+    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresCapabilityRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue) && shouldRunSecondPass) {
       const elapsedBeforeSecondPass = Date.now() - started;
       const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
       if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
@@ -1532,17 +1643,27 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
               company: row.company,
               mustRecoverThemes: row.missingThemes,
             }));
+          const missingCapabilities = capabilityCoverage.missingByExp
+            .slice(0, 4)
+            .map((row) => ({
+              expId: row.expId,
+              role: row.role,
+              company: row.company,
+              mustRecoverCapabilities: row.missingCapabilities,
+            }));
           const secondPassPrompt = JSON.stringify({
             ...basePayload,
             correction: 'Second pass required. Reframe narrative at recruiter-grade level. Compress and elevate. Add stronger specificity, scope, outcomes, tooling, decision ownership, system thinking, risk mitigation, and commercial influence where evidenced. Avoid simple verb swaps and one-to-one category mirroring. No fabricated metrics.',
             firstPassQuality: quality,
             projectNotesCoverage,
             strategicThemeCoverage,
+            capabilityCoverage,
             mirrorRisk,
             notesDrivenLift,
             groundingViolations: grounding,
             missingSignalsToRecover: missingSignalList,
             missingStrategicThemesToRecover: missingStrategicThemes,
+            missingCapabilitiesToRecover: missingCapabilities,
             minNewBulletsForLongNotes: notesDrivenLift.deficits.map((row) => ({
               expId: row.expId,
               role: row.role,
@@ -1550,7 +1671,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
               required: row.requiredNewBullets,
               detected: row.detectedNewBullets,
             })),
-            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, structure must avoid one-to-one category mirroring, every role with >=100-word projectNotes must contain at least 2 genuinely new bullets, and no bullet may contain JD-only unsupported claims or placeholders.',
+            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, at least 55% of capability markers must be preserved in mode-appropriate framing, structure must avoid one-to-one category mirroring, every role with >=100-word projectNotes must contain at least 2 genuinely new bullets, and no bullet may contain JD-only unsupported claims or placeholders.',
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
           output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
@@ -1561,6 +1682,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           output.quality = quality;
           projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
           strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
+          capabilityCoverage = evaluateCapabilityElevationCoverage(input.resumeData, output.improved, targetRoleMode);
           mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
           notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
           grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText);
