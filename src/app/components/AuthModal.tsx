@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import {
   AUTH_EVENT_KEY,
   beginOAuthSignIn,
+  setPendingSignInMethod,
   requestEmailOtp,
   tokenStore,
   type OAuthProvider,
@@ -51,6 +52,7 @@ export default function AuthModal({
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
+      setPendingSignInMethod('email');
       await requestEmailOtp(normalizedEmail);
       setMagicLinkSentTo(normalizedEmail);
       setHint('Magic link sent. Check your email and click the link to continue.');
@@ -66,6 +68,7 @@ export default function AuthModal({
     setHint('');
     setOauthLoading(provider);
     try {
+      setPendingSignInMethod(provider);
       await beginOAuthSignIn(provider);
     } catch (err) {
       setOauthLoading(null);
@@ -144,6 +147,7 @@ export default function AuthModal({
                   setError('');
                   setHint('');
                   setLoading(true);
+                  setPendingSignInMethod('email');
                   void requestEmailOtp(email.trim().toLowerCase())
                     .then(() => setHint('A new magic link was sent to your email.'))
                     .catch((err) => setError(err instanceof Error ? err.message : 'Failed to resend magic link'))

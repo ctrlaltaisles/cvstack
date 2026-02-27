@@ -1,10 +1,21 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { AuthGateProvider } from './components/AuthGate';
-import { consumeSupabaseAccessTokenFromUrl, loginWithSupabaseAccessToken, resolvePostLoginPath, tokenStore, userStore, verifySupabaseTokenHash } from '../lib/api';
+import {
+  consumePendingSignInMethod,
+  consumeSupabaseAccessTokenFromUrl,
+  getSignInMethodLabel,
+  loginWithSupabaseAccessToken,
+  resolvePostLoginPath,
+  tokenStore,
+  userStore,
+  verifySupabaseTokenHash,
+} from '../lib/api';
 
 export default function App() {
+  const [authToast, setAuthToast] = useState('');
+
   useEffect(() => {
     const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const hasHashParams = new URLSearchParams(hash).has('access_token');
@@ -29,6 +40,10 @@ export default function App() {
         if (!result) return;
         tokenStore.set(result.token);
         userStore.set(result.user);
+        const pendingMethod = consumePendingSignInMethod();
+        if (pendingMethod) {
+          setAuthToast(`Signed in with ${getSignInMethodLabel(pendingMethod)}!`);
+        }
         return resolvePostLoginPath();
       })
       .then((destination) => {
@@ -43,9 +58,20 @@ export default function App() {
       });
   }, []);
 
+  useEffect(() => {
+    if (!authToast) return;
+    const timeoutId = window.setTimeout(() => setAuthToast(''), 2400);
+    return () => window.clearTimeout(timeoutId);
+  }, [authToast]);
+
   return (
     <AuthGateProvider>
       <RouterProvider router={router} />
+      {authToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] rounded-[10px] bg-[#1A1A1A] px-4 py-2 text-sm text-white shadow-[0_8px_24px_rgba(0,0,0,0.28)]">
+          {authToast}
+        </div>
+      )}
     </AuthGateProvider>
   );
 }

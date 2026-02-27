@@ -21,6 +21,7 @@ const TOKEN_KEY = 'cvstack_token';
 const USER_KEY = 'cvstack_user';
 const GUEST_KEY = 'cvstack_guest_id';
 export const AUTH_EVENT_KEY = 'cvstack_auth_event';
+const PENDING_SIGN_IN_METHOD_KEY = 'cvstack_pending_sign_in_method';
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
 let supabaseClient: SupabaseClient | null = null;
@@ -69,6 +70,25 @@ export function clearAuthStorage() {
 }
 
 export type OAuthProvider = 'google' | 'github' | 'linkedin_oidc';
+export type SignInMethod = OAuthProvider | 'email';
+
+export function setPendingSignInMethod(method: SignInMethod) {
+  localStorage.setItem(PENDING_SIGN_IN_METHOD_KEY, method);
+}
+
+export function consumePendingSignInMethod(): SignInMethod | null {
+  const method = localStorage.getItem(PENDING_SIGN_IN_METHOD_KEY) as SignInMethod | null;
+  if (!method) return null;
+  localStorage.removeItem(PENDING_SIGN_IN_METHOD_KEY);
+  return method;
+}
+
+export function getSignInMethodLabel(method: SignInMethod) {
+  if (method === 'google') return 'Google';
+  if (method === 'github') return 'Github';
+  if (method === 'linkedin_oidc') return 'Linkedin';
+  return 'Email';
+}
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {

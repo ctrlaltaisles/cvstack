@@ -1914,29 +1914,33 @@ function JDSidePanel({
 
 // ─── CreateResumeModal ───────────────────────────────────────────────────────
 
-function CreateResumeModal({ onGenerate, onClose }: { onGenerate: (role: string, company: string, jd: string, link: string) => void; onClose: () => void }) {
+function CreateResumeModal({ onGenerate, onClose, isGenerating }: { onGenerate: (role: string, company: string, jd: string, link: string) => void; onClose: () => void; isGenerating: boolean }) {
   const [roleName, setRoleName] = useState(''); const [company, setCompany] = useState(''); const [jobDesc, setJobDesc] = useState(''); const [jobLink, setJobLink] = useState('');
   const fCls = "w-full px-4 py-2.5 bg-[#F7F7F8] rounded-[10px] border border-[#EFEFEF] text-sm outline-none focus:border-[#CBCBCB] placeholder:text-[#D4D4D4] transition-colors text-[#1A1A1A]";
-  useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h); }, [onClose]);
+  const canSubmit = roleName.trim().length > 0 && !isGenerating;
+  useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isGenerating) onClose(); }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h); }, [isGenerating, onClose]);
   return (
-    <div className="fixed inset-0 bg-black/20 z-[200] flex items-center justify-center p-6 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/20 z-[200] flex items-center justify-center p-6 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={() => { if (!isGenerating) onClose(); }}>
       <div className="bg-white rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.14)] w-full max-w-[600px] animate-[fadeInScale_200ms_ease-out]" onClick={e => e.stopPropagation()}>
         <div className="px-8 py-6 border-b border-[#F0F0F0] flex items-center justify-between">
           <div><h2 className="text-base text-[#1A1A1A]" style={{ fontWeight: 500 }}>Create Resume for New Role</h2><p className="text-xs text-[#9B9B9B] mt-0.5">AI will tailor your resume to match this position</p></div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors"><X size={16} /></button>
+          <button onClick={onClose} disabled={isGenerating} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"><X size={16} /></button>
         </div>
         <div className="px-8 py-6 space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Role Name</label><input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Product Designer" className={fCls} autoFocus /></div>
-            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Company <span className="text-[#CBCBCB]">(optional)</span></label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Stripe" className={fCls} /></div>
+            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Role Name</label><input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Product Designer" className={fCls} autoFocus disabled={isGenerating} /></div>
+            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Company <span className="text-[#CBCBCB]">(optional)</span></label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Stripe" className={fCls} disabled={isGenerating} /></div>
           </div>
-          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} /></div>
-          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label><input value={jobLink} onChange={e => setJobLink(e.target.value)} placeholder="https://…" className={fCls} /></div>
+          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} disabled={isGenerating} /></div>
+          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label><input value={jobLink} onChange={e => setJobLink(e.target.value)} placeholder="https://…" className={fCls} disabled={isGenerating} /></div>
+          {isGenerating && (
+            <p className="text-xs text-[#6B6B6B]">Generating your tailored resume. This can take a moment.</p>
+          )}
         </div>
         <div className="px-8 py-5 border-t border-[#F0F0F0] flex items-center justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2.5 border border-[#E8E8E8] rounded-[10px] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5]">Cancel</button>
-          <button onClick={() => { if (roleName.trim()) onGenerate(roleName, company, jobDesc, jobLink); }} disabled={!roleName.trim()} className="px-4 py-2.5 bg-[#1A1A1A] text-white rounded-[10px] text-sm hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-            <Sparkles size={13} /> Generate Resume
+          <button onClick={onClose} disabled={isGenerating} className="px-4 py-2.5 border border-[#E8E8E8] rounded-[10px] text-sm text-[#6B6B6B] hover:bg-[#F5F5F5] disabled:opacity-40 disabled:cursor-not-allowed">Cancel</button>
+          <button onClick={() => { if (roleName.trim() && !isGenerating) onGenerate(roleName, company, jobDesc, jobLink); }} disabled={!canSubmit} className="px-4 py-2.5 bg-[#1A1A1A] text-white rounded-[10px] text-sm hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-w-[152px]">
+            <Sparkles size={13} className={isGenerating ? 'animate-pulse' : ''} /> {isGenerating ? 'Generating...' : 'Generate Resume'}
           </button>
         </div>
       </div>
@@ -2057,6 +2061,7 @@ export default function Workspace() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isCurating, setIsCurating] = useState(false);
+  const [isGeneratingVersion, setIsGeneratingVersion] = useState(false);
   const [isTldrLoading, setIsTldrLoading] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; tone: 'success' | 'info' | 'error' }>({ visible: false, message: '', tone: 'success' });
   const [baseResumeModel, setBaseResumeModel] = useState<BaseResumeModel | null>(null);
@@ -2066,6 +2071,7 @@ export default function Workspace() {
   const avatarRef = useRef<HTMLDivElement>(null);
   const currentUser = userStore.get();
   const activeVersionRef = useRef<ResumeVersion | null>(null);
+  const generateVersionLockRef = useRef(false);
   const autoSavedSigRef = useRef<Record<string, string>>({});
   const initialExpanded = INITIAL_VERSIONS
     .filter((v) => v.isAI)
@@ -2315,8 +2321,12 @@ export default function Workspace() {
   const handleRejectAll = () => setVersions(prev => prev.map(v => v.id === selectedVersionId ? { ...v, aiChanges: v.aiChanges.map(c => ({ ...c, status: 'rejected' as const })) } : v));
 
   const handleGenerateVersion = (roleName: string, company: string, jd: string, link: string) => {
+    if (generateVersionLockRef.current || isGeneratingVersion) return;
     requireAuth(async () => {
+      if (generateVersionLockRef.current) return;
       if (!baseVersion) return;
+      generateVersionLockRef.current = true;
+      setIsGeneratingVersion(true);
       const baseSnapshot = buildTextResume(baseVersion.data);
       const nowIso = new Date().toISOString();
       const nextBaseResume: BaseResumeModel = {
@@ -2396,6 +2406,9 @@ export default function Workspace() {
       } catch {
         setIsCurating(false);
         showToast('Failed to save generated version');
+      } finally {
+        setIsGeneratingVersion(false);
+        generateVersionLockRef.current = false;
       }
     });
   };
@@ -2883,7 +2896,7 @@ export default function Workspace() {
         </div>
       </div>
 
-      {showModal && <CreateResumeModal onGenerate={handleGenerateVersion} onClose={() => setShowModal(false)} />}
+      {showModal && <CreateResumeModal onGenerate={handleGenerateVersion} onClose={() => setShowModal(false)} isGenerating={isGeneratingVersion} />}
       {showBaseFileModal && (
         <BaseResumeFileModal
           fileName={resumeMeta?.file_name || 'resume.pdf'}
