@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, makeId, requireAuth, signShareToken, signToken, verifyPassword, verifyShareToken } from './auth';
 import { defaultResumeData } from './defaults';
 import { initDb, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
@@ -24,6 +25,18 @@ const PORT = Number(process.env.PORT ?? 4000);
 const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
 const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
+const SUPABASE_URL = String(process.env.SUPABASE_URL ?? '').trim();
+const SUPABASE_AUTH_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? '').trim();
+let supabaseAuthClient: ReturnType<typeof createClient> | null = null;
+
+function getSupabaseAuthClient() {
+  if (!SUPABASE_URL || !SUPABASE_AUTH_KEY) return null;
+  if (supabaseAuthClient) return supabaseAuthClient;
+  supabaseAuthClient = createClient(SUPABASE_URL, SUPABASE_AUTH_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return supabaseAuthClient;
+}
 
 type CompressionResult = {
   buffer: Buffer;
@@ -141,6 +154,44 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const profile = state.profiles.find((p) => p.userId === user.id);
+  res.json({ token: signToken(user.id), user: { id: user.id, email: user.email, fullName: profile?.fullName ?? '' } });
+});
+
+app.post('/api/auth/supabase', async (req, res) => {
+  const accessToken = String(req.body?.accessToken ?? '').trim();
+  if (!accessToken) {
+    res.status(400).json({ error: 'accessToken is required' });
+    return;
+  }
+
+  const supabase = getSupabaseAuthClient();
+  if (!supabase) {
+    res.status(500).json({ error: 'Supabase auth is not configured on server' });
+    return;
+  }
+
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  if (error || !data?.user?.email) {
+    res.status(401).json({ error: 'Invalid Supabase access token' });
+    return;
+  }
+
+  const email = data.user.email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  const state = await readDb();
+  let user = state.users.find((u) => u.email === email) ?? null;
+
+  if (!user) {
+    const userId = makeId('usr');
+    user = { id: userId, email, passwordHash: 'supabase', createdAt: now };
+    await withDb(async (db) => {
+      db.users.push(user as UserRecord);
+      db.profiles.push(makeProfileRecord(userId, now, { contactEmail: email }));
+    });
+  }
+
+  const latestState = await readDb();
+  const profile = latestState.profiles.find((p) => p.userId === user!.id);
   res.json({ token: signToken(user.id), user: { id: user.id, email: user.email, fullName: profile?.fullName ?? '' } });
 });
 

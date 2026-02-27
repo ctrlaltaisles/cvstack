@@ -74,6 +74,64 @@ export function beginOAuthSignIn(provider: OAuthProvider) {
   window.location.assign(`${authBase}/authorize?${params.toString()}`);
 }
 
+function supabaseHeaders() {
+  if (!SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_ANON_KEY.');
+  }
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+export async function requestEmailOtp(email: string) {
+  const authBase = getSupabaseAuthBase();
+  if (!authBase) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL.');
+  }
+
+  const response = await fetch(`${authBase}/otp`, {
+    method: 'POST',
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ email, create_user: true }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error_description || payload.msg || payload.error || 'Failed to send OTP');
+  }
+}
+
+export async function verifyEmailOtp(email: string, token: string) {
+  const authBase = getSupabaseAuthBase();
+  if (!authBase) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL.');
+  }
+
+  const response = await fetch(`${authBase}/verify`, {
+    method: 'POST',
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ email, token, type: 'email' }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error_description || payload.msg || payload.error || 'Invalid OTP');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const accessToken = String(payload?.access_token || payload?.session?.access_token || '').trim();
+  if (!accessToken) {
+    throw new Error('Could not complete sign in after OTP verification.');
+  }
+  return accessToken;
+}
+
+export function loginWithSupabaseAccessToken(accessToken: string) {
+  return requestJson<AuthResponse>('/api/auth/supabase', { accessToken });
+}
+
 type ReqOpts = RequestInit & { auth?: boolean };
 
 function getGuestId() {

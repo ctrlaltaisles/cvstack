@@ -1,6 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { beginOAuthSignIn, login, register, tokenStore, userStore, type OAuthProvider } from '../../lib/api';
+import {
+  beginOAuthSignIn,
+  loginWithSupabaseAccessToken,
+  requestEmailOtp,
+  tokenStore,
+  userStore,
+  verifyEmailOtp,
+  type OAuthProvider,
+} from '../../lib/api';
 import googleLogo from '../assets/social/google-black.svg';
 import linkedInLogo from '../assets/social/InBug-Black.png';
 
@@ -14,29 +22,56 @@ export default function AuthModal({
   onSuccess: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSentTo, setOtpSentTo] = useState('');
   const [error, setError] = useState('');
+  const [hint, setHint] = useState('');
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
+  const otpStage = useMemo(() => Boolean(otpSentTo && otpSentTo === email.trim().toLowerCase()), [email, otpSentTo]);
 
-  if (!open) return null;
+  useEffect(() => {
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    if (!accessToken) return;
+
+    setLoading(true);
+    setError('');
+    setHint('');
+    void loginWithSupabaseAccessToken(accessToken)
+      .then((result) => {
+        tokenStore.set(result.token);
+        userStore.set(result.user);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        onSuccess();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Social sign-in failed');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [onSuccess]);
 
   const submit = async () => {
     setError('');
+    setHint('');
     setLoading(true);
     try {
-      let result;
-      try {
-        result = await register(email, password);
-      } catch (registerErr) {
-        if (registerErr instanceof Error && /already registered/i.test(registerErr.message)) {
-          result = await login(email, password);
-        } else {
-          throw registerErr;
-        }
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!otpStage) {
+        await requestEmailOtp(normalizedEmail);
+        setOtpSentTo(normalizedEmail);
+        setHint('We sent a 6-digit code to your email.');
+        return;
       }
+
+      const accessToken = await verifyEmailOtp(normalizedEmail, otp.trim());
+      const result = await loginWithSupabaseAccessToken(accessToken);
       tokenStore.set(result.token);
       userStore.set(result.user);
+      setOtp('');
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
@@ -47,6 +82,7 @@ export default function AuthModal({
 
   const startOAuth = (provider: OAuthProvider) => {
     setError('');
+    setHint('');
     setOauthLoading(provider);
     try {
       beginOAuthSignIn(provider);
@@ -55,6 +91,8 @@ export default function AuthModal({
       setError(err instanceof Error ? err.message : 'Unable to start social login');
     }
   };
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 bg-black/25 z-[250] flex items-center justify-center p-6" onClick={onClose}>
@@ -108,28 +146,57 @@ export default function AuthModal({
             </div>
             <input
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError('');
+                setHint('');
+              }}
               type="email"
               placeholder="Email"
               className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
             />
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              placeholder="Password (min 8 chars)"
-              className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
-            />
+            {otpStage && (
+              <input
+                value={otp}
+                onChange={(e) => {
+                  setOtp(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  setError('');
+                  setHint('');
+                }}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="6-digit OTP code"
+                className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
+              />
+            )}
+            {hint && <p className="text-xs text-[#6B6B6B]">{hint}</p>}
             {error && <p className="text-xs text-[#D14343]">{error}</p>}
+            {otpStage && (
+              <button
+                onClick={() => {
+                  setError('');
+                  setHint('');
+                  setLoading(true);
+                  void requestEmailOtp(email.trim().toLowerCase())
+                    .then(() => setHint('A new code was sent to your email.'))
+                    .catch((err) => setError(err instanceof Error ? err.message : 'Failed to resend code'))
+                    .finally(() => setLoading(false));
+                }}
+                disabled={loading || oauthLoading !== null || !email}
+                className="text-xs text-[#6B6B6B] hover:text-[#1A1A1A] underline underline-offset-2 text-left"
+              >
+                Resend code
+              </button>
+            )}
           </div>
         </div>
         <div className="px-6 py-5 border-t border-[#F0F0F0]">
           <button
             onClick={submit}
-            disabled={loading || oauthLoading !== null || !email || password.length < 8}
+            disabled={loading || oauthLoading !== null || !email || (otpStage && otp.length !== 6)}
             className="w-full bg-[#1A1A1A] text-white px-5 py-3 rounded-[12px] text-sm disabled:opacity-40"
           >
-            {loading ? 'Please wait...' : 'Continue'}
+            {loading ? 'Please wait...' : otpStage ? 'Verify & Continue' : 'Send OTP'}
           </button>
         </div>
       </div>
