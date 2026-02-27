@@ -23,6 +23,7 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "openai": "^6.24.0",
+    "pdf-parse": "^1.1.4",
     "pdfjs-dist": "^4.10.38",
     "prisma": "^6.16.0"
   },

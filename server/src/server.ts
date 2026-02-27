@@ -12,8 +12,9 @@ import { defaultResumeData } from './defaults';
 import { initDb, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
 import type { ResumeData, ResumeVersionDTO } from './types';
 import { inferResumeSummaryFromDebug, parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
+import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
-import { deleteStoredResumePdf, getResumePdfAccess, storeResumePdf } from './storage/pdfStorage';
+import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, storeResumePdf } from './storage/pdfStorage';
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -34,6 +35,14 @@ app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
+app.get('/api/storage/health', (_req, res) => {
+  res.json({
+    ok: true,
+    storage: getStorageDiagnostics(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post('/api/ai/tailor-resume', async (req, res) => {
@@ -278,10 +287,17 @@ async function optimizePdfBufferForStorage(inputBuffer: Buffer): Promise<Compres
   return best;
 }
 
-async function persistUploadedPdf(originalName: string, originalBuffer: Buffer): Promise<{ storedBytes: number; method: CompressionResult['method']; storagePath: string }> {
+async function persistUploadedPdf(originalName: string, originalBuffer: Buffer): Promise<{ storedBytes: number; method: CompressionResult['method']; storagePath: string; provider: 'supabase' | 'local'; bucket?: string; key?: string }> {
   const optimized = await optimizePdfBufferForStorage(originalBuffer);
   const stored = await storeResumePdf(optimized.buffer, originalName);
-  return { storedBytes: optimized.buffer.length, method: optimized.method, storagePath: stored.storagePath };
+  return {
+    storedBytes: optimized.buffer.length,
+    method: optimized.method,
+    storagePath: stored.storagePath,
+    provider: stored.provider,
+    bucket: stored.bucket,
+    key: stored.key,
+  };
 }
 
 async function cleanupExpiredUploadedPdfs() {
@@ -340,7 +356,57 @@ async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
     return await parseUploadedResumeBuffer(buffer);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown parser error';
-    const fallbackParsedData = {
+    // Keep upload flow resilient in production: if deterministic structured parser
+    // fails, try legacy text extraction + heuristic mapping before falling back to blank.
+    try {
+      const extracted = await extractTextFromPdfBuffer(buffer);
+      const extractedText = String(extracted.text ?? '').trim();
+      if (extractedText) {
+        const parsedLegacy = parseResumeText(extractedText);
+        const data = toResumeDataFromLegacyParser(parsedLegacy);
+        const fallbackParsedData = {
+          name: parsedLegacy.name || null,
+          phone: parsedLegacy.phone || null,
+          email: parsedLegacy.email || null,
+          linkedin: null,
+          website: null,
+          country: null,
+          currentTitle: data.title || null,
+          experiences: (data.workExperience ?? []).map((exp) => ({
+            start: { month: exp.startDate?.month ?? null, year: exp.startDate?.year ?? null },
+            end: { month: exp.endDate?.month ?? null, year: exp.endDate?.year ?? null },
+            isCurrent: Boolean(exp.endDate?.present),
+            role: exp.role || null,
+            company: exp.company || null,
+            description: exp.bullets ?? [],
+          })),
+          education: (data.education ?? []).map((edu) => ({
+            degree: edu.degree || null,
+            school: edu.school || null,
+            location: edu.location || null,
+            start: { month: edu.startDate?.month ?? null, year: edu.startDate?.year ?? null },
+            end: { month: edu.endDate?.month ?? null, year: edu.endDate?.year ?? null },
+            isCurrent: Boolean(edu.endDate?.present),
+          })),
+          skills: data.skills ?? [],
+        };
+
+        return {
+          parsedData: fallbackParsedData,
+          warnings: [
+            'Primary structured extraction failed; recovered data using compatibility parser.',
+            `Parser detail: ${message}`,
+            `Fallback extractor: ${extracted.method}`,
+          ],
+          extractedText: extractedText.slice(0, 5000),
+          data,
+        };
+      }
+    } catch {
+      // continue to blank fallback
+    }
+
+    const blankParsedData = {
       name: null,
       phone: null,
       email: null,
@@ -353,10 +419,8 @@ async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
       skills: [],
     };
 
-    // Keep upload flow resilient in production: when parsing fails, continue
-    // with a blank base resume and surface warnings for manual editing.
     return {
-      parsedData: fallbackParsedData,
+      parsedData: blankParsedData,
       warnings: [
         'Structured extraction failed for this PDF; opened editor with a blank base resume.',
         `Parser detail: ${message}`,
@@ -544,6 +608,12 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     parsed: parsed.parsedData,
     warnings: parsed.warnings,
     extractedTextPreview: parsed.extractedText.slice(0, 1200),
+    storage: {
+      provider: storedFile.provider,
+      bucket: storedFile.bucket ?? null,
+      path: storedFile.storagePath,
+      key: storedFile.key ?? null,
+    },
   });
 });
 
@@ -660,6 +730,12 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
     parsed: parsed.parsedData,
     warnings: parsed.warnings,
     extractedTextPreview: parsed.extractedText.slice(0, 1200),
+    storage: {
+      provider: storedFile.provider,
+      bucket: storedFile.bucket ?? null,
+      path: storedFile.storagePath,
+      key: storedFile.key ?? null,
+    },
     resume: {
       id: resumeId,
       source: 'upload',
