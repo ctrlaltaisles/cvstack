@@ -24,6 +24,7 @@ const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
 const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
 const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+const ENABLE_UPLOAD_CLEANUP = String(process.env.ENABLE_UPLOAD_CLEANUP ?? '').trim() === '1';
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
 const SUPABASE_URL = String(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').trim();
 const SUPABASE_AUTH_KEY = String(
@@ -404,12 +405,21 @@ async function cleanupExpiredUploadedPdfs() {
 }
 
 function startUploadCleanupScheduler() {
-  void cleanupExpiredUploadedPdfs();
+  if (!ENABLE_UPLOAD_CLEANUP) {
+    console.log('[uploads] cleanup scheduler disabled (set ENABLE_UPLOAD_CLEANUP=1 to enable)');
+    return;
+  }
+
+  void cleanupExpiredUploadedPdfs().catch((error) => {
+    console.warn('[uploads] cleanup run failed', error);
+  });
   if (!Number.isFinite(UPLOAD_CLEANUP_INTERVAL_MS) || UPLOAD_CLEANUP_INTERVAL_MS <= 0) {
     return;
   }
   const timer = setInterval(() => {
-    void cleanupExpiredUploadedPdfs();
+    void cleanupExpiredUploadedPdfs().catch((error) => {
+      console.warn('[uploads] cleanup run failed', error);
+    });
   }, UPLOAD_CLEANUP_INTERVAL_MS);
   timer.unref();
 }
