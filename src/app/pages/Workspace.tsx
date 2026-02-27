@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
-  Copy, GripVertical, FileText, Share2, Trash2, Menu,
+  Copy, GripVertical, FileText, Share2, Trash2, Menu, Minus,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
@@ -22,6 +22,7 @@ const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
 const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|principal|staff|head|chief|vp|director|associate)\s+)+/i;
 const MIN_JD_CURATION_LENGTH = 40;
 const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
+const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Base Resume';
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -240,6 +241,65 @@ function countWords(value: string): number {
   const clean = value.trim();
   if (!clean) return 0;
   return clean.split(/\s+/).length;
+}
+type ProjectNotesSection = {
+  source: string;
+  content: string;
+};
+function normalizeProjectNotesSourceLabel(value: string): string {
+  const clean = compactText(value);
+  return clean || PROJECT_NOTES_BASE_SOURCE_LABEL;
+}
+function parseProjectNotesSections(value: string): ProjectNotesSection[] {
+  const normalized = normalizeClipboardLineEndings(value).trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split('\n');
+  const headingIndices: number[] = [];
+  const headingPattern = /^From\s+(.+?)\s*$/;
+
+  lines.forEach((line, index) => {
+    if (headingPattern.test(line.trim())) headingIndices.push(index);
+  });
+
+  const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  const isStructured = headingIndices.length >= 2 && firstNonEmptyLineIndex === headingIndices[0];
+  if (!isStructured) {
+    return [{ source: PROJECT_NOTES_BASE_SOURCE_LABEL, content: normalized }];
+  }
+
+  const sections: ProjectNotesSection[] = [];
+  for (let i = 0; i < headingIndices.length; i += 1) {
+    const start = headingIndices[i];
+    const end = i + 1 < headingIndices.length ? headingIndices[i + 1] : lines.length;
+    const heading = lines[start].trim();
+    const match = heading.match(headingPattern);
+    if (!match) continue;
+    const source = normalizeProjectNotesSourceLabel(match[1]);
+    const content = lines.slice(start + 1, end).join('\n').trim();
+    if (!content) continue;
+    sections.push({ source, content });
+  }
+  if (sections.length === 0) {
+    return [{ source: PROJECT_NOTES_BASE_SOURCE_LABEL, content: normalized }];
+  }
+  return sections;
+}
+function serializeProjectNotesSections(sections: ProjectNotesSection[]): string {
+  const cleanSections = sections
+    .map((section) => ({
+      source: normalizeProjectNotesSourceLabel(section.source),
+      content: normalizeClipboardLineEndings(section.content).trim(),
+    }))
+    .filter((section) => section.content.length > 0);
+
+  if (cleanSections.length === 0) return '';
+  if (cleanSections.length === 1 && cleanSections[0].source === PROJECT_NOTES_BASE_SOURCE_LABEL) {
+    return cleanSections[0].content;
+  }
+  return cleanSections
+    .map((section) => `From ${section.source}\n${section.content}`)
+    .join('\n\n');
 }
 const BASE_PROJECT_NOTES_PROMPTS = [
   'What were the 2-3 biggest projects you owned in this role?',
@@ -849,7 +909,7 @@ function mergeProjectNotesPreservingStructure(baseNotes: string, variantNotes: s
   return [...baseSegments, ...additions].join('\n\n');
 }
 
-function mergeVariantProjectNotesIntoBase(baseData: ResumeData, variantData: ResumeData): { data: ResumeData; changed: boolean } {
+function mergeVariantProjectNotesIntoBase(baseData: ResumeData, variantData: ResumeData, sourceLabel: string): { data: ResumeData; changed: boolean } {
   if (!baseData.workExperience.length || !variantData.workExperience.length) return { data: baseData, changed: false };
 
   const variantById = new Map(variantData.workExperience.map((exp) => [exp.id, exp]));
@@ -861,7 +921,31 @@ function mergeVariantProjectNotesIntoBase(baseData: ResumeData, variantData: Res
     if (!variantExp) return baseExp;
 
     const currentNotes = (baseExp.projectNotes ?? '').trim();
-    const mergedNotes = mergeProjectNotesPreservingStructure(currentNotes, variantExp.projectNotes ?? '');
+    const currentSections = parseProjectNotesSections(currentNotes);
+    const variantNotes = (variantExp.projectNotes ?? '').trim();
+    const variantSections = parseProjectNotesSections(variantNotes);
+    const incomingSource = normalizeProjectNotesSourceLabel(sourceLabel);
+    const sourceMatchedSection = variantSections.find((section) => normalizeProjectNotesSourceLabel(section.source).toLowerCase() === incomingSource.toLowerCase());
+    const incomingContent = sourceMatchedSection
+      ? sourceMatchedSection.content
+      : variantSections.map((section) => section.content.trim()).filter(Boolean).join('\n\n');
+    if (!incomingContent) return baseExp;
+
+    const sectionIndex = currentSections.findIndex((section) => normalizeProjectNotesSourceLabel(section.source).toLowerCase() === incomingSource.toLowerCase());
+    let nextSections = [...currentSections];
+
+    if (sectionIndex >= 0) {
+      const mergedContent = mergeProjectNotesPreservingStructure(nextSections[sectionIndex].content, incomingContent);
+      if (mergedContent !== nextSections[sectionIndex].content) {
+        nextSections[sectionIndex] = { ...nextSections[sectionIndex], content: mergedContent };
+      }
+    } else if (nextSections.length === 0) {
+      nextSections = [{ source: incomingSource, content: incomingContent }];
+    } else {
+      nextSections = [...nextSections, { source: incomingSource, content: incomingContent }];
+    }
+
+    const mergedNotes = serializeProjectNotesSections(nextSections);
     if (mergedNotes === currentNotes) return baseExp;
     changed = true;
     return { ...baseExp, projectNotes: mergedNotes };
@@ -1183,6 +1267,7 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = false, onAutoExpandConsumed, promptMode = 'base' }: { value: string; onChange: (v: string) => void; disabled?: boolean; autoExpand?: boolean; onAutoExpandConsumed?: () => void; promptMode?: 'base' | 'variant' }) {
   const [expanded, setExpanded] = useState(Boolean(value.trim()));
+  const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(new Set());
   const [isRecording, setIsRecording] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [dictationError, setDictationError] = useState<string | null>(null);
@@ -1206,7 +1291,25 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
     onAutoExpandConsumed?.();
   }, [autoExpand, onAutoExpandConsumed]);
   const prompts = promptMode === 'variant' ? VARIANT_PROJECT_NOTES_PROMPTS : BASE_PROJECT_NOTES_PROMPTS;
+  const sections = parseProjectNotesSections(value);
+  const hasMultipleSources = sections.length > 1;
+  const sectionKeys = sections.map((section, index) => `${index}:${normalizeProjectNotesSourceLabel(section.source)}`);
+  const sectionsSignature = sectionKeys.join('||');
   const hasReachedPromptThreshold = countWords(value) >= PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD;
+
+  useEffect(() => {
+    if (!hasMultipleSources) {
+      setExpandedSourceKeys(new Set());
+      return;
+    }
+    setExpandedSourceKeys((prev) => {
+      const next = new Set<string>();
+      sectionKeys.forEach((key, index) => {
+        if (prev.has(key) || index === 0) next.add(key);
+      });
+      return next;
+    });
+  }, [hasMultipleSources, sectionsSignature]);
 
   const stopDictation = useCallback(() => {
     if (interimTranscript.trim()) {
@@ -1333,13 +1436,56 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
       </div>
       {expanded && (
         <div className="px-4 pb-4 animate-[fadeInDown_150ms_ease-out]">
-          <InlineArea
-            disabled={disabled}
-            value={value}
-            onChange={onChange}
-            placeholder="Word-dump what you did. AI will convert this into recruiter-ready bullets."
-            className="ml-1 text-[13px] text-[#767676]"
-          />
+          {!hasMultipleSources && (
+            <InlineArea
+              disabled={disabled}
+              value={value}
+              onChange={(nextValue) => onChange(nextValue)}
+              placeholder="Word-dump what you did. AI will convert this into recruiter-ready bullets."
+              className="ml-1 text-[13px] text-[#767676]"
+            />
+          )}
+          {hasMultipleSources && (
+            <div className="mt-1 ml-1 mr-1 border-t border-[#ECECEC]">
+              {sections.map((section, index) => {
+                const key = sectionKeys[index];
+                const isOpen = expandedSourceKeys.has(key);
+                return (
+                  <div key={key} className="border-b border-[#ECECEC] py-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedSourceKeys((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        });
+                      }}
+                      className="w-full flex items-center justify-between text-left"
+                    >
+                      <span className="text-sm text-[#6F6F6F]">From {section.source}</span>
+                      <span className="text-[#9A9A9A]">{isOpen ? <Minus size={16} /> : <Plus size={16} />}</span>
+                    </button>
+                    {isOpen && (
+                      <InlineArea
+                        disabled={disabled}
+                        value={section.content}
+                        onChange={(content) => {
+                          const nextSections = sections.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, content } : item
+                          ));
+                          onChange(serializeProjectNotesSections(nextSections));
+                        }}
+                        placeholder="Add source-specific context"
+                        className="mt-2 text-[13px] text-[#767676]"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {!disabled && isRecording && interimTranscript && (
             <p className="mt-2 ml-1 text-[11px] text-[#7A7A7A] italic">
               Listening: "{interimTranscript}"
@@ -1353,7 +1499,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
           {!disabled && dictationError && (
             <p className="mt-2 ml-1 text-[11px] text-[#A6454A]">{dictationError}</p>
           )}
-          {!disabled && !hasReachedPromptThreshold && (
+          {!disabled && !hasMultipleSources && !hasReachedPromptThreshold && (
             <div className="flex flex-wrap gap-2 mt-3">
               {prompts.map((prompt) => (
                 <button
@@ -2495,7 +2641,8 @@ export default function Workspace() {
     void persistVersion(nextVersion).catch(() => {});
 
     if (nextVersion.id !== baseVersion.id) {
-      const mergedBase = mergeVariantProjectNotesIntoBase(baseVersion.data, normalizedData);
+      const variantSourceLabel = composeRoleCompanyTitle(nextVersion.jobTitle ?? '', nextVersion.jobCompany ?? '') || nextVersion.name || 'Variant';
+      const mergedBase = mergeVariantProjectNotesIntoBase(baseVersion.data, normalizedData, variantSourceLabel);
       if (mergedBase.changed) {
         const nextBaseVersion: ResumeVersion = {
           ...baseVersion,
