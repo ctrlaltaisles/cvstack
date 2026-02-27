@@ -18,6 +18,7 @@ const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'cvstack_token';
 const USER_KEY = 'cvstack_user';
 const GUEST_KEY = 'cvstack_guest_id';
+export const AUTH_EVENT_KEY = 'cvstack_auth_event';
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
 
@@ -29,8 +30,14 @@ export interface StoredUser {
 
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
-  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  set: (token: string) => {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(AUTH_EVENT_KEY, String(Date.now()));
+  },
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.setItem(AUTH_EVENT_KEY, String(Date.now()));
+  },
 };
 
 export const userStore = {
@@ -43,8 +50,14 @@ export const userStore = {
       return null;
     }
   },
-  set: (user: StoredUser) => localStorage.setItem(USER_KEY, JSON.stringify(user)),
-  clear: () => localStorage.removeItem(USER_KEY),
+  set: (user: StoredUser) => {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.setItem(AUTH_EVENT_KEY, String(Date.now()));
+  },
+  clear: () => {
+    localStorage.removeItem(USER_KEY);
+    localStorage.setItem(AUTH_EVENT_KEY, String(Date.now()));
+  },
 };
 
 export function clearAuthStorage() {

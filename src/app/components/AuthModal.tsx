@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import {
+  AUTH_EVENT_KEY,
   beginOAuthSignIn,
-  loginWithSupabaseAccessToken,
   requestEmailOtp,
   tokenStore,
-  userStore,
-  verifyEmailOtp,
   type OAuthProvider,
 } from '../../lib/api';
 import googleLogo from '../assets/social/google-black.svg';
@@ -22,37 +20,30 @@ export default function AuthModal({
   onSuccess: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpSentTo, setOtpSentTo] = useState('');
+  const [magicLinkSentTo, setMagicLinkSentTo] = useState('');
   const [error, setError] = useState('');
   const [hint, setHint] = useState('');
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
-  const otpStage = useMemo(() => Boolean(otpSentTo && otpSentTo === email.trim().toLowerCase()), [email, otpSentTo]);
+  const magicLinkSentForCurrentEmail = Boolean(magicLinkSentTo && magicLinkSentTo === email.trim().toLowerCase());
 
   useEffect(() => {
-    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    if (!accessToken) return;
+    if (!open) return;
+    if (tokenStore.get()) {
+      onSuccess();
+      return;
+    }
 
-    setLoading(true);
-    setError('');
-    setHint('');
-    void loginWithSupabaseAccessToken(accessToken)
-      .then((result) => {
-        tokenStore.set(result.token);
-        userStore.set(result.user);
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_EVENT_KEY) return;
+      if (tokenStore.get()) {
         onSuccess();
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Social sign-in failed');
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [onSuccess]);
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [open, onSuccess]);
 
   const submit = async () => {
     setError('');
@@ -60,19 +51,9 @@ export default function AuthModal({
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      if (!otpStage) {
-        await requestEmailOtp(normalizedEmail);
-        setOtpSentTo(normalizedEmail);
-        setHint('We sent a 6-digit code to your email.');
-        return;
-      }
-
-      const accessToken = await verifyEmailOtp(normalizedEmail, otp.trim());
-      const result = await loginWithSupabaseAccessToken(accessToken);
-      tokenStore.set(result.token);
-      userStore.set(result.user);
-      setOtp('');
-      onSuccess();
+      await requestEmailOtp(normalizedEmail);
+      setMagicLinkSentTo(normalizedEmail);
+      setHint('Magic link sent. Check your email and click the link to continue.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
@@ -155,37 +136,23 @@ export default function AuthModal({
               placeholder="Email"
               className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
             />
-            {otpStage && (
-              <input
-                value={otp}
-                onChange={(e) => {
-                  setOtp(e.target.value.replace(/\D/g, '').slice(0, 6));
-                  setError('');
-                  setHint('');
-                }}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder="6-digit OTP code"
-                className="w-full bg-[#F7F7F8] rounded-[12px] p-3 border border-[#ECECEC] text-sm"
-              />
-            )}
             {hint && <p className="text-xs text-[#6B6B6B]">{hint}</p>}
             {error && <p className="text-xs text-[#D14343]">{error}</p>}
-            {otpStage && (
+            {magicLinkSentForCurrentEmail && (
               <button
                 onClick={() => {
                   setError('');
                   setHint('');
                   setLoading(true);
                   void requestEmailOtp(email.trim().toLowerCase())
-                    .then(() => setHint('A new code was sent to your email.'))
-                    .catch((err) => setError(err instanceof Error ? err.message : 'Failed to resend code'))
+                    .then(() => setHint('A new magic link was sent to your email.'))
+                    .catch((err) => setError(err instanceof Error ? err.message : 'Failed to resend magic link'))
                     .finally(() => setLoading(false));
                 }}
                 disabled={loading || oauthLoading !== null || !email}
                 className="text-xs text-[#6B6B6B] hover:text-[#1A1A1A] underline underline-offset-2 text-left"
               >
-                Resend code
+                Resend link
               </button>
             )}
           </div>
@@ -193,7 +160,7 @@ export default function AuthModal({
         <div className="px-6 py-5 border-t border-[#F0F0F0]">
           <button
             onClick={submit}
-            disabled={loading || oauthLoading !== null || !email || (otpStage && otp.length !== 6)}
+            disabled={loading || oauthLoading !== null || !email}
             className="w-full bg-[#1A1A1A] text-white px-5 py-3 rounded-[12px] text-sm disabled:opacity-40"
           >
             {loading ? 'Please wait...' : 'Continue'}

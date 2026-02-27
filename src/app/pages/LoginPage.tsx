@@ -9,7 +9,7 @@ export default function LoginPage() {
       <AuthModal
         open
         onClose={() => navigate('/')}
-        onSuccess={() => navigate('/workspace')}
+        onSuccess={() => navigate('/start')}
       />
     </div>
   );

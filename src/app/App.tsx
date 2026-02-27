@@ -17,7 +17,7 @@ export default function App() {
         tokenStore.set(result.token);
         userStore.set(result.user);
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        window.location.replace('/workspace');
+        window.location.replace('/start');
       })
       .catch(() => {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);

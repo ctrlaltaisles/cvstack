@@ -962,9 +962,9 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
     <div className={`relative flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => setRowHov(false)}>
       {!isReviewLocked && <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`absolute -left-4 top-[3px] shrink-0 cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} strokeWidth={1.8} /></div>}
       <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
-      <div className="flex-1 min-w-0"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
+      <div className="flex-1 min-w-0 md:pr-10"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
       {!isReviewLocked && (
-        <div className={`shrink-0 flex items-center gap-0.5 mt-0.5 transition-opacity ${rowHov || active || isHighlighted ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`hidden md:flex absolute right-1 top-1 items-center gap-0.5 transition-opacity ${rowHov || active || isHighlighted ? 'opacity-100' : 'opacity-0'}`}>
           <button onClick={onDuplicate} aria-label="Duplicate bullet" title="Duplicate bullet" className="p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-colors">
             <Copy size={13} />
           </button>
@@ -1076,7 +1076,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
 
   return (
     <div className="mt-6 rounded-[12px] bg-[#F8F8F8]">
-      <div className={`w-full pr-4 rounded-[12px] transition-colors flex items-center justify-between text-left ${expanded ? 'h-11 pt-1 pl-5 hover:bg-transparent' : 'h-10 pl-4 hover:bg-[#F1F1F1]'}`}>
+      <div className={`w-full pr-4 rounded-[12px] transition-colors flex items-center justify-between text-left ${expanded ? 'h-12 pt-1.5 pl-5 hover:bg-transparent md:h-11 md:pt-1' : 'h-12 pl-4 hover:bg-[#F1F1F1] md:h-10'}`}>
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -1201,7 +1201,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2 group/role mb-0.5">
           <div className="flex-1 min-w-0"><InlineText disabled={isReviewLocked} value={exp.role} onChange={v => onUpdateExp({ ...exp, role: v })} className="text-sm text-[#1A1A1A]" /></div>
-          <div className="relative shrink-0 mt-0.5 flex items-center gap-1">
+          <div className="hidden md:flex relative shrink-0 mt-0.5 items-center gap-1">
             {!isReviewLocked && <button onClick={() => { const text = [`${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate), '', ...exp.bullets.map(b => `• ${b}`)].join('\n'); navigator.clipboard.writeText(text).catch(() => {}); onShowToast('Copied to clipboard'); }} onMouseEnter={() => setShowCopyTip(true)} onMouseLeave={() => setShowCopyTip(false)} className="opacity-0 group-hover/role:opacity-100 text-[#CBCBCB] hover:text-[#6B6B6B] transition-all p-0.5"><Copy size={12} strokeWidth={1.8} /></button>}
             {showCopyTip && <div className="absolute right-0 top-6 bg-[#1A1A1A] text-white rounded-[6px] px-2 py-1 whitespace-nowrap pointer-events-none z-50" style={{ fontSize: 11 }}>Copy role</div>}
           </div>
@@ -1260,9 +1260,9 @@ function EducationBlock({ edu, onUpdateEdu, onDeleteEdu }: { edu: EducationEntry
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const duration = calcDurationFromDates(edu.startDate, edu.endDate);
   return (
-    <div className="flex gap-10 group/edu">
-      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
-        <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(edu.startDate, edu.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
+    <div className="flex flex-col gap-3 md:flex-row md:gap-10 group/edu">
+      <div className="w-full md:w-44 md:shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
+        <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer"><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors md:whitespace-nowrap">{formatDateRange(edu.startDate, edu.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={edu.startDate} endDate={edu.endDate} onChangeStart={v => onUpdateEdu({ ...edu, startDate: v })} onChangeEnd={v => onUpdateEdu({ ...edu, endDate: v })} onClose={() => setEditingDate(false)} />}
       </div>
       <div className="flex-1 min-w-0">
