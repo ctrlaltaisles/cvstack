@@ -92,6 +92,7 @@ function shouldUseJsonFallback(error: unknown) {
   return (
     code === 'P1001'
     || code === 'P1012'
+    || code === 'P2028'
     || code === 'P2021'
     || code === 'P2022'
     || message.includes('prisma client not available')
@@ -102,6 +103,8 @@ function shouldUseJsonFallback(error: unknown) {
     || message.includes('does not exist in the current database')
     || message.includes('table')
     || message.includes('relation')
+    || message.includes('transaction api error')
+    || message.includes('transaction not found')
   );
 }
 

@@ -2475,6 +2475,9 @@ export default function Workspace() {
   }, [isMobile, isMobileSidebarOpen]);
 
   const showToast = (msg: string, tone: 'success' | 'info' | 'error' = 'success') => {
+    if (tone === 'error') {
+      console.error(`[Workspace toast] ${msg}`);
+    }
     setToast({ visible: true, message: msg, tone });
     setTimeout(() => setToast({ visible: false, message: '', tone: 'success' }), 2500);
   };
