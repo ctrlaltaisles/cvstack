@@ -24,7 +24,8 @@ const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
 const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
 const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
-const ENABLE_UPLOAD_CLEANUP = String(process.env.ENABLE_UPLOAD_CLEANUP ?? '').trim() === '1';
+// Temporarily hard-disable cleanup scheduler to prevent Prisma transaction conflicts in production.
+const ENABLE_UPLOAD_CLEANUP = false;
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
 const SUPABASE_URL = String(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').trim();
 const SUPABASE_AUTH_KEY = String(
