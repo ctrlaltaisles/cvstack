@@ -1,4 +1,20 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:4000';
+function resolveApiBase() {
+  const envBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (envBase) return envBase;
+
+  // In deployed environments, default to same-origin API routes.
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return '';
+    }
+  }
+
+  // Local development fallback when frontend and API run separately.
+  return 'http://localhost:4000';
+}
+
+const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'cvstack_token';
 const USER_KEY = 'cvstack_user';
 const GUEST_KEY = 'cvstack_guest_id';
