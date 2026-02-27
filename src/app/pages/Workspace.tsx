@@ -8,7 +8,7 @@ import {
   Copy, GripVertical, FileText, Share2, Trash2, Menu,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
 } from 'lucide-react';
-import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
+import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 import { useIsMobile } from '../components/ui/use-mobile';
@@ -2107,15 +2107,43 @@ export default function Workspace() {
       setIsLoading(true);
       setLoadError('');
       try {
-        const resumeListResponse = await listResumes();
-        const targetResumeId = resumeId || resumeListResponse.resumes[0]?.id;
+        let targetResumeId = resumeId;
+        let loadedResumeMeta: { id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string } | null = null;
+        let response: Awaited<ReturnType<typeof listVersions>>;
+
+        if (targetResumeId) {
+          const [resumeResponse, versionsResponse] = await Promise.all([
+            getResume(targetResumeId).catch(() => null),
+            listVersions(targetResumeId),
+          ]);
+          response = versionsResponse;
+          if (resumeResponse?.resume) {
+            loadedResumeMeta = {
+              id: resumeResponse.resume.id,
+              title: resumeResponse.resume.title,
+              source: resumeResponse.resume.source,
+              file_name: resumeResponse.resume.fileName,
+              created_at: resumeResponse.resume.createdAt,
+              updated_at: resumeResponse.resume.updatedAt,
+            };
+          }
+        } else {
+          const resumeListResponse = await listResumes();
+          targetResumeId = resumeListResponse.resumes[0]?.id;
+          if (!targetResumeId) {
+            navigate('/start', { replace: true });
+            return;
+          }
+          loadedResumeMeta = resumeListResponse.resumes.find((resume) => resume.id === targetResumeId) ?? null;
+          response = await listVersions(targetResumeId);
+        }
+
         if (!targetResumeId) {
           navigate('/start', { replace: true });
           return;
         }
         if (!resumeId) setResumeId(targetResumeId);
-        setResumeMeta(resumeListResponse.resumes.find((resume) => resume.id === targetResumeId) ?? null);
-        const response = await listVersions(targetResumeId);
+        setResumeMeta(loadedResumeMeta);
         const loadedVersions = response.versions as ResumeVersion[];
         if (!mounted) return;
         const localStore = loadLocalWorkspaceStore(storageKeyForResume(targetResumeId));

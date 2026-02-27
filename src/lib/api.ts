@@ -247,6 +247,19 @@ export function listResumes() {
   return request<{ resumes: Array<{ id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string }> }>('/api/resumes', { auth: true });
 }
 
+export function getResume(resumeId: string) {
+  return request<{
+    resume: {
+      id: string;
+      title: string;
+      source: string;
+      fileName?: string;
+      createdAt: string;
+      updatedAt: string;
+    };
+  }>(`/api/resumes/${resumeId}`, { auth: true });
+}
+
 export function listVersions(resumeId: string) {
   return request<{ versions: unknown[] }>(`/api/resumes/${resumeId}/versions`, { auth: true });
 }
