@@ -13,7 +13,7 @@ type PdfAccess =
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
-const SUPABASE_BUCKET = (process.env.SUPABASE_STORAGE_BUCKET ?? 'resumes').trim() || 'resumes';
+const SUPABASE_BUCKET = (process.env.SUPABASE_BUCKET ?? process.env.SUPABASE_STORAGE_BUCKET ?? 'resumes').trim() || 'resumes';
 const uploadsDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR ?? 'uploads');
 
 let supabaseClient: ReturnType<typeof createClient> | null = null;
