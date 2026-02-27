@@ -58,6 +58,7 @@ export interface DbState {
 }
 
 let prismaSingleton: any = null;
+let dbMutationQueue: Promise<unknown> = Promise.resolve();
 
 async function getPrisma() {
   if (prismaSingleton) return prismaSingleton;
@@ -271,8 +272,29 @@ export async function writeDb(state: DbState): Promise<void> {
 }
 
 export async function withDb<T>(fn: (state: DbState) => Promise<T> | T): Promise<T> {
-  const state = await readDb();
-  const result = await fn(state);
-  await writeDb(state);
-  return result;
+  const runMutation = async (): Promise<T> => {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const state = await readDb();
+        const result = await fn(state);
+        await writeDb(state);
+        return result;
+      } catch (error) {
+        lastError = error;
+        const code = String((error as { code?: string } | undefined)?.code ?? '');
+        const message = String((error as { message?: string } | undefined)?.message ?? '');
+        const retryable = code === 'P2028' || /Transaction API error|Transaction not found/i.test(message);
+        if (!retryable || attempt >= 3) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 75 * attempt));
+      }
+    }
+    throw lastError;
+  };
+
+  const queued = dbMutationQueue.then(runMutation, runMutation) as Promise<T>;
+  dbMutationQueue = queued.then(() => undefined, () => undefined);
+  return queued;
 }
