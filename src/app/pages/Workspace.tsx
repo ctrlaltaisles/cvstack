@@ -224,10 +224,15 @@ function appendUniqueDictatedText(existing: string, dictated: string): string {
   if (existingNormalized.endsWith(cleanNormalized)) return existing;
   return appendDictatedText(existing, clean);
 }
-const PROJECT_NOTES_PROMPTS = [
+const BASE_PROJECT_NOTES_PROMPTS = [
   'What were the 2-3 biggest projects you owned in this role?',
   'What tools, stack, or systems did you personally use?',
   'What outcomes changed (time saved, revenue, cost, quality, speed)?',
+] as const;
+const VARIANT_PROJECT_NOTES_PROMPTS = [
+  'What in this role best matches the target JD priorities?',
+  'What ownership or scope can we make more explicit for this variant?',
+  'Which impact points should we emphasize for this specific company?',
 ] as const;
 function normalizeWorkExperienceEntry(exp: WorkExperience): WorkExperience {
   return {
@@ -563,6 +568,17 @@ type LocalWorkspaceStore = { baseResume: BaseResumeModel | null; jdVariants: JDV
 function cloneResumeData(data: ResumeData): ResumeData {
   return normalizeResumeDataShape(JSON.parse(JSON.stringify(data)) as ResumeData);
 }
+function createVariantDataFromBase(data: ResumeData, title: string): ResumeData {
+  const cloned = cloneResumeData(data);
+  return {
+    ...cloned,
+    title,
+    workExperience: cloned.workExperience.map((exp) => ({
+      ...exp,
+      projectNotes: '',
+    })),
+  };
+}
 function storageKeyForResume(resumeId?: string): string {
   return `cvstack_workspace_variants_${resumeId || 'local'}`;
 }
@@ -590,7 +606,7 @@ function createJDVariantFromBase(baseVersion: ResumeVersion, roleName: string, c
   const title = composeRoleCompanyTitle(roleName, company) || PRODUCT_DESIGNER_TITLE;
   const jdVariantId = `jdv-${ts}`;
   const variantContent = buildVariantContent(baseResume.content);
-  const variantData = { ...cloneResumeData(baseVersion.data), title };
+  const variantData = createVariantDataFromBase(baseVersion.data, title);
   const version: ResumeVersion = {
     id: `ai-v-${ts}`,
     name: title,
@@ -793,9 +809,9 @@ function syncVariantExperiencesWithBase(baseData: ResumeData, variantData: Resum
   const baseByRoleKey = new Map(baseData.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
   const syncedWorkExperience = variantData.workExperience.map((exp) => {
     const byId = baseById.get(exp.id);
-    if (byId) return JSON.parse(JSON.stringify(byId)) as WorkExperience;
+    if (byId) return { ...(JSON.parse(JSON.stringify(byId)) as WorkExperience), projectNotes: exp.projectNotes ?? '' };
     const byRole = baseByRoleKey.get(normalizeRoleKey(exp));
-    if (byRole) return { ...byRole, id: exp.id };
+    if (byRole) return { ...byRole, id: exp.id, projectNotes: exp.projectNotes ?? '' };
     return exp;
   });
   return { ...variantData, workExperience: syncedWorkExperience };
@@ -1098,7 +1114,7 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
-function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = false, onAutoExpandConsumed }: { value: string; onChange: (v: string) => void; disabled?: boolean; autoExpand?: boolean; onAutoExpandConsumed?: () => void }) {
+function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = false, onAutoExpandConsumed, promptMode = 'base' }: { value: string; onChange: (v: string) => void; disabled?: boolean; autoExpand?: boolean; onAutoExpandConsumed?: () => void; promptMode?: 'base' | 'variant' }) {
   const [expanded, setExpanded] = useState(Boolean(value.trim()));
   const [isRecording, setIsRecording] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -1122,6 +1138,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
     setExpanded(true);
     onAutoExpandConsumed?.();
   }, [autoExpand, onAutoExpandConsumed]);
+  const prompts = promptMode === 'variant' ? VARIANT_PROJECT_NOTES_PROMPTS : BASE_PROJECT_NOTES_PROMPTS;
 
   const stopDictation = useCallback(() => {
     if (interimTranscript.trim()) {
@@ -1270,7 +1287,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
           )}
           {!disabled && (
             <div className="flex flex-wrap gap-2 mt-3">
-              {PROJECT_NOTES_PROMPTS.map((prompt) => (
+              {prompts.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => onChange(value.trim() ? `${value.trim()}\n\n${prompt}` : prompt)}
@@ -1287,7 +1304,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
   );
 }
 
-function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, autoExpandProjectNotes = false, onAutoExpandProjectNotesConsumed, isReviewLocked = false }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; autoExpandProjectNotes?: boolean; onAutoExpandProjectNotesConsumed?: () => void; isReviewLocked?: boolean }) {
+function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, autoExpandProjectNotes = false, onAutoExpandProjectNotesConsumed, isReviewLocked = false, notesPromptMode = 'base' }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; autoExpandProjectNotes?: boolean; onAutoExpandProjectNotesConsumed?: () => void; isReviewLocked?: boolean; notesPromptMode?: 'base' | 'variant' }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const [autoEditBulletIdx, setAutoEditBulletIdx] = useState<number | null>(null); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const updateBullets = (bullets: string[]) => onUpdateExp({ ...exp, bullets });
@@ -1365,6 +1382,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
           onChange={(projectNotes) => onUpdateExp({ ...exp, projectNotes })}
           autoExpand={autoExpandProjectNotes}
           onAutoExpandConsumed={onAutoExpandProjectNotesConsumed}
+          promptMode={notesPromptMode}
         />
         {!isReviewLocked && <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>}
       </div>
@@ -1562,6 +1580,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
                   onShowToast={onShowToast}
                   autoExpandProjectNotes={autoExpandProjectNotesExpId === exp.id}
                   onAutoExpandProjectNotesConsumed={() => setAutoExpandProjectNotesExpId((current) => (current === exp.id ? null : current))}
+                  notesPromptMode={version.isBase ? 'base' : 'variant'}
                 />
                   );
                 })()}
