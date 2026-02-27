@@ -1,0 +1,455 @@
+{
+  "generatedAt": "2026-02-27T19:37:30.104Z",
+  "scenarios": [
+    {
+      "scenarioId": "S1_base_curate_no_jd",
+      "title": "First Upload + Curate (no project notes, no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 25945,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.59,
+        "impactScore": 0.5,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. No project-notes signals detected. No strategic themes detected in project notes. Capability-elevation coverage=100% for mode=product. Category-mirror risk=high (ratio=83%, compared=6). No >=100-word project notes roles requiring forced new-bullet lift. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Supported people operations and hiring-related projects, collaborating with HR and business stakeholders across multiple teams.",
+        "Assisted with coordination of early-career hiring activities, onboarding workflows, and employee lifecycle changes, supporting dozens of hires and movements.",
+        "Contributed to operational projects focused on improving documentation, learning resources, and access to HR information.",
+        "Supported HR systems and tools to enhance reporting, visibility, and day-to-day operational efficiency.",
+        "Negotiated and closed IT vendor contracts, achieving a 23% reduction in annual recurring costs across Microsoft and AWS.",
+        "Project-managed the redesign and launch of the company careers webpage, delivering the project in 50% of the planned timeline while aligning with employer branding goals. Viewership increased by 128% and engagement time rose by 68%."
+      ],
+      "avgSimilarityToBase": 0.89,
+      "meaningfulChanges": 1,
+      "rewordingRisk": true,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "reporting",
+          "planning"
+        ]
+      },
+      "questions": [
+        "What specific HR systems and tools have you worked with?",
+        "Can you provide examples of the types of documentation and learning resources you improved?",
+        "What metrics did you use to measure the success of your HR initiatives?",
+        "Have you received any feedback from stakeholders regarding your contributions?",
+        "What challenges did you face during the project management of the careers webpage?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S2_base_curate_with_master_notes_no_jd",
+      "title": "Add Master Project Notes + Curate (no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 36964,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.06,
+        "impactScore": 0.33,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=8%, new-signal lift=8%. Strategic-theme coverage=50%. Capability-elevation coverage=50% for mode=product. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Demonstrated experience in HR operations and ownership of cross-functional projects, supporting HR ops and leading various initiatives across departments.",
+        "Strong ability to coordinate with stakeholders across multiple departments, working closely with engineering and product teams to standardize workflows.",
+        "Proficient in creating reports for data-driven decision-making, building recurring reports and tracking key hiring metrics for leadership visibility.",
+        "Skilled in implementing process improvements to enhance operational efficiency, creating onboarding guides and formalizing approval flows.",
+        "Experience in vendor cost optimization and contract negotiations, conducting cost comparisons and audits leading to significant cost reductions."
+      ],
+      "avgSimilarityToBase": 0.07,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "day1_workflow",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific tools or software did you use for HR operations?",
+        "Can you provide more details on the metrics tracked for reporting?",
+        "What challenges did you face during the vendor cost optimization project?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What was the impact of the changes made to the candidate tracking system?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S3_hitachi_pm_with_master_notes",
+      "title": "Add Hitachi PM JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 38345,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.06,
+        "impactScore": 0.33,
+        "atsScore": 0.67,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=75%. Capability-elevation coverage=50% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Coordinated with engineering and product teams to streamline hiring processes and improve candidate tracking.",
+        "Developed a central onboarding guide and standardized workflows to enhance new hire experience and reduce repetitive inquiries.",
+        "Created recurring reports for leadership, providing visibility into headcount and cost metrics for informed decision-making.",
+        "Implemented process improvements for employee lifecycle changes, formalizing approval flows to prevent delays.",
+        "Supported vendor management initiatives, conducting audits and renegotiations that resulted in a 23% reduction in recurring costs."
+      ],
+      "avgSimilarityToBase": 0.07,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "day1_workflow",
+          "headcount_reporting",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific financial metrics or results have you achieved in your projects?",
+        "Can you provide examples of project risks you managed and their outcomes?",
+        "What tools or software did you use for reporting and data analysis?",
+        "How many projects did you manage simultaneously, and what was their average budget?",
+        "What was the scale of the teams you coordinated with in your projects?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "project management",
+        "stakeholder communication",
+        "financial results"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 31647,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.03,
+        "impactScore": 0.33,
+        "atsScore": 0.67,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 23% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=60%. Capability-elevation coverage=8% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Demonstrated ability to coordinate stakeholders effectively across engineering and product teams, ensuring alignment and communication.",
+        "Proficient in creating and managing reporting systems for HR metrics, building recurring reports for leadership visibility.",
+        "Skilled in process improvement, having developed a central onboarding guide and standardized workflows to enhance efficiency.",
+        "Supported vendor cost optimization efforts, resulting in a 23% reduction in recurring costs through effective renegotiations.",
+        "Collaborated with cross-functional teams to streamline hiring processes and improve candidate tracking systems."
+      ],
+      "avgSimilarityToBase": 0.03,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "day1_workflow",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific metrics or outcomes did you achieve in your projects?",
+        "Can you provide examples of project risks you managed and their outcomes?",
+        "What tools or systems did you use for project management and reporting?",
+        "How did you measure customer satisfaction in your projects?",
+        "What was the scale of the projects you managed (e.g., budget, team size)?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "Project Management",
+        "Stakeholder Communication",
+        "Risk Management"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 30806,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.06,
+        "impactScore": 0.33,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=60%. Capability-elevation coverage=8% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Demonstrated ability to coordinate with cross-functional teams including engineering, product, IT, and Finance, enhancing collaboration and workflow standardization.",
+        "Proficient in HR operations with a focus on process improvement, creating a central onboarding guide that streamlined the onboarding process and reduced repetitive inquiries.",
+        "Developed and formalized approval flows for employee lifecycle changes, ensuring timely and efficient management of transfers, promotions, and offboarding.",
+        "Built recurring reports for leadership to track headcount and cost visibility, facilitating data-driven decision-making.",
+        "Supported vendor cost optimization initiatives, resulting in a 23% reduction in recurring costs through effective contract renegotiations."
+      ],
+      "avgSimilarityToBase": 0.07,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "day1_workflow",
+          "lifecycle_flows",
+          "headcount_reporting",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific HRIS systems have you worked with?",
+        "Can you provide more details on the types of reports you generated?",
+        "What tools or software did you use for candidate tracking?",
+        "How did you measure the success of the onboarding guide?",
+        "What other cross-functional initiatives did you lead?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "project management",
+        "stakeholder engagement",
+        "financial oversight"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 33937,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.02,
+        "impactScore": 0.33,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=40%. Capability-elevation coverage=8% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Coordinated with engineering and product teams to align on project goals, enhancing cross-functional collaboration.",
+        "Developed a central onboarding guide and checklist for managers, streamlining the onboarding process and reducing repetitive inquiries.",
+        "Built recurring reports and tracked key HR metrics, including time-to-hire and offer acceptance rates, to provide leadership with better visibility.",
+        "Standardized Day 1 workflows with IT and Finance to ensure timely laptop provisioning and system access for new hires.",
+        "Documented employee lifecycle workflows to improve process clarity and reduce reliance on informal communication channels."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "time_to_hire",
+          "offer_acceptance",
+          "day1_workflow"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific metrics did you track for reporting beyond time-to-hire and offer acceptance rates?",
+        "Can you provide any quantifiable outcomes from the onboarding process improvements?",
+        "What specific tools or software did you use for HR operations?",
+        "Can you provide more details on the metrics tracked in your reporting?",
+        "What challenges did you face during the vendor cost optimization project?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "program leadership",
+        "risk management",
+        "process discipline"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 36366,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.08,
+        "impactScore": 0.5,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=60%. Capability-elevation coverage=0% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Coordinated stakeholders across engineering and product teams to ensure alignment and effective communication.",
+        "Developed a central onboarding guide and checklist, streamlining the onboarding process and reducing repetitive inquiries.",
+        "Formalized approval workflows for employee lifecycle changes, enhancing process efficiency and reducing oversight.",
+        "Built recurring reports and tracked key hiring metrics, improving visibility into time-to-hire and offer acceptance rates.",
+        "Supported vendor cost optimization initiatives, resulting in a 23% reduction in recurring costs through effective contract renegotiations."
+      ],
+      "avgSimilarityToBase": 0.09,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "time_to_hire",
+          "offer_acceptance",
+          "day1_workflow",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific tools or software did you use for HR operations?",
+        "Can you provide more details on the metrics you tracked for reporting?",
+        "What challenges did you face during the vendor cost optimization project?",
+        "Were there any specific outcomes or feedback from the onboarding guide you created?",
+        "How did you measure the success of the cross-functional initiatives you owned?"
+      ],
+      "redFlags": [
+        "Quality gate warning: suggestions provided, but more metrics/scope/tooling detail would improve recruiter-grade impact."
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing."
+      ],
+      "jdFocusAreas": [
+        "program leadership",
+        "risk management",
+        "process discipline"
+      ]
+    }
+  ]
+}
