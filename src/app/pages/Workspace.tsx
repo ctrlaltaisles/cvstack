@@ -12,6 +12,7 @@ import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, d
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 import { useIsMobile } from '../components/ui/use-mobile';
+import cvBlackLogo from '../assets/branding/cv-black.svg';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2716,7 +2717,9 @@ export default function Workspace() {
       <div
         className={`w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide transition-transform duration-200 ease-out md:relative md:translate-x-0 md:shadow-none ${isMobile ? 'fixed inset-y-0 left-0 z-50 shadow-[0_12px_30px_rgba(0,0,0,0.2)]' : ''} ${isMobile && !isMobileSidebarOpen ? '-translate-x-full' : 'translate-x-0'}`}
       >
-        <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]"><span className="text-base tracking-tight text-[#1A1A1A]" style={{ fontWeight: 700 }}>cv stack</span></div>
+        <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]">
+          <img src={cvBlackLogo} alt="CV Stack" className="h-6 w-auto" />
+        </div>
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
             <button onClick={() => handleSidebarVersionSelect(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>

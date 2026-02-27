@@ -6,9 +6,18 @@ import { consumeSupabaseAccessTokenFromUrl, loginWithSupabaseAccessToken, tokenS
 
 export default function App() {
   useEffect(() => {
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const hasHashParams = new URLSearchParams(hash).has('access_token');
     const queryParams = new URLSearchParams(window.location.search);
     const tokenHash = queryParams.get('token_hash');
     const callbackType = queryParams.get('type');
+    const code = queryParams.get('code');
+    const queryAccessToken = queryParams.get('access_token');
+
+    // Only run callback exchange when landing from Supabase auth redirect.
+    if (!hasHashParams && !code && !queryAccessToken && !(tokenHash && callbackType)) {
+      return;
+    }
 
     const accessTokenPromise = tokenHash && callbackType
       ? verifySupabaseTokenHash(tokenHash, callbackType)
@@ -21,7 +30,9 @@ export default function App() {
         tokenStore.set(result.token);
         userStore.set(result.user);
         window.history.replaceState(null, '', window.location.pathname);
-        window.location.replace('/start');
+        if (window.location.pathname !== '/start') {
+          window.location.replace('/start');
+        }
       })
       .catch(() => {
         window.history.replaceState(null, '', window.location.pathname);
