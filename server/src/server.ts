@@ -1,6 +1,9 @@
 import "dotenv/config";
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -10,13 +13,21 @@ import { initDb, readDb, withDb, type ProfileRecord, type ResumeRecord, type Use
 import type { ResumeData, ResumeVersionDTO } from './types';
 import { inferResumeSummaryFromDebug, parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
+import { deleteStoredResumePdf, getResumePdfAccess, storeResumePdf } from './storage/pdfStorage';
 
 dotenv.config();
+const execFileAsync = promisify(execFile);
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
-const uploadsDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR ?? 'uploads');
-fs.mkdirSync(uploadsDir, { recursive: true });
+const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
+const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+const MIN_OPTIMIZE_BYTES = 200 * 1024;
+
+type CompressionResult = {
+  buffer: Buffer;
+  method: 'none' | 'qpdf' | 'ghostscript';
+};
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',').map((v) => v.trim()) || true }));
 app.use(express.json({ limit: '5mb' }));
@@ -201,6 +212,129 @@ function getPdfBufferOrRespond(req: express.Request, res: express.Response): Buf
   return req.body;
 }
 
+async function tryCompressPdfWithCommand(params: {
+  command: string;
+  args: string[];
+  appendInputOutput?: boolean;
+  inputBuffer: Buffer;
+}): Promise<Buffer | null> {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cvstack-pdf-opt-'));
+  const inputPath = path.join(tempDir, 'in.pdf');
+  const outputPath = path.join(tempDir, 'out.pdf');
+
+  try {
+    await fs.promises.writeFile(inputPath, params.inputBuffer);
+    const commandArgs = params.appendInputOutput === false
+      ? params.args.map((arg) => arg.replace('{input}', inputPath).replace('{output}', outputPath))
+      : [...params.args, inputPath, outputPath];
+    await execFileAsync(params.command, commandArgs, {
+      timeout: 30000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    if (!fs.existsSync(outputPath)) {
+      return null;
+    }
+    const outputBuffer = await fs.promises.readFile(outputPath);
+    return outputBuffer.length > 0 ? outputBuffer : null;
+  } catch {
+    return null;
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function optimizePdfBufferForStorage(inputBuffer: Buffer): Promise<CompressionResult> {
+  if (inputBuffer.length < MIN_OPTIMIZE_BYTES) {
+    return { buffer: inputBuffer, method: 'none' };
+  }
+
+  const candidates: CompressionResult[] = [{ buffer: inputBuffer, method: 'none' }];
+
+  const qpdfBuffer = await tryCompressPdfWithCommand({
+    command: 'qpdf',
+    args: ['--stream-data=compress', '--object-streams=generate'],
+    inputBuffer,
+  });
+  if (qpdfBuffer) {
+    candidates.push({ buffer: qpdfBuffer, method: 'qpdf' });
+  }
+
+  const gsBuffer = await tryCompressPdfWithCommand({
+    command: 'gs',
+    args: ['-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4', '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dBATCH', '-dQUIET', '-sOutputFile={output}', '{input}'],
+    appendInputOutput: false,
+    inputBuffer,
+  });
+  if (gsBuffer) {
+    candidates.push({ buffer: gsBuffer, method: 'ghostscript' });
+  }
+
+  let best = candidates[0];
+  for (const candidate of candidates.slice(1)) {
+    if (candidate.buffer.length < best.buffer.length) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+async function persistUploadedPdf(originalName: string, originalBuffer: Buffer): Promise<{ storedBytes: number; method: CompressionResult['method']; storagePath: string }> {
+  const optimized = await optimizePdfBufferForStorage(originalBuffer);
+  const stored = await storeResumePdf(optimized.buffer, originalName);
+  return { storedBytes: optimized.buffer.length, method: optimized.method, storagePath: stored.storagePath };
+}
+
+async function cleanupExpiredUploadedPdfs() {
+  if (!Number.isFinite(UPLOAD_RETENTION_DAYS) || UPLOAD_RETENTION_DAYS <= 0) {
+    return;
+  }
+  const cutoffMs = Date.now() - (UPLOAD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const toDeletePaths = new Set<string>();
+  let expiredUploadCount = 0;
+
+  await withDb(async (db) => {
+    for (const resume of db.resumes) {
+      if (!resume.filePath) continue;
+      if (!path.isAbsolute(resume.filePath)) continue;
+      let fileAgeMs = Number.NaN;
+      try {
+        const stat = fs.statSync(resume.filePath);
+        fileAgeMs = stat.mtimeMs;
+      } catch {
+        // Missing files should be cleared from DB references.
+      }
+      const referenceTs = Number.isFinite(fileAgeMs) ? fileAgeMs : Date.parse(resume.updatedAt || resume.createdAt);
+      if (Number.isFinite(referenceTs) && referenceTs >= cutoffMs) continue;
+      toDeletePaths.add(resume.filePath);
+      resume.filePath = '';
+      resume.fileName = '';
+      if (resume.source === 'upload') {
+        resume.source = 'manual';
+      }
+      expiredUploadCount += 1;
+    }
+  });
+
+  for (const filePath of toDeletePaths) {
+    await fs.promises.unlink(filePath).catch(() => {});
+  }
+
+  if (expiredUploadCount > 0) {
+    console.log(`[uploads] cleaned expired files: ${expiredUploadCount} (retention=${UPLOAD_RETENTION_DAYS}d)`);
+  }
+}
+
+function startUploadCleanupScheduler() {
+  void cleanupExpiredUploadedPdfs();
+  if (!Number.isFinite(UPLOAD_CLEANUP_INTERVAL_MS) || UPLOAD_CLEANUP_INTERVAL_MS <= 0) {
+    return;
+  }
+  const timer = setInterval(() => {
+    void cleanupExpiredUploadedPdfs();
+  }, UPLOAD_CLEANUP_INTERVAL_MS);
+  timer.unref();
+}
+
 async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
   try {
     return await parseUploadedResumeBuffer(buffer);
@@ -351,20 +485,20 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     return;
   }
 
-  const uploadName = `${Date.now()}_${fileName}`;
-  const filePath = path.join(uploadsDir, uploadName);
-  fs.writeFileSync(filePath, buffer);
-
   const parsed = await parseUploadOrRespond(buffer, res);
   if (!parsed) {
     return;
+  }
+  const storedFile = await persistUploadedPdf(fileName, buffer);
+  if (storedFile.method !== 'none') {
+    console.log(`[uploads] optimized ${fileName} via ${storedFile.method} (${buffer.length} -> ${storedFile.storedBytes} bytes)`);
   }
 
   const created = await createResumeWithBaseVersion({
     userId: resolveRequestUserId(req),
     title,
     source: 'upload',
-    filePath,
+    filePath: storedFile.storagePath,
     fileName,
     extractedText: parsed.extractedText,
     parsed: parsed.parsedData,
@@ -410,13 +544,18 @@ app.get('/api/resumes/:resumeId/pdf', async (req, res) => {
     sendResumeNotFound(res);
     return;
   }
-  if (!resume.filePath || !fs.existsSync(resume.filePath)) {
+  const pdfAccess = await getResumePdfAccess(resume.filePath, resume.fileName || 'resume.pdf');
+  if (!pdfAccess) {
     res.status(404).json({ error: 'Uploaded PDF not found' });
+    return;
+  }
+  if (pdfAccess.kind === 'remote') {
+    res.redirect(pdfAccess.signedUrl);
     return;
   }
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${resume.fileName || 'resume.pdf'}"`);
-  res.sendFile(path.resolve(resume.filePath));
+  res.sendFile(pdfAccess.filePath);
 });
 
 app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
@@ -440,19 +579,21 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
     return;
   }
 
-  const uploadName = `${Date.now()}_${fileName}`;
-  const filePath = path.join(uploadsDir, uploadName);
-  fs.writeFileSync(filePath, buffer);
+  const storedFile = await persistUploadedPdf(fileName, buffer);
+  if (storedFile.method !== 'none') {
+    console.log(`[uploads] optimized ${fileName} via ${storedFile.method} (${buffer.length} -> ${storedFile.storedBytes} bytes)`);
+  }
 
   const now = new Date().toISOString();
   let updatedBaseVersion: VersionRecord | null = null;
+  let previousPath = '';
   await withDb(async (db) => {
     const resume = db.resumes.find((r) => r.id === resumeId && r.userId === userId);
     if (!resume) return;
-    const previousPath = resume.filePath;
+    previousPath = resume.filePath;
 
     resume.source = 'upload';
-    resume.filePath = filePath;
+    resume.filePath = storedFile.storagePath;
     resume.fileName = fileName;
     resume.extractedText = parsed.extractedText;
     resume.parsed = parsed.parsedData as any;
@@ -466,10 +607,11 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
       updatedBaseVersion = baseVersion;
     }
 
-    if (previousPath && previousPath !== filePath && fs.existsSync(previousPath)) {
-      fs.unlink(previousPath, () => {});
-    }
   });
+
+  if (previousPath && previousPath !== storedFile.storagePath) {
+    await deleteStoredResumePdf(previousPath);
+  }
 
   if (!updatedBaseVersion) {
     res.status(404).json({ error: 'Base version not found' });
@@ -754,6 +896,7 @@ app.post('/api/dev/seed', async (req, res) => {
 
 async function bootstrap() {
   await initDb();
+  startUploadCleanupScheduler();
   app.listen(PORT, () => {
     console.log(`CVStack API listening on http://localhost:${PORT}`);
   });

@@ -18,6 +18,7 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.16.0",
+    "@supabase/supabase-js": "^2.98.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -29,5 +30,8 @@
     "@types/express": "^5.0.6",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "minimatch": "3.1.4"
   }
 }

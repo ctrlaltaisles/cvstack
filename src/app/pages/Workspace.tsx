@@ -978,7 +978,7 @@ function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripD
 
 // ─── ExperienceBlock ─────────────────────────────────────────────────────────
 
-function ProjectNotesEditor({ value, onChange, disabled = false }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = false, onAutoExpandConsumed }: { value: string; onChange: (v: string) => void; disabled?: boolean; autoExpand?: boolean; onAutoExpandConsumed?: () => void }) {
   const [expanded, setExpanded] = useState(Boolean(value.trim()));
   const [isRecording, setIsRecording] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -997,6 +997,11 @@ function ProjectNotesEditor({ value, onChange, disabled = false }: { value: stri
       recognitionRef.current = null;
     };
   }, []);
+  useEffect(() => {
+    if (!autoExpand) return;
+    setExpanded(true);
+    onAutoExpandConsumed?.();
+  }, [autoExpand, onAutoExpandConsumed]);
 
   const stopDictation = useCallback(() => {
     if (interimTranscript.trim()) {
@@ -1162,7 +1167,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false }: { value: stri
   );
 }
 
-function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, isReviewLocked = false }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; isReviewLocked?: boolean }) {
+function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience, onDragEndExperience, isDraggingExperience, pendingBulletChanges, showOriginal, onAcceptPending, onRejectPending, onToggleShowOriginal, onShowToast, autoExpandProjectNotes = false, onAutoExpandProjectNotesConsumed, isReviewLocked = false }: { exp: WorkExperience; onUpdateExp: (e: WorkExperience) => void; onDeleteExp: () => void; onDragStartExperience: (e: React.DragEvent) => void; onDragEndExperience: () => void; isDraggingExperience: boolean; pendingBulletChanges: Map<number, AIChange>; showOriginal: boolean; onAcceptPending: () => void; onRejectPending: () => void; onToggleShowOriginal: () => void; onShowToast: (msg: string) => void; autoExpandProjectNotes?: boolean; onAutoExpandProjectNotesConsumed?: () => void; isReviewLocked?: boolean }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null); const [dragTarget, setDragTarget] = useState<number | null>(null); const [showCopyTip, setShowCopyTip] = useState(false); const [editingDate, setEditingDate] = useState(false); const [autoEditBulletIdx, setAutoEditBulletIdx] = useState<number | null>(null); const dateColRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   const updateBullets = (bullets: string[]) => onUpdateExp({ ...exp, bullets });
@@ -1238,6 +1243,8 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
           disabled={isReviewLocked}
           value={exp.projectNotes ?? ''}
           onChange={(projectNotes) => onUpdateExp({ ...exp, projectNotes })}
+          autoExpand={autoExpandProjectNotes}
+          onAutoExpandConsumed={onAutoExpandProjectNotesConsumed}
         />
         {!isReviewLocked && <button onClick={onDeleteExp} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 transition-colors opacity-0 group-hover/exp:opacity-100">Remove</button>}
       </div>
@@ -1303,6 +1310,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
   const update = (p: Partial<ResumeData>) => onUpdateData({ ...data, ...p });
   const [dragExpFrom, setDragExpFrom] = useState<number | null>(null);
   const [dragExpTarget, setDragExpTarget] = useState<number | null>(null);
+  const [autoExpandProjectNotesExpId, setAutoExpandProjectNotesExpId] = useState<string | null>(null);
   const pendingChanges = (aiChanges ?? []).filter(c => c.status === 'pending');
   const [showOriginalGroups, setShowOriginalGroups] = useState<Set<string>>(new Set());
   const bioChanges = pendingChanges.filter((c) => c.field === 'bio');
@@ -1433,13 +1441,19 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
                   onRejectPending={() => rejectChanges(expChanges)}
                   onToggleShowOriginal={() => toggleOriginal(groupKey)}
                   onShowToast={onShowToast}
+                  autoExpandProjectNotes={autoExpandProjectNotesExpId === exp.id}
+                  onAutoExpandProjectNotesConsumed={() => setAutoExpandProjectNotesExpId((current) => (current === exp.id ? null : current))}
                 />
                   );
                 })()}
               </div>
             ))}
           </div>
-          {!isReviewLocked && <button onClick={() => update({ workExperience: [...data.workExperience, { id: `exp-${Date.now()}`, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'], projectNotes: '' }] })} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Experience</button>}
+          {!isReviewLocked && <button onClick={() => {
+            const id = `exp-${Date.now()}`;
+            setAutoExpandProjectNotesExpId(id);
+            update({ workExperience: [...data.workExperience, { id, company: 'Company Name', role: 'Your Role', startDate: { month: 1, year: 2023, present: false }, endDate: { month: 1, year: 2026, present: true }, bullets: ['Describe your impact here'], projectNotes: '' }] });
+          }} className="mt-7 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Experience</button>}
         </div>
         {/* Education */}
         <div className={`resume-section mb-7 ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasEducation}>
