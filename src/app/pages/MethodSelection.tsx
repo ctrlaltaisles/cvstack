@@ -31,10 +31,22 @@ export default function MethodSelection() {
     setError('');
     setLoading(true);
     try {
-      const created = await createResume({
-        source: 'manual',
+      const payload = {
+        source: 'manual' as const,
         title: 'Base Resume',
-      });
+      };
+      let created;
+      try {
+        created = await createResume(payload);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        const likelyAuthIssue = /401|invalid bearer token|missing or invalid bearer token/i.test(message);
+        if (!likelyAuthIssue) throw err;
+        // Stale auth state can block the manual-start call in some environments.
+        // Clear it and retry as guest so users can continue.
+        clearAuthStorage();
+        created = await createResume(payload);
+      }
       navigate(`/workspace?resumeId=${created.resumeId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create resume');

@@ -52,6 +52,91 @@ function formatSidebarRoleLabel(roleFamily: string, count: number): string {
 function hasMeaningfulJobDescription(value?: string): boolean {
   return (value ?? '').trim().length >= MIN_JD_CURATION_LENGTH;
 }
+function normalizeClipboardLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
+function normalizePastedText(value: string): string {
+  return normalizeClipboardLineEndings(value)
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+function scorePastedText(value: string): number {
+  const bulletMatches = value.match(/(^|\n)\s*[•◦▪‣◉●○◆◇■□►▸▹▫-]\s+/g)?.length ?? 0;
+  const numberedMatches = value.match(/(^|\n)\s*\d+[.)]\s+/g)?.length ?? 0;
+  const newlineCount = value.match(/\n/g)?.length ?? 0;
+  return bulletMatches * 8 + numberedMatches * 5 + newlineCount * 2 + value.length * 0.001;
+}
+function pickBestClipboardText(options: string[]): string {
+  const normalized = options
+    .map(normalizePastedText)
+    .filter(Boolean);
+  if (normalized.length === 0) return '';
+  return normalized.reduce((best, current) => (
+    scorePastedText(current) > scorePastedText(best) ? current : best
+  ));
+}
+function serializeClipboardNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const element = node as HTMLElement;
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'br') return '\n';
+  if (tag === 'ul') {
+    return Array.from(element.children)
+      .filter((child) => child.tagName.toLowerCase() === 'li')
+      .map((child) => `• ${serializeClipboardNode(child).trim()}`)
+      .join('\n');
+  }
+  if (tag === 'ol') {
+    return Array.from(element.children)
+      .filter((child) => child.tagName.toLowerCase() === 'li')
+      .map((child, index) => `${index + 1}. ${serializeClipboardNode(child).trim()}`)
+      .join('\n');
+  }
+  if (tag === 'li' || element.getAttribute('role') === 'listitem') {
+    return `• ${Array.from(element.childNodes).map(serializeClipboardNode).join('').trim()}\n`;
+  }
+  const childrenText = Array.from(element.childNodes).map(serializeClipboardNode).join('');
+  if (['p', 'div', 'section', 'article', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+    return `${childrenText}\n`;
+  }
+  return childrenText;
+}
+function parseHtmlClipboardText(value: string): string {
+  if (!value.trim()) return '';
+  const doc = new DOMParser().parseFromString(value, 'text/html');
+  const serialized = Array.from(doc.body.childNodes).map(serializeClipboardNode).join('');
+  return normalizePastedText(serialized);
+}
+function insertTextAtCursor(
+  target: HTMLTextAreaElement,
+  text: string,
+  update: (value: string) => void,
+) {
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? target.value.length;
+  const nextValue = `${target.value.slice(0, start)}${text}${target.value.slice(end)}`;
+  update(nextValue);
+  requestAnimationFrame(() => {
+    const nextCursor = start + text.length;
+    target.selectionStart = nextCursor;
+    target.selectionEnd = nextCursor;
+  });
+}
+function handleStructuredPaste(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  update: (value: string) => void,
+) {
+  const html = event.clipboardData.getData('text/html');
+  const plain = event.clipboardData.getData('text/plain');
+  const parsed = html ? parseHtmlClipboardText(html) : '';
+  const text = pickBestClipboardText([parsed, plain]);
+  if (!text) return;
+  event.preventDefault();
+  insertTextAtCursor(event.currentTarget, text, update);
+}
 function getHeaderTitleForVersion(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>): string {
   if (version.isAI) {
     const aiHeader = composeRoleCompanyTitle(version.jobTitle ?? '', version.jobCompany ?? '');
@@ -1857,6 +1942,7 @@ function JDSidePanel({
                 <textarea
                   value={jdDraft}
                   onChange={(e) => setJdDraft(e.target.value)}
+                  onPaste={(event) => handleStructuredPaste(event, setJdDraft)}
                   className="flex-1 min-h-0 w-full text-sm text-[#4B4B4B] leading-[1.75] whitespace-pre-wrap bg-[#FAFAFA] border border-[#ECECEC] rounded-[8px] px-3 py-2.5 outline-none resize-none overflow-y-auto"
                 />
               </div>
@@ -1964,7 +2050,7 @@ function CreateResumeModal({ onGenerate, onClose, isGenerating }: { onGenerate: 
             <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Role Name</label><input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Product Designer" className={fCls} autoFocus disabled={isGenerating} /></div>
             <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Company <span className="text-[#CBCBCB]">(optional)</span></label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Stripe" className={fCls} disabled={isGenerating} /></div>
           </div>
-          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} disabled={isGenerating} /></div>
+          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} onPaste={(event) => handleStructuredPaste(event, setJobDesc)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} disabled={isGenerating} /></div>
           <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label><input value={jobLink} onChange={e => setJobLink(e.target.value)} placeholder="https://…" className={fCls} disabled={isGenerating} /></div>
           {isGenerating && (
             <p className="text-xs text-[#6B6B6B]">Generating your tailored resume. This can take a moment.</p>
@@ -2891,11 +2977,9 @@ export default function Workspace() {
           <AnimatePresence>
             {showJDPanel && (
               <>
-                <motion.button
+                <motion.div
                   key="jd-panel-backdrop"
-                  aria-label="Close job description panel"
-                  onClick={() => setShowJDPanel(false)}
-                  className="absolute inset-0 z-[9] cursor-default"
+                  className="absolute inset-0 z-[9] pointer-events-none"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
