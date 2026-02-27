@@ -306,6 +306,12 @@ function extractProjectNoteSignals(projectNotes: string, limit = 12): string[] {
   return signals;
 }
 
+function wordCount(text: string): number {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
 function buildProjectNotesSignalMap(resumeData: ResumeData): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const exp of resumeData.workExperience ?? []) {
@@ -442,6 +448,59 @@ function evaluateStrategicThemeCoverage(
     hasThemes: total > 0,
     coverageRatio: total > 0 ? covered / total : 1,
     missingByExp,
+  };
+}
+
+function evaluateNotesDrivenBulletLift(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+): {
+  hasEligibleRoles: boolean;
+  passedRoles: number;
+  totalEligibleRoles: number;
+  deficits: Array<{ expId: string; role: string; company: string; requiredNewBullets: number; detectedNewBullets: number }>;
+} {
+  const deficits: Array<{ expId: string; role: string; company: string; requiredNewBullets: number; detectedNewBullets: number }> = [];
+  let totalEligibleRoles = 0;
+  let passedRoles = 0;
+
+  for (const exp of resumeData.workExperience ?? []) {
+    const notesWords = wordCount(exp.projectNotes ?? '');
+    if (notesWords < 100) continue;
+    totalEligibleRoles += 1;
+
+    const improvedExp = improved.experience.find((item) => item.expId === exp.id);
+    const improvedBullets = (improvedExp?.bullets ?? []).map((b) => b.trim()).filter(Boolean);
+    const originalBullets = (exp.bullets ?? []).map((b) => b.trim()).filter(Boolean);
+
+    let newBullets = 0;
+    for (const bullet of improvedBullets) {
+      if (originalBullets.length === 0) {
+        newBullets += 1;
+        continue;
+      }
+      const bestSimilarity = Math.max(...originalBullets.map((original) => lexicalSimilarity(original, bullet)));
+      if (bestSimilarity < 0.68) newBullets += 1;
+    }
+
+    if (newBullets >= 2) {
+      passedRoles += 1;
+      continue;
+    }
+    deficits.push({
+      expId: exp.id,
+      role: exp.role,
+      company: exp.company,
+      requiredNewBullets: 2,
+      detectedNewBullets: newBullets,
+    });
+  }
+
+  return {
+    hasEligibleRoles: totalEligibleRoles > 0,
+    passedRoles,
+    totalEligibleRoles,
+    deficits,
   };
 }
 
@@ -982,8 +1041,10 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   const strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
   const strategicThemePass = !strategicThemeCoverage.hasThemes || strategicThemeCoverage.coverageRatio >= 0.6;
   const mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
+  const notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
+  const notesLiftPass = !notesDrivenLift.hasEligibleRoles || notesDrivenLift.deficits.length === 0;
 
-  const passed = !lowValue.lowValue && !hallucination.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky;
+  const passed = !lowValue.lowValue && !hallucination.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky && notesLiftPass;
   const notes = [
     lowValue.notes,
     hallucination.suspicious ? hallucination.details.join(' | ') : 'No fabricated metric pattern detected.',
@@ -995,6 +1056,9 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
       ? `Strategic-theme coverage=${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`
       : 'No strategic themes detected in project notes.',
     `Category-mirror risk=${mirrorRisk.risky ? 'high' : 'low'} (ratio=${Math.round(mirrorRisk.mirrorRatio * 100)}%, compared=${mirrorRisk.compared}).`,
+    notesDrivenLift.hasEligibleRoles
+      ? `Notes-driven new-bullet lift=${notesDrivenLift.passedRoles}/${notesDrivenLift.totalEligibleRoles} eligible roles met >=2 new bullets.`
+      : 'No >=100-word project notes roles requiring forced new-bullet lift.',
   ].join(' ');
 
   return {
@@ -1238,6 +1302,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       bullet_formula: '[Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools]',
       required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
       narrative_compression_target: 'Prefer 3-5 strategic bullets per role unless evidence strongly requires 6',
+      notes_expansion_rule: 'If a role has projectNotes >= 100 words, include at least 2 genuinely new bullets mined from notes (not paraphrases of existing bullets).',
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
       role_level_positioning: hasJD
@@ -1284,6 +1349,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'When projectNotes include JD-relevant transferable work that is missing in current bullets, re-introduce it into improved bullets or skills.',
       'Do not overfit to the current job title if projectNotes show additional credible capabilities useful for the target role.',
       'Do not preserve original bullet structure if it obscures higher-order capability.',
+      'If projectNotes for a role are >= 100 words, produce at least 2 new bullets that are not near-paraphrases of legacy bullets.',
     ],
     resumeData: compactResumeData,
     output_schema: {
@@ -1330,10 +1396,12 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     let projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
     let strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
     let mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
+    let notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
     const requiresProjectNotesRescue = projectNotesCoverage.hasSignals
       && (projectNotesCoverage.coverageRatio < 0.65 || projectNotesCoverage.newSignalRatio < 0.25);
     const requiresStrategicThemeRescue = strategicThemeCoverage.hasThemes && strategicThemeCoverage.coverageRatio < 0.6;
     const requiresNarrativeRestructureRescue = mirrorRisk.risky;
+    const requiresNotesDrivenLiftRescue = notesDrivenLift.hasEligibleRoles && notesDrivenLift.deficits.length > 0;
     if (requiresProjectNotesRescue) {
       output.redFlags = [
         ...new Set([
@@ -1358,9 +1426,17 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         ]),
       ];
     }
+    if (requiresNotesDrivenLiftRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Notes-driven lift rescue triggered: ${notesDrivenLift.deficits.length} eligible role(s) did not reach >=2 new bullets.`,
+        ]),
+      ];
+    }
 
-    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue);
-    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue) && shouldRunSecondPass) {
+    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue);
+    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue) && shouldRunSecondPass) {
       const elapsedBeforeSecondPass = Date.now() - started;
       const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
       if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
@@ -1388,9 +1464,17 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
             projectNotesCoverage,
             strategicThemeCoverage,
             mirrorRisk,
+            notesDrivenLift,
             missingSignalsToRecover: missingSignalList,
             missingStrategicThemesToRecover: missingStrategicThemes,
-            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, and structure must avoid one-to-one category mirroring.',
+            minNewBulletsForLongNotes: notesDrivenLift.deficits.map((row) => ({
+              expId: row.expId,
+              role: row.role,
+              company: row.company,
+              required: row.requiredNewBullets,
+              detected: row.detectedNewBullets,
+            })),
+            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, structure must avoid one-to-one category mirroring, and every role with >=100-word projectNotes must contain at least 2 genuinely new bullets.',
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
           output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
@@ -1402,6 +1486,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
           strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
           mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
+          notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
           output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
         } catch (secondPassError) {
           const elapsedSecondPassMs = Date.now() - started;

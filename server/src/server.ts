@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, makeId, requireAuth, signShareToken, signToken, verifyPassword, verifyShareToken } from './auth';
 import { defaultResumeData } from './defaults';
-import { initDb, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
+import { createVersionRecord, initDb, patchVersionRecord, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
 import type { ResumeData, ResumeVersionDTO } from './types';
 import { inferResumeSummaryFromDebug, parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
@@ -964,12 +964,26 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
     updatedAt: now,
   };
 
-  await withDb(async (db) => {
-    db.versions.push(version);
-    touchResumeUpdatedAt(db, resumeId, now);
+  const created = await createVersionRecord({
+    id: version.id,
+    resumeId,
+    content: {
+      versionName: version.versionName,
+      isBase: version.isBase,
+      isAI: version.isAI,
+      matchScore: version.matchScore,
+      jobTitle: version.jobTitle,
+      jobCompany: version.jobCompany,
+      jobDescription: version.jobDescription,
+      jobLink: version.jobLink,
+      data: version.data,
+      aiChanges: version.aiChanges,
+    },
+    createdAt: now,
+    updatedAt: now,
   });
 
-  res.status(201).json({ version: versionToDto(version) });
+  res.status(201).json({ version: versionToDto(created) });
 });
 
 app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
@@ -983,28 +997,29 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
     return;
   }
 
-  let updated: VersionRecord | null = null;
   const input = req.body as Partial<ResumeVersionDTO>;
   const now = new Date().toISOString();
-
-  await withDb(async (db) => {
-    const version = db.versions.find((v) => v.id === versionId && v.resumeId === resumeId);
-    if (!version) return;
-
-    version.versionName = input.name ?? version.versionName;
-    version.isAI = input.isAI ?? version.isAI;
-    version.matchScore = input.matchScore ?? version.matchScore;
-    version.jobTitle = input.jobTitle ?? version.jobTitle;
-    version.jobCompany = input.jobCompany ?? version.jobCompany;
-    version.jobDescription = input.jobDescription ?? version.jobDescription;
-    version.jobLink = input.jobLink ?? version.jobLink;
-    version.data = (input.data as ResumeData) ?? version.data;
-    version.aiChanges = input.aiChanges ?? version.aiChanges;
-    version.updatedAt = now;
-
-    touchResumeUpdatedAt(db, resumeId, now);
-
-    updated = version;
+  const existing = state.versions.find((v) => v.id === versionId && v.resumeId === resumeId);
+  if (!existing) {
+    res.status(404).json({ error: 'Version not found' });
+    return;
+  }
+  const updated = await patchVersionRecord({
+    versionId,
+    resumeId,
+    content: {
+      versionName: input.name ?? existing.versionName,
+      isBase: existing.isBase,
+      isAI: input.isAI ?? existing.isAI,
+      matchScore: input.matchScore ?? existing.matchScore,
+      jobTitle: input.jobTitle ?? existing.jobTitle,
+      jobCompany: input.jobCompany ?? existing.jobCompany,
+      jobDescription: input.jobDescription ?? existing.jobDescription,
+      jobLink: input.jobLink ?? existing.jobLink,
+      data: (input.data as ResumeData) ?? existing.data,
+      aiChanges: input.aiChanges ?? existing.aiChanges,
+    },
+    updatedAt: now,
   });
 
   if (!updated) {

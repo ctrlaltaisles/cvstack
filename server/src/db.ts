@@ -298,3 +298,95 @@ export async function withDb<T>(fn: (state: DbState) => Promise<T> | T): Promise
   dbMutationQueue = queued.then(() => undefined, () => undefined);
   return queued;
 }
+
+function mapVersionContent(content: any) {
+  return {
+    versionName: String(content?.versionName ?? content?.name ?? 'Base Resume'),
+    isBase: Boolean(content?.isBase),
+    isAI: Boolean(content?.isAI),
+    matchScore: typeof content?.matchScore === 'number' ? content.matchScore : null,
+    jobTitle: String(content?.jobTitle ?? ''),
+    jobCompany: String(content?.jobCompany ?? ''),
+    jobDescription: String(content?.jobDescription ?? ''),
+    jobLink: String(content?.jobLink ?? ''),
+    data: (content?.data ?? {}) as ResumeData,
+    aiChanges: (content?.aiChanges ?? []) as unknown[],
+  };
+}
+
+export async function createVersionRecord(params: {
+  id: string;
+  resumeId: string;
+  content: any;
+  createdAt: string;
+  updatedAt: string;
+}): Promise<VersionRecord> {
+  const prisma = await getPrisma();
+  const normalized = mapVersionContent(params.content);
+  const createdAt = new Date(params.createdAt);
+  const updatedAt = new Date(params.updatedAt);
+
+  const created = await prisma.$transaction(async (tx: any) => {
+    const latest = await tx.resumeVersion.aggregate({
+      where: { resumeId: params.resumeId },
+      _max: { versionNumber: true },
+    });
+    const nextVersionNumber = Number(latest?._max?.versionNumber ?? 0) + 1;
+
+    const row = await tx.resumeVersion.create({
+      data: {
+        id: params.id,
+        resumeId: params.resumeId,
+        versionNumber: nextVersionNumber,
+        contentJson: normalized,
+        createdAt,
+        updatedAt,
+      },
+    });
+
+    await tx.resume.update({
+      where: { id: params.resumeId },
+      data: { updatedAt },
+    });
+
+    return row;
+  });
+
+  return versionFromContent(created.resumeId, created.id, created.createdAt, created.updatedAt, created.contentJson);
+}
+
+export async function patchVersionRecord(params: {
+  versionId: string;
+  resumeId: string;
+  content: any;
+  updatedAt: string;
+}): Promise<VersionRecord | null> {
+  const prisma = await getPrisma();
+  const updatedAt = new Date(params.updatedAt);
+  const normalized = mapVersionContent(params.content);
+
+  const updated = await prisma.$transaction(async (tx: any) => {
+    const existing = await tx.resumeVersion.findFirst({
+      where: { id: params.versionId, resumeId: params.resumeId },
+    });
+    if (!existing) return null;
+
+    const row = await tx.resumeVersion.update({
+      where: { id: params.versionId },
+      data: {
+        contentJson: normalized,
+        updatedAt,
+      },
+    });
+
+    await tx.resume.update({
+      where: { id: params.resumeId },
+      data: { updatedAt },
+    });
+
+    return row;
+  });
+
+  if (!updated) return null;
+  return versionFromContent(updated.resumeId, updated.id, updated.createdAt, updated.updatedAt, updated.contentJson);
+}

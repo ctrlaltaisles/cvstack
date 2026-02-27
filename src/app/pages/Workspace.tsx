@@ -2718,7 +2718,7 @@ export default function Workspace() {
         className={`w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide transition-transform duration-200 ease-out md:relative md:translate-x-0 md:shadow-none ${isMobile ? 'fixed inset-y-0 left-0 z-50 shadow-[0_12px_30px_rgba(0,0,0,0.2)]' : ''} ${isMobile && !isMobileSidebarOpen ? '-translate-x-full' : 'translate-x-0'}`}
       >
         <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]">
-          <img src={cvBlackLogo} alt="CV Stack" className="h-6 w-auto" />
+          <img src={cvBlackLogo} alt="CV Stack" className="w-6 h-6 object-contain" />
         </div>
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
