@@ -351,11 +351,18 @@ function startUploadCleanupScheduler() {
   timer.unref();
 }
 
-async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
+async function parseUploadOrRespond(buffer: Buffer, res: express.Response, fileName: string) {
+  console.log(`[parser] starting parse file="${fileName}" bytes=${buffer.length}`);
   try {
-    return await parseUploadedResumeBuffer(buffer);
+    const parsed = await parseUploadedResumeBuffer(buffer);
+    const expCount = Array.isArray((parsed.parsedData as any)?.experiences) ? (parsed.parsedData as any).experiences.length : 0;
+    const eduCount = Array.isArray((parsed.parsedData as any)?.education) ? (parsed.parsedData as any).education.length : 0;
+    const skillCount = Array.isArray((parsed.parsedData as any)?.skills) ? (parsed.parsedData as any).skills.length : 0;
+    console.log(`[parser] parse ok file="${fileName}" extractedChars=${parsed.extractedText.length} warnings=${parsed.warnings.length} experiences=${expCount} education=${eduCount} skills=${skillCount}`);
+    return parsed;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown parser error';
+    console.warn(`[parser] parse failed file="${fileName}" detail="${message}"`);
     // Keep upload flow resilient in production: if deterministic structured parser
     // fails, try legacy text extraction + heuristic mapping before falling back to blank.
     try {
@@ -583,7 +590,7 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     return;
   }
 
-  const parsed = await parseUploadOrRespond(buffer, res);
+  const parsed = await parseUploadOrRespond(buffer, res, fileName);
   if (!parsed) {
     return;
   }
@@ -678,7 +685,7 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
     return;
   }
 
-  const parsed = await parseUploadOrRespond(buffer, res);
+  const parsed = await parseUploadOrRespond(buffer, res, fileName);
   if (!parsed) {
     return;
   }
