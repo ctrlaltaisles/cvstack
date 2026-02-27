@@ -112,100 +112,35 @@ export class TailorResumeError extends Error {
 const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
 const REQUEST_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 60000);
 const CURATE_TIMEOUT_MS = Number(process.env.OPENAI_CURATE_TIMEOUT_MS ?? process.env.OPENAI_TIMEOUT_MS ?? 120000);
-const SECOND_PASS_MIN_REMAINING_MS = Number(process.env.OPENAI_SECOND_PASS_MIN_REMAINING_MS ?? 45000);
-const CURATE_SECOND_PASS_ENABLED = String(process.env.OPENAI_CURATE_SECOND_PASS ?? 'false').trim().toLowerCase() === 'true';
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
 const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
-const CURATION_ROLE_CLUSTERS = [
-  'Product Manager',
-  'Software Developer',
-  'Front-End Developer',
-  'Product Designer',
-  'Business Development',
-  'Data Analytics',
-];
-const CURATION_HARD_RULES = [
-  'No fabricated metrics or tools',
-  'Do not invent new employers/projects/awards',
-  'If data is missing, ask concise questions (max 5)',
-  'Reject synonym-only rewrites',
-  'Every generated bullet must be grounded in explicit evidence from resume bullets or workExperience.projectNotes; language can be abstracted/elevated but facts must remain evidence-backed',
-  'Do not introduce responsibilities, tools, or outcomes that cannot be reasonably inferred from source evidence',
-  'Treat the JD as a scoring rubric, not as source content; never copy or paraphrase JD responsibilities',
-  'If a responsibility exists only in the JD and not in resume bullets/projectNotes, do not include it',
-  'Prioritize ownership, scope, outcomes, and business impact',
-  'Position experience and skills to match expected responsibility of the target role level at the target company',
-  'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
-  'When projectNotes exist for a role, do not preserve prior bullet taxonomy by default; rebuild that role from notes-first evidence',
-  'Do not discard transferable skills in projectNotes (e.g., design, visual communication, motion, storytelling) when they are relevant to the target JD',
-  'If source evidence shows scope beyond nominal title level, position by demonstrated scope and ownership, not title seniority bias',
-  'You may re-architect bullet structure (merge, replace, reorder) when needed to surface strategic signal hidden in task-level wording',
-  'ROLE-LENS MODE (Level 3): change framing and positioning, not just wording',
-  'SOURCE OF TRUTH: resume bullets + workExperience.projectNotes are the only evidence of what the candidate has done',
-  'JD is only a prioritization rubric: emphasize matched evidence and keywords only when grounded in source evidence',
-  'ANTI-JD-COPY: do not copy or paraphrase JD line-by-line',
-  'ANTI-JD-COPY: do not reuse more than 6 consecutive words from JD',
-  'ANTI-JD-COPY: do not mirror JD bullet order',
-];
-const BASE_CURATION_HARD_RULES = [
-  'No fabricated metrics or tools',
-  'Do not invent new employers/projects/awards',
-  'If data is missing, ask concise questions (max 5)',
-  'Reject synonym-only rewrites',
-  'Improve existing experience bullets with stronger ownership, scope, outcomes, and tool clarity using source facts only',
-  'Draft a personable, credible About section that reflects profile strengths and working style from existing experience',
-  'Expand skills into meaningful skill blocks inferred from demonstrated experience (without inventing tools)',
-  'Treat workExperience.projectNotes as primary source evidence when present; existing bullets are secondary compressed evidence',
-  'When projectNotes exist for a role, do not preserve prior bullet taxonomy by default; rebuild that role from notes-first evidence',
-  'Preserve transferable skills and side responsibilities from projectNotes when they add credible capability signal',
-  'If source evidence shows scope beyond nominal title level, position by demonstrated scope and ownership, not title seniority bias',
-  'You may re-architect bullet structure (merge, replace, reorder) when needed to surface strategic signal hidden in task-level wording',
-];
-const CURATION_GENERIC_PHRASES_TO_REDUCE = [
-  'helped',
-  'worked on',
-  'responsible for',
-  'assisted with',
-  'various tasks',
-];
-const CURATION_VARIANT_SYSTEM_PROMPT = [
-  'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
-  'Specialize in Product Manager, Software Developer, Front-End Developer, Product Designer, Business Development, and Data Analytics hiring.',
-  'Your edits must sound sharp, distinct, and impact-first, aligned with what employers screen for in tech hiring loops.',
-  'Analyze only the provided JD text to identify role expectations and the profile of a strong applicant.',
-  'Always reason from this lens: "If I am applying for this role and level, how should I position my responsibilities through CV experience and skills?"',
-  'Amend work experience and skills to reflect role-level expectations while staying truthful to source evidence.',
+const CAPABILITY_EXTRACTION_SYSTEM_PROMPT = [
+  'You extract capability evidence from resume content.',
+  'Use ONLY resume bullets and project notes.',
+  'Do not use JD for this step.',
+  'Do not rewrite into polished bullets.',
   'Return valid JSON only.',
-  'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
-  'Use impact-first bullets: [Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools].',
-  'If no metrics exist in source, do not invent them. Put metric placeholders only under questions.',
-  'Keep truthfulness: do not invent employers, products, metrics, awards, credentials, or tools.',
-  'CRITICAL: Every generated bullet must map to explicit source evidence in resume bullets or projectNotes; elevate wording without adding unsupported facts.',
-  'CRITICAL: Use the JD only to score/prioritize what to emphasize. Do not copy or paraphrase JD responsibilities as resume content.',
-  'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
-  'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
-  'Optimize keyword placement across About, Experience, and Skills without keyword stuffing.',
-  'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and ensure JD-relevant transferable signals are not lost.',
-  'CRITICAL: For any role with projectNotes, treat prior bullets as optional weak summaries; reconstruct bullets from projectNotes as the primary narrative source.',
-  'CRITICAL: Do not stay task-level. Reframe into transformation-level bullets when evidence supports ownership, systems thinking, risk mitigation, cross-functional leadership, or commercial influence.',
-  'CRITICAL: If title says Intern but scope evidence is higher, write to demonstrated scope while staying truthful.',
 ].join(' ');
-const CURATION_BASE_SYSTEM_PROMPT = [
-  'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
-  'You are curating a base resume without a target JD. Focus on strengthening core recruiter signals from existing data.',
-  'Your edits must sound sharp, distinct, and impact-first, while staying faithful to source facts.',
-  'Prioritize: stronger impact wording in experience bullets, a personable About section, and expanded skills based on demonstrated work.',
+const ROLE_MAPPING_SYSTEM_PROMPT = [
+  'You map extracted capabilities to JD signals.',
+  'Identify supported vs unsupported JD signals.',
+  'Do not rewrite resume bullets.',
+  'Do not copy JD text line-by-line.',
   'Return valid JSON only.',
-  'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
-  'Use impact-first bullets: [Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools].',
-  'If no metrics exist in source, do not invent them. Put metric placeholders only under questions.',
-  'Keep truthfulness: do not invent employers, products, metrics, awards, credentials, or tools.',
-  'Remove fluff and generic verbs. Keep max 5-7 bullets per role.',
-  'Each change reason must cite at least one recruiter heuristic: ownership, scope, outcomes, tooling, signal clarity.',
-  'CRITICAL: projectNotes may contain richer detail than current bullets; mine projectNotes first and keep transferable capabilities visible.',
-  'CRITICAL: For any role with projectNotes, treat prior bullets as optional weak summaries; reconstruct bullets from projectNotes as the primary narrative source.',
-  'CRITICAL: Do not stay task-level. Reframe into transformation-level bullets when evidence supports ownership, systems thinking, risk mitigation, cross-functional leadership, or commercial influence.',
-  'CRITICAL: If title says Intern but scope evidence is higher, write to demonstrated scope while staying truthful.',
+].join(' ');
+const ROLE_TRANSFORMATION_SYSTEM_PROMPT = [
+  'You transform capabilities into role-lens claims.',
+  'Use only supported signals and evidence-backed capabilities.',
+  'No final bullet writing in this step.',
+  'Return valid JSON only.',
+].join(' ');
+const FINAL_WRITING_SYSTEM_PROMPT = [
+  'You write final resume output from transformed claims and source evidence.',
+  'Source of truth is resume bullets/projectNotes and transformed claims.',
+  'JD is prioritization only. No JD copying.',
+  'No fabricated tools/metrics/systems/outcomes.',
+  'If metrics are missing, ask concise questions.',
+  'Return valid JSON only.',
 ].join(' ');
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with', 'was', 'were', 'this', 'these', 'those',
@@ -639,6 +574,210 @@ function evaluateCapabilityElevationCoverage(
     hasMarkers: total > 0,
     coverageRatio: total > 0 ? covered / total : 1,
     missingByExp,
+  };
+}
+
+interface CapabilityInventoryItem {
+  expId: string;
+  capability: string;
+  evidenceQuotes: string[];
+}
+
+interface CapabilityExtractionOutput {
+  capabilities: CapabilityInventoryItem[];
+  capabilitySummary: string[];
+  missingInfoQuestions: string[];
+}
+
+interface RoleMappingSignal {
+  signal: string;
+  mappedCapabilities: string[];
+  evidenceQuotes: string[];
+}
+
+interface RoleMappingOutput {
+  supportedSignals: RoleMappingSignal[];
+  unsupportedSignals: string[];
+  jdFocusAreas: string[];
+  targetRoleMode: TargetRoleMode;
+}
+
+interface RoleTransformationClaim {
+  expId: string;
+  claim: string;
+  mechanism: string;
+  impactSignal: string;
+  evidenceQuotes: string[];
+}
+
+interface RoleTransformationOutput {
+  transformedClaims: RoleTransformationClaim[];
+  droppedClaims: string[];
+  warnings: string[];
+}
+
+function buildDeterministicCapabilityExtraction(resumeData: ResumeData, mode: TargetRoleMode): CapabilityExtractionOutput {
+  const capabilities: CapabilityInventoryItem[] = [];
+  for (const exp of resumeData.workExperience ?? []) {
+    const sourceText = `${exp.projectNotes ?? ''} ${(exp.bullets ?? []).join(' ')}`.trim();
+    const markers = extractCapabilityMarkers(sourceText, mode);
+    const notesSentences = splitSentences(exp.projectNotes ?? '').slice(0, 2);
+    const bulletQuotes = (exp.bullets ?? []).map((b) => b.trim()).filter(Boolean).slice(0, 2);
+    const evidenceBase = uniqueStrings([...notesSentences, ...bulletQuotes]).slice(0, 2);
+    for (const marker of markers) {
+      capabilities.push({
+        expId: exp.id,
+        capability: marker.label,
+        evidenceQuotes: evidenceBase,
+      });
+    }
+  }
+
+  const capabilitySummary = uniqueStrings(capabilities.map((item) => item.capability)).slice(0, 20);
+  return {
+    capabilities: capabilities.slice(0, 60),
+    capabilitySummary,
+    missingInfoQuestions: [],
+  };
+}
+
+function sanitizeCapabilityExtractionOutput(payload: unknown, resumeData: ResumeData, mode: TargetRoleMode): CapabilityExtractionOutput {
+  const fallback = buildDeterministicCapabilityExtraction(resumeData, mode);
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  const validExpIds = new Set((resumeData.workExperience ?? []).map((exp) => exp.id));
+  const capabilityRows = Array.isArray(raw.capabilities) ? raw.capabilities : [];
+
+  const capabilities = capabilityRows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const item = row as Record<string, unknown>;
+      const expId = String(item.expId ?? '').trim();
+      const capability = String(item.capability ?? '').trim();
+      if (!expId || !capability || !validExpIds.has(expId)) return null;
+      return {
+        expId,
+        capability,
+        evidenceQuotes: asStringArray(item.evidenceQuotes).slice(0, 2),
+      } as CapabilityInventoryItem;
+    })
+    .filter((row): row is CapabilityInventoryItem => Boolean(row));
+
+  const capabilitySummary = uniqueStrings([
+    ...asStringArray(raw.capabilitySummary),
+    ...capabilities.map((item) => item.capability),
+  ]).slice(0, 20);
+
+  return {
+    capabilities: capabilities.length > 0 ? capabilities.slice(0, 60) : fallback.capabilities,
+    capabilitySummary: capabilitySummary.length > 0 ? capabilitySummary : fallback.capabilitySummary,
+    missingInfoQuestions: asStringArray(raw.missingInfoQuestions).slice(0, 5),
+  };
+}
+
+function buildDeterministicRoleMapping(
+  capabilities: CapabilityExtractionOutput,
+  jdKeywords: string[],
+  targetRoleMode: TargetRoleMode,
+): RoleMappingOutput {
+  const supportedSignals: RoleMappingSignal[] = capabilities.capabilitySummary.slice(0, 8).map((capability) => {
+    const mapped = capabilities.capabilities.filter((item) => item.capability.toLowerCase() === capability.toLowerCase()).slice(0, 2);
+    return {
+      signal: capability,
+      mappedCapabilities: [capability],
+      evidenceQuotes: uniqueStrings(mapped.flatMap((item) => item.evidenceQuotes)).slice(0, 2),
+    };
+  });
+
+  const supportedText = supportedSignals.map((item) => item.signal.toLowerCase()).join(' ');
+  const unsupportedSignals = jdKeywords.filter((keyword) => !supportedText.includes(keyword.toLowerCase())).slice(0, 8);
+  return {
+    supportedSignals,
+    unsupportedSignals,
+    jdFocusAreas: jdKeywords.slice(0, 3),
+    targetRoleMode,
+  };
+}
+
+function sanitizeRoleMappingOutput(
+  payload: unknown,
+  fallback: RoleMappingOutput,
+): RoleMappingOutput {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  const supportedRows = Array.isArray(raw.supportedSignals) ? raw.supportedSignals : [];
+  const supportedSignals = supportedRows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const item = row as Record<string, unknown>;
+      const signal = String(item.signal ?? '').trim();
+      if (!signal) return null;
+      return {
+        signal,
+        mappedCapabilities: asStringArray(item.mappedCapabilities).slice(0, 4),
+        evidenceQuotes: asStringArray(item.evidenceQuotes).slice(0, 2),
+      } as RoleMappingSignal;
+    })
+    .filter((row): row is RoleMappingSignal => Boolean(row));
+
+  const modeRaw = String(raw.targetRoleMode ?? fallback.targetRoleMode).trim().toLowerCase();
+  const mode: TargetRoleMode = (['pm', 'product', 'designer', 'dev', 'analyst', 'ops', 'strategy', 'bizdev'].includes(modeRaw)
+    ? modeRaw
+    : fallback.targetRoleMode) as TargetRoleMode;
+
+  return {
+    supportedSignals: supportedSignals.length > 0 ? supportedSignals.slice(0, 12) : fallback.supportedSignals,
+    unsupportedSignals: uniqueStrings(asStringArray(raw.unsupportedSignals)).slice(0, 8),
+    jdFocusAreas: uniqueStrings(asStringArray(raw.jdFocusAreas)).slice(0, 3),
+    targetRoleMode: mode,
+  };
+}
+
+function buildDeterministicRoleTransformation(
+  capabilities: CapabilityExtractionOutput,
+  _targetRoleMode: TargetRoleMode,
+): RoleTransformationOutput {
+  const transformedClaims: RoleTransformationClaim[] = capabilities.capabilities.slice(0, 16).map((item) => ({
+    expId: item.expId,
+    claim: `Applied ${item.capability} in cross-functional delivery contexts.`,
+    mechanism: item.capability,
+    impactSignal: 'execution clarity',
+    evidenceQuotes: item.evidenceQuotes.slice(0, 2),
+  }));
+
+  return {
+    transformedClaims,
+    droppedClaims: [],
+    warnings: transformedClaims.length === 0 ? ['No transformed claims detected from capability inventory.'] : [],
+  };
+}
+
+function sanitizeRoleTransformationOutput(payload: unknown, fallback: RoleTransformationOutput, resumeData: ResumeData): RoleTransformationOutput {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  const validExpIds = new Set((resumeData.workExperience ?? []).map((exp) => exp.id));
+  const rows = Array.isArray(raw.transformedClaims) ? raw.transformedClaims : [];
+  const transformedClaims = rows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const item = row as Record<string, unknown>;
+      const expId = String(item.expId ?? '').trim();
+      const claim = String(item.claim ?? '').trim();
+      if (!expId || !claim || !validExpIds.has(expId)) return null;
+      return {
+        expId,
+        claim,
+        mechanism: String(item.mechanism ?? '').trim(),
+        impactSignal: String(item.impactSignal ?? '').trim(),
+        evidenceQuotes: asStringArray(item.evidenceQuotes).slice(0, 2),
+      } as RoleTransformationClaim;
+    })
+    .filter((row): row is RoleTransformationClaim => Boolean(row));
+
+  return {
+    transformedClaims: transformedClaims.length > 0 ? transformedClaims.slice(0, 24) : fallback.transformedClaims,
+    droppedClaims: uniqueStrings(asStringArray(raw.droppedClaims)).slice(0, 8),
+    warnings: uniqueStrings(asStringArray(raw.warnings)).slice(0, 8),
   };
 }
 
@@ -1327,390 +1466,213 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
   const jdText = (input.jdText ?? '').trim();
   const hasJD = jdText.length > 0;
   const jdKeywords = extractJDKeywords(input.jdText ?? '', targetRole);
-
-  const systemPrompt = hasJD ? CURATION_VARIANT_SYSTEM_PROMPT : CURATION_BASE_SYSTEM_PROMPT;
   const projectNotesPrimaryData = buildProjectNotesPrimaryResumeData(input.resumeData);
   const compactResumeData = compactResumeDataForCuration(projectNotesPrimaryData);
-  const hasProjectNotes = input.resumeData.workExperience.some((exp) => String(exp.projectNotes ?? '').trim().length > 0);
-  const projectNotesSignals = [...buildProjectNotesSignalMap(compactResumeData).entries()].map(([expId, signals]) => {
-    const exp = compactResumeData.workExperience.find((item) => item.id === expId);
-    return {
-      expId,
-      role: exp?.role ?? '',
-      company: exp?.company ?? '',
-      signals: signals.slice(0, 10),
-    };
-  });
-  const capabilitySignalAudit = (compactResumeData.workExperience ?? []).map((exp) => {
-    const markers = extractCapabilityMarkers(`${exp.projectNotes ?? ''} ${(exp.bullets ?? []).join(' ')}`, targetRoleMode);
-    return {
-      expId: exp.id,
-      role: exp.role,
-      company: exp.company,
-      markers: markers.map((marker) => marker.label).slice(0, 8),
-    };
-  }).filter((row) => row.markers.length > 0);
-
-  const basePayload = {
-    task: hasJD
-      ? 'Recruiter-grade elevate of current resume content using intent-over-rephrase behavior aligned to JD'
-      : 'Recruiter-grade elevate of base resume using impact-first, ATS-friendly, role-aligned improvements without JD dependency',
-    curationMode: hasJD ? 'jd_aligned' : 'base_resume_optimization',
-    curationPersona: 'Principal Tech Recruiter',
-    roleClusters: CURATION_ROLE_CLUSTERS,
-    roleTarget: targetRole,
-    targetRoleMode,
-    company: hasJD ? (input.jobCompany ?? '') : '',
-    positioningQuestion: hasJD
-      ? `From this JD, what role is this and how should this profile present role-level responsibilities through experience and skills?`
-      : `How should this base resume be elevated for ${targetRole || 'this role'} to increase recruiter confidence through ownership, scope, tool fluency, and outcomes based only on existing facts?`,
-    baseResumeObjectives: hasJD
-      ? []
-      : [
-        'Improve wording of past work experience bullets with stronger impact, ownership, and recruiter-grade phrasing.',
-        'Infer candidate profile from prior experience and produce a personable, credible About section.',
-        'Add and organize skill blocks from demonstrated experience to improve ATS and recruiter scanability.',
-        'Use each role projectNotes context as source evidence for sharper bullets, but do not expose raw notes in final resume bullets.',
-      ],
-    seniority: input.seniority ?? '',
-    jdText,
-    jdKeywords,
-    hard_rules: hasJD ? CURATION_HARD_RULES : BASE_CURATION_HARD_RULES,
-    recruiter_rubric: {
-      bullet_formula: '[Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools]',
-      required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
-      narrative_compression_target: hasJD
-        ? 'Prefer 5-7 strategic bullets per role and prioritize strongest evidence.'
-        : 'Prefer 3-5 strategic bullets per role unless evidence strongly requires 6',
-      notes_expansion_rule: 'If a role has projectNotes >= 100 words, include at least 2 genuinely new bullets mined from notes (not paraphrases of existing bullets).',
-      ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
-      generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
-      role_level_positioning: hasJD
-        ? 'Experience and skills must reflect the responsibility level expected for the target role based on JD requirements.'
-        : 'Experience and skills must reflect the responsibility level implied by the candidate history and current title.',
-      transferable_signal_rule: 'If projectNotes include credible capabilities outside the formal job title, retain them when relevant to the target role instead of pruning them away.',
-      title_bias_override: 'Position by demonstrated scope. Nominal title (e.g., Intern) must not suppress proven ownership, system design, or leadership signals.',
-    },
-    source_priority: hasProjectNotes
-      ? {
-        primary: 'workExperience.projectNotes',
-        secondary: 'JD + other resume sections',
-        tertiary: 'legacy bullets (fact-check only, not structure anchor)',
-        rationale: 'projectNotes are richer raw evidence and may contain role-transferable achievements omitted from prior summaries; legacy bullets can bias toward low-leverage categories.',
-      }
-      : {
-        primary: 'workExperience.bullets',
-        secondary: 'other resume sections',
-      },
-    legacyBulletArchive: (input.resumeData.workExperience ?? []).map((exp) => ({
-      expId: exp.id,
-      role: exp.role,
-      company: exp.company,
-      legacyBullets: (exp.bullets ?? []).slice(0, 8),
-      usageRule: 'Use only for factual consistency checks. Do not mirror structure unless projectNotes are empty.',
-    })),
-    reconstruction_mode: hasProjectNotes ? 'project_notes_first_rebuild' : 'standard_elevate',
-    projectNotesSignalAudit: projectNotesSignals,
-    narrative_reframe_rules: [
-      'If projectNotes reveal deeper ownership, system design, risk mitigation, commercial influence, or cross-functional leadership not visible in existing bullets, re-architect bullet structure to surface those signals.',
-      'Elevate task descriptions into strategic themes when supported by source evidence.',
-      'You may consolidate, merge, or replace bullets if original structure hides higher-order capability.',
-      'Prefer transformation framing (problem -> intervention -> mechanism -> outcome -> business implication) over activity framing.',
-      'Avoid one-to-one mirroring of original bullet categories when notes support a more strategic narrative architecture.',
-      'Compress and elevate: combine overlapping task clusters into fewer, higher-leverage bullets with clearer strategic signal.',
-      'Project-notes-first rebuild: for roles with notes, start from a blank bullet canvas and reconstruct the narrative from notes before checking legacy bullets for factual consistency.',
-      'ROLE-LENS MODE (Level 3 Transformation): change framing of the same evidence into the recruiter signals expected for targetRoleMode; synonym-only rewrites fail.',
-      'Every bullet must add at least one of: stronger ownership, clearer scope, clearer mechanism/how, or decision/impact signal (without fabricating).',
-      'Do not collapse high-signal mechanisms into generic labels like "process improvement", "reporting", or "optimization" when source evidence supports stronger capability framing.',
-      'Preserve mechanism nouns where present in evidence (e.g., workflow spec, state transitions, discovery interviews, synthesis themes, journey map, scenario model, SLA, dashboard).',
-    ],
-    capabilityElevationRules: hasJD ? [
-      'Capability abstraction over operational summarization: map evidence -> capability signal -> recruiter-facing bullet.',
-      'If notes mention workflow spec/state transitions, frame as requirements modeling and process architecture (without claiming system build if not stated).',
-      'If notes mention discovery interviews/theme synthesis/template design, frame as discovery and decision-quality improvement.',
-      'If notes mention heatmaps/conversion/content repositioning, frame as analytics interpretation and intervention design.',
-      'If notes mention scenarios/velocity/cost assumptions, frame as scenario planning and decision support.',
-      'If notes mention SLA/escalation/dashboard, frame as risk mitigation and operational governance.',
-    ] : undefined,
-    capabilitySignalAudit,
-    roleLensModeRules: hasJD ? {
-      mode: targetRoleMode,
-      sourceOfTruth: [
-        'Resume bullets + workExperience.projectNotes are the only evidence.',
-        'JD is a prioritization rubric only.',
-        'Never introduce responsibilities, tools, systems, metrics, or outcomes that appear only in JD.',
-        'If a metric is not explicit in source evidence, do not invent numbers and do not use placeholders. Ask a concise question instead.',
-      ],
-      antiJdCopy: [
-        'Do not copy or paraphrase the JD line-by-line.',
-        'Do not reuse more than 6 consecutive words from the JD.',
-        'Do not mirror JD bullet order.',
-        'Use JD keywords only when they map to existing source evidence.',
-      ],
-      lensByMode: {
-        pm: {
-          emphasize: ['scope', 'timeline', 'milestones', 'dependencies', 'stakeholder coordination', 'meeting cadence', 'progress reporting', 'risk/issues', 'change tracking', 'documentation'],
-          useLanguage: ['defined scope', 'built project plan/trackers', 'coordinated stakeholders', 'tracked risks/issues/changes', 'reported progress', 'managed dependencies'],
-          avoidUnlessExplicit: ['UAT', 'SIT', 'user stories', 'acceptance criteria'],
-        },
-        product: {
-          emphasize: ['problem framing', 'discovery', 'requirements/specs', 'prioritization', 'metrics', 'adoption', 'tradeoffs', 'cross-functional alignment'],
-          useLanguage: ['synthesized inputs', 'drafted lightweight spec', 'defined success metrics', 'identified bottlenecks', 'prioritized interventions'],
-          avoidUnlessExplicit: ['roadmap ownership', 'PRD', 'backlog', 'sprint planning'],
-        },
-        designer: {
-          emphasize: ['user journeys', 'flows', 'information architecture', 'prototyping', 'testing/iteration', 'storytelling', 'collaboration with PM/Eng'],
-          useLanguage: ['mapped end-to-end journey', 'designed flows', 'validated with feedback', 'improved clarity/usability'],
-          avoidUnlessExplicit: ['tool names like Figma'],
-        },
-        dev: {
-          emphasize: ['shipped features', 'implementation', 'reliability', 'performance', 'testing/debugging', 'ownership'],
-          useLanguage: ['implemented', 'shipped', 'debugged', 'stabilized', 'improved reliability'],
-          avoidUnlessExplicit: ['stacks/tools not present in evidence'],
-        },
-        analyst: {
-          emphasize: ['KPI definitions', 'dashboards', 'reporting cadence', 'insights to decisions', 'data quality', 'analysis'],
-          useLanguage: ['defined KPIs', 'built reporting cadence', 'translated insights into decisions'],
-          avoidUnlessExplicit: ['SQL/Python/BI tool names'],
-        },
-        ops: {
-          emphasize: ['SOPs', 'process standardization', 'scaling', 'cost controls', 'vendor management', 'operational visibility', 'issue resolution'],
-          useLanguage: ['standardized process', 'improved operational visibility', 'resolved operational blockers'],
-          avoidUnlessExplicit: ['strategy claims'],
-        },
-        strategy: {
-          emphasize: ['business cases', 'scenario planning', 'cost/ROI modeling', 'executive recommendations', 'prioritization frameworks'],
-          useLanguage: ['built business case', 'modeled scenarios', 'recommended priorities'],
-          avoidUnlessExplicit: ['market claims'],
-        },
-        bizdev: {
-          emphasize: ['pipeline', 'partnerships', 'negotiation', 'stakeholder management', 'revenue impact'],
-          useLanguage: ['advanced pipeline', 'structured partnerships', 'negotiated terms'],
-          avoidUnlessExplicit: ['revenue metrics'],
-        },
-      },
-    } : undefined,
-    editing_rules: [
-      'You may rewrite, add, or remove bullets when it improves clarity and impact.',
-      hasJD
-        ? 'Keep each role to 5-7 bullets maximum and prioritize strongest evidence.'
-        : 'Keep each role to 3-5 bullets in most cases (up to 6 only when truly necessary) and prioritize strongest evidence.',
-      'For removals, use empty string in improved bullets at that index.',
-      'Treat resumeData.workExperience[].projectNotes as private source context for bullet improvements.',
-      'If projectNotes conflict with existing bullets, preserve truthfulness and ask concise clarification questions instead of inventing details.',
-      'When projectNotes include JD-relevant transferable work that is missing in current bullets, re-introduce it into improved bullets or skills.',
-      'Do not overfit to the current job title if projectNotes show additional credible capabilities useful for the target role.',
-      'Do not preserve original bullet structure if it obscures higher-order capability.',
-      'If projectNotes for a role are >= 100 words, produce at least 2 new bullets that are not near-paraphrases of legacy bullets.',
-      'Treat JD as a scoring rubric only, not as content to rewrite from.',
-      'Never copy, paraphrase, or mirror JD responsibilities.',
-      'Do not reuse more than 6 consecutive words from the JD.',
-      'Do not mirror JD bullet order.',
-      'If a responsibility appears only in JD and not in resume bullets/projectNotes evidence, do not include it.',
-      'Never output placeholder metrics or bracket placeholders (e.g., [X%], [L%], [TBD]).',
-    ],
-    resumeData: compactResumeData,
-    output_schema: {
-      improved: {
-        about: 'string',
-        experience: [{ expId: 'string', role: 'string', company: 'string', bullets: 'string[]' }],
-        skills: 'string[]',
-      },
-      changes: [{ section: 'string', before: 'string', after: 'string', reason: 'string' }],
-      ats: {
-        targetRole: 'string',
-        keywordsAdded: [{ keyword: 'string', where: 'about|experience|skills' }],
-        keywordsMissing: 'string[]',
-      },
-      questions: 'string[] max 5, only critical missing info (metrics/tools/scope/ownership)',
-      changeSummary: 'string[]',
-      redFlags: 'string[]',
-      aboutPointers: 'string[]',
-      jdFocusAreas: 'string[] max 3',
-      positioningSummary: 'string concise role-level positioning summary tailored to JD expectations',
-      jdTldr: { roleAsks: 'string', candidateNeeds: 'string', keyFocusAreas: 'string[] max 3' },
-      companyContext: {
-        company: 'string',
-        focus: 'string',
-        stellarProfile: 'string[] max 4',
-        evidence: 'string[] max 4',
-      },
-      suggestions: [{ field: 'bio|bullet', expId: 'string when bullet', bulletIdx: 'number when bullet', suggested: 'string', reason: 'string with recruiter heuristic' }],
-      roleLensOutput: {
-        targetRoleMode: 'pm|product|designer|dev|analyst|ops|strategy|bizdev',
-        bullets: [{
-          bullet: 'string',
-          evidenceQuotes: 'string[] (1-2 short phrases copied from resume bullets/projectNotes)',
-        }],
-        missingInfoQuestions: 'string[] max 5; use instead of inventing unsupported claims',
-      },
-    },
-  };
 
   try {
     console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${jdText.length} mode=${hasJD ? 'jd' : 'base'}`);
 
-    let { parsed } = await runCurateModelParsed(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
-    let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
+    let layer1 = buildDeterministicCapabilityExtraction(compactResumeData, targetRoleMode);
+    try {
+      const layer1Payload = {
+        task: 'layer_1_capability_extraction',
+        targetRoleMode,
+        sourceOfTruth: 'resume bullets + workExperience.projectNotes only',
+        resumeData: compactResumeData,
+        output_schema: {
+          capabilities: [{ expId: 'string', capability: 'string', evidenceQuotes: 'string[] max 2' }],
+          capabilitySummary: 'string[]',
+          missingInfoQuestions: 'string[] max 5',
+        },
+      };
+      const { parsed } = await runCurateModelParsed(
+        client,
+        CAPABILITY_EXTRACTION_SYSTEM_PROMPT,
+        JSON.stringify(layer1Payload),
+        curateSignal,
+      );
+      layer1 = sanitizeCapabilityExtractionOutput(parsed, compactResumeData, targetRoleMode);
+    } catch (error) {
+      console.warn(`[ai-curate][${requestId}] layer1 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
+    }
+
+    let layer2 = buildDeterministicRoleMapping(layer1, jdKeywords, targetRoleMode);
+    if (hasJD) {
+      try {
+        const layer2Payload = {
+          task: 'layer_2_role_mapping',
+          targetRole,
+          targetRoleMode,
+          jdText,
+          jdKeywords,
+          capabilityInventory: layer1,
+          output_schema: {
+            supportedSignals: [{ signal: 'string', mappedCapabilities: 'string[]', evidenceQuotes: 'string[] max 2' }],
+            unsupportedSignals: 'string[]',
+            jdFocusAreas: 'string[] max 3',
+            targetRoleMode: 'pm|product|designer|dev|analyst|ops|strategy|bizdev',
+          },
+        };
+        const { parsed } = await runCurateModelParsed(
+          client,
+          ROLE_MAPPING_SYSTEM_PROMPT,
+          JSON.stringify(layer2Payload),
+          curateSignal,
+        );
+        layer2 = sanitizeRoleMappingOutput(parsed, layer2);
+      } catch (error) {
+        console.warn(`[ai-curate][${requestId}] layer2 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
+      }
+    } else {
+      layer2 = { ...layer2, unsupportedSignals: [] };
+    }
+
+    let layer3 = buildDeterministicRoleTransformation(layer1, layer2.targetRoleMode);
+    try {
+      const layer3Payload = {
+        task: 'layer_3_role_transformation',
+        targetRole,
+        targetRoleMode: layer2.targetRoleMode,
+        supportedSignals: layer2.supportedSignals,
+        capabilityInventory: layer1,
+        output_schema: {
+          transformedClaims: [{
+            expId: 'string',
+            claim: 'string',
+            mechanism: 'string',
+            impactSignal: 'string',
+            evidenceQuotes: 'string[] max 2',
+          }],
+          droppedClaims: 'string[]',
+          warnings: 'string[]',
+        },
+      };
+      const { parsed } = await runCurateModelParsed(
+        client,
+        ROLE_TRANSFORMATION_SYSTEM_PROMPT,
+        JSON.stringify(layer3Payload),
+        curateSignal,
+      );
+      layer3 = sanitizeRoleTransformationOutput(parsed, layer3, compactResumeData);
+    } catch (error) {
+      console.warn(`[ai-curate][${requestId}] layer3 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
+    }
+
+    const finalPayload = {
+      task: hasJD ? 'layer_4_final_writing_jd_aligned' : 'layer_4_final_writing_base_resume',
+      targetRole,
+      targetRoleMode: layer2.targetRoleMode,
+      jdText,
+      jdFocusAreas: layer2.jdFocusAreas,
+      supportedSignals: layer2.supportedSignals,
+      unsupportedSignals: layer2.unsupportedSignals,
+      transformedClaims: layer3.transformedClaims,
+      resumeData: compactResumeData,
+      rules: [
+        'Use only source-backed claims from resumeData and transformedClaims.',
+        'Do not invent responsibilities, tools, metrics, systems, or outcomes.',
+        'Do not copy JD text line-by-line or mirror JD order.',
+        'Keep 5-7 bullets maximum per role.',
+        'If metrics are missing, ask concise questions instead of inventing values.',
+      ],
+      output_schema: {
+        improved: {
+          about: 'string',
+          experience: [{ expId: 'string', role: 'string', company: 'string', bullets: 'string[]' }],
+          skills: 'string[]',
+        },
+        changes: [{ section: 'string', before: 'string', after: 'string', reason: 'string' }],
+        ats: {
+          targetRole: 'string',
+          keywordsAdded: [{ keyword: 'string', where: 'about|experience|skills' }],
+          keywordsMissing: 'string[]',
+        },
+        questions: 'string[] max 5',
+        changeSummary: 'string[]',
+        redFlags: 'string[]',
+        aboutPointers: 'string[]',
+        jdFocusAreas: 'string[] max 3',
+        positioningSummary: 'string',
+        jdTldr: { roleAsks: 'string', candidateNeeds: 'string', keyFocusAreas: 'string[] max 3' },
+        companyContext: {
+          company: 'string',
+          focus: 'string',
+          stellarProfile: 'string[] max 4',
+          evidence: 'string[] max 4',
+        },
+        suggestions: [{ field: 'bio|bullet', expId: 'string', bulletIdx: 'number', suggested: 'string', reason: 'string' }],
+      },
+    };
+
+    let finalParsed: unknown;
+    try {
+      ({ parsed: finalParsed } = await runCurateModelParsed(
+        client,
+        FINAL_WRITING_SYSTEM_PROMPT,
+        JSON.stringify(finalPayload),
+        curateSignal,
+      ));
+    } catch (error) {
+      console.warn(`[ai-curate][${requestId}] layer4 retry reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
+      const rescuePayload = {
+        ...finalPayload,
+        rescue: true,
+        extraInstruction: 'Return exactly one valid JSON object matching output_schema. No markdown.',
+      };
+      try {
+        ({ parsed: finalParsed } = await runCurateModelParsed(
+          client,
+          FINAL_WRITING_SYSTEM_PROMPT,
+          JSON.stringify(rescuePayload),
+          curateSignal,
+        ));
+      } catch (rescueError) {
+        console.warn(`[ai-curate][${requestId}] layer4 rescue fallback reason="${String((rescueError as { message?: string }).message ?? 'unknown error')}"`);
+        return buildFallbackCurateOutput(input, 'AI response formatting issue in final writing step. Please retry curation.');
+      }
+    }
+
+    const output = sanitizeElevateOutput(finalParsed, input.resumeData, targetRole, jdKeywords);
 
     if (output.suggestions.length === 0) {
       output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
     }
 
-    let quality = evaluateCurateQuality(input, output);
-    output.quality = quality;
-    let projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
-    let strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
-    let capabilityCoverage = evaluateCapabilityElevationCoverage(input.resumeData, output.improved, targetRoleMode);
-    let mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
-    let notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
-    let grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText);
-    const requiresProjectNotesRescue = projectNotesCoverage.hasSignals
-      && (projectNotesCoverage.coverageRatio < 0.65 || projectNotesCoverage.newSignalRatio < 0.25);
-    const requiresStrategicThemeRescue = strategicThemeCoverage.hasThemes && strategicThemeCoverage.coverageRatio < 0.6;
-    const requiresCapabilityRescue = capabilityCoverage.hasMarkers && capabilityCoverage.coverageRatio < 0.55;
-    const requiresNarrativeRestructureRescue = mirrorRisk.risky;
-    const requiresNotesDrivenLiftRescue = notesDrivenLift.hasEligibleRoles && notesDrivenLift.deficits.length > 0;
-    const requiresGroundingRescue = grounding.suspicious;
-    if (requiresProjectNotesRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Project-notes rescue triggered: coverage ${Math.round(projectNotesCoverage.coverageRatio * 100)}%, new-signal lift ${Math.round(projectNotesCoverage.newSignalRatio * 100)}%.`,
-        ]),
-      ];
+    const unsupportedQuestions = hasJD
+      ? layer2.unsupportedSignals.slice(0, 3).map((signal) => `Do you have source evidence for "${signal}" in your past work?`)
+      : [];
+    output.questions = uniqueStrings([
+      ...output.questions,
+      ...layer1.missingInfoQuestions,
+      ...unsupportedQuestions,
+    ]).slice(0, 5);
+
+    if (output.jdFocusAreas.length === 0) {
+      output.jdFocusAreas = layer2.jdFocusAreas.slice(0, 3);
     }
-    if (requiresStrategicThemeRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Strategic-theme rescue triggered: coverage ${Math.round(strategicThemeCoverage.coverageRatio * 100)}%.`,
-        ]),
-      ];
-    }
-    if (requiresCapabilityRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Capability-elevation rescue triggered: coverage ${Math.round(capabilityCoverage.coverageRatio * 100)}% for mode=${targetRoleMode}.`,
-        ]),
-      ];
-    }
-    if (requiresNarrativeRestructureRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Narrative restructure rescue triggered: category-mirror ratio ${Math.round(mirrorRisk.mirrorRatio * 100)}%.`,
-        ]),
-      ];
-    }
-    if (requiresNotesDrivenLiftRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Notes-driven lift rescue triggered: ${notesDrivenLift.deficits.length} eligible role(s) did not reach >=2 new bullets.`,
-        ]),
-      ];
-    }
-    if (requiresGroundingRescue) {
-      output.redFlags = [
-        ...new Set([
-          ...output.redFlags,
-          `Grounding rescue triggered: ${grounding.details.join(' | ')}`,
-        ]),
-      ];
+    if (output.jdTldr.keyFocusAreas.length === 0) {
+      output.jdTldr.keyFocusAreas = output.jdFocusAreas.slice(0, 3);
     }
 
-    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresCapabilityRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue);
-    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresCapabilityRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue) && shouldRunSecondPass) {
-      const elapsedBeforeSecondPass = Date.now() - started;
-      const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
-      if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
-        try {
-          const missingSignalList = projectNotesCoverage.missingByExp
-            .slice(0, 4)
-            .map((row) => ({
-              expId: row.expId,
-              role: row.role,
-              company: row.company,
-              mustRecoverSignals: row.missingSignals.slice(0, 5),
-            }));
-          const missingStrategicThemes = strategicThemeCoverage.missingByExp
-            .slice(0, 4)
-            .map((row) => ({
-              expId: row.expId,
-              role: row.role,
-              company: row.company,
-              mustRecoverThemes: row.missingThemes,
-            }));
-          const missingCapabilities = capabilityCoverage.missingByExp
-            .slice(0, 4)
-            .map((row) => ({
-              expId: row.expId,
-              role: row.role,
-              company: row.company,
-              mustRecoverCapabilities: row.missingCapabilities,
-            }));
-          const secondPassPrompt = JSON.stringify({
-            ...basePayload,
-            correction: 'Second pass required. Reframe narrative at recruiter-grade level. Compress and elevate. Add stronger specificity, scope, outcomes, tooling, decision ownership, system thinking, risk mitigation, and commercial influence where evidenced. Avoid simple verb swaps and one-to-one category mirroring. No fabricated metrics.',
-            firstPassQuality: quality,
-            projectNotesCoverage,
-            strategicThemeCoverage,
-            capabilityCoverage,
-            mirrorRisk,
-            notesDrivenLift,
-            groundingViolations: grounding,
-            missingSignalsToRecover: missingSignalList,
-            missingStrategicThemesToRecover: missingStrategicThemes,
-            missingCapabilitiesToRecover: missingCapabilities,
-            minNewBulletsForLongNotes: notesDrivenLift.deficits.map((row) => ({
-              expId: row.expId,
-              role: row.role,
-              company: row.company,
-              required: row.requiredNewBullets,
-              detected: row.detectedNewBullets,
-            })),
-            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, at least 55% of capability markers must be preserved in mode-appropriate framing, structure must avoid one-to-one category mirroring, every role with >=100-word projectNotes must contain at least 2 genuinely new bullets, and no bullet may contain JD-only unsupported claims or placeholders.',
-          });
-          ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
-          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
-          if (output.suggestions.length === 0) {
-            output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
-          }
-          quality = evaluateCurateQuality(input, output);
-          output.quality = quality;
-          projectNotesCoverage = evaluateProjectNotesCoverage(input.resumeData, output.improved);
-          strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
-          capabilityCoverage = evaluateCapabilityElevationCoverage(input.resumeData, output.improved, targetRoleMode);
-          mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
-          notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
-          grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText);
-          output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
-        } catch (secondPassError) {
-          const elapsedSecondPassMs = Date.now() - started;
-          console.warn(`[ai-curate][${requestId}] second-pass failed elapsedMs=${elapsedSecondPassMs} reason="${String((secondPassError as { message?: string }).message ?? 'unknown error')}"`);
-          output.redFlags = [
-            ...new Set([
-              ...output.redFlags,
-              `Second pass skipped after first-pass completion: ${isAbortLikeError(secondPassError) ? 'timed out' : 'model error'}.`,
-            ]),
-          ];
-        }
-      } else {
-        output.redFlags = [
-          ...new Set([
-            ...output.redFlags,
-            'Second pass skipped to preserve responsiveness within timeout budget.',
-          ]),
-        ];
-      }
-    }
+    output.changeSummary = uniqueStrings([
+      ...output.changeSummary,
+      `Used staged reasoning: capability extraction -> role mapping -> ${layer2.targetRoleMode} transformation -> final writing.`,
+    ]).slice(0, 10);
+
+    output.redFlags = uniqueStrings([
+      ...output.redFlags,
+      ...layer3.warnings,
+      ...(hasJD && layer2.unsupportedSignals.length > 0
+        ? [`Excluded unsupported JD signals: ${layer2.unsupportedSignals.slice(0, 5).join(', ')}`]
+        : []),
+    ]).slice(0, 8);
+
+    output.quality = evaluateCurateQuality(input, output);
 
     const meaningfulSuggestions = output.suggestions.filter((s) => s.suggested.trim()).length;
     const hasChangePayload = meaningfulSuggestions > 0 || output.changes.length > 0;
 
-    if (!output.quality.passed) {
+    if (output.quality && !output.quality.passed) {
       output.redFlags = [
         ...new Set([
           ...output.redFlags,
@@ -1732,7 +1694,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     }
 
     const elapsedMs = Date.now() - started;
-    console.info(`[ai-curate][${requestId}] success elapsedMs=${elapsedMs} suggestions=${output.suggestions.length} impactScore=${output.quality.impactScore}`);
+    console.info(`[ai-curate][${requestId}] success elapsedMs=${elapsedMs} suggestions=${output.suggestions.length} capabilities=${layer1.capabilitySummary.length} supportedSignals=${layer2.supportedSignals.length}`);
     output.meta = {
       providerStatus: 'ok',
       model: DEFAULT_MODEL,
