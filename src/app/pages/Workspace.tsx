@@ -12,7 +12,7 @@ import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, d
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 import { useIsMobile } from '../components/ui/use-mobile';
-import cvBlackLogo from '../assets/branding/cv-black.svg';
+import cvLogo from '../assets/branding/cv-logo.svg';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,6 +21,7 @@ const PRODUCT_DESIGNER_TITLE = 'Product Designer';
 const PRODUCT_DESIGNER_PATTERN = /\bproduct\s+designer\b/i;
 const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|principal|staff|head|chief|vp|director|associate)\s+)+/i;
 const MIN_JD_CURATION_LENGTH = 40;
+const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -234,6 +235,11 @@ function appendUniqueDictatedText(existing: string, dictated: string): string {
   const cleanNormalized = clean.replace(/\s+/g, ' ').toLowerCase();
   if (existingNormalized.endsWith(cleanNormalized)) return existing;
   return appendDictatedText(existing, clean);
+}
+function countWords(value: string): number {
+  const clean = value.trim();
+  if (!clean) return 0;
+  return clean.split(/\s+/).length;
 }
 const BASE_PROJECT_NOTES_PROMPTS = [
   'What were the 2-3 biggest projects you owned in this role?',
@@ -815,6 +821,56 @@ function normalizeRoleKey(exp: WorkExperience): string {
   return `${exp.role.trim().toLowerCase()}::${exp.company.trim().toLowerCase()}`;
 }
 
+function splitProjectNotesIntoSegments(value: string): string[] {
+  return normalizeClipboardLineEndings(value)
+    .split(/\n{2,}/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function normalizeProjectNotesSegment(value: string): string {
+  return compactText(value).toLowerCase();
+}
+
+function mergeProjectNotesPreservingStructure(baseNotes: string, variantNotes: string): string {
+  const baseSegments = splitProjectNotesIntoSegments(baseNotes);
+  const variantSegments = splitProjectNotesIntoSegments(variantNotes);
+  if (variantSegments.length === 0) return baseSegments.join('\n\n');
+  if (baseSegments.length === 0) return variantSegments.join('\n\n');
+
+  const seen = new Set(baseSegments.map(normalizeProjectNotesSegment));
+  const additions = variantSegments.filter((segment) => {
+    const key = normalizeProjectNotesSegment(segment);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (additions.length === 0) return baseSegments.join('\n\n');
+  return [...baseSegments, ...additions].join('\n\n');
+}
+
+function mergeVariantProjectNotesIntoBase(baseData: ResumeData, variantData: ResumeData): { data: ResumeData; changed: boolean } {
+  if (!baseData.workExperience.length || !variantData.workExperience.length) return { data: baseData, changed: false };
+
+  const variantById = new Map(variantData.workExperience.map((exp) => [exp.id, exp]));
+  const variantByRoleKey = new Map(variantData.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
+  let changed = false;
+
+  const mergedWorkExperience = baseData.workExperience.map((baseExp) => {
+    const variantExp = variantById.get(baseExp.id) ?? variantByRoleKey.get(normalizeRoleKey(baseExp));
+    if (!variantExp) return baseExp;
+
+    const currentNotes = (baseExp.projectNotes ?? '').trim();
+    const mergedNotes = mergeProjectNotesPreservingStructure(currentNotes, variantExp.projectNotes ?? '');
+    if (mergedNotes === currentNotes) return baseExp;
+    changed = true;
+    return { ...baseExp, projectNotes: mergedNotes };
+  });
+
+  if (!changed) return { data: baseData, changed: false };
+  return { data: { ...baseData, workExperience: mergedWorkExperience }, changed: true };
+}
+
 function syncVariantExperiencesWithBase(baseData: ResumeData, variantData: ResumeData): ResumeData {
   const baseById = new Map(baseData.workExperience.map((exp) => [exp.id, exp]));
   const baseByRoleKey = new Map(baseData.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
@@ -1150,6 +1206,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
     onAutoExpandConsumed?.();
   }, [autoExpand, onAutoExpandConsumed]);
   const prompts = promptMode === 'variant' ? VARIANT_PROJECT_NOTES_PROMPTS : BASE_PROJECT_NOTES_PROMPTS;
+  const hasReachedPromptThreshold = countWords(value) >= PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD;
 
   const stopDictation = useCallback(() => {
     if (interimTranscript.trim()) {
@@ -1296,7 +1353,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false, autoExpand = fa
           {!disabled && dictationError && (
             <p className="mt-2 ml-1 text-[11px] text-[#A6454A]">{dictationError}</p>
           )}
-          {!disabled && (
+          {!disabled && !hasReachedPromptThreshold && (
             <div className="flex flex-wrap gap-2 mt-3">
               {prompts.map((prompt) => (
                 <button
@@ -2437,6 +2494,19 @@ export default function Workspace() {
     setVersions((prev) => prev.map((v) => (v.id === selectedVersionId ? nextVersion : v)));
     void persistVersion(nextVersion).catch(() => {});
 
+    if (nextVersion.id !== baseVersion.id) {
+      const mergedBase = mergeVariantProjectNotesIntoBase(baseVersion.data, normalizedData);
+      if (mergedBase.changed) {
+        const nextBaseVersion: ResumeVersion = {
+          ...baseVersion,
+          data: mergedBase.data,
+          variantContent: buildTextResume(mergedBase.data),
+        };
+        setVersions((prev) => prev.map((v) => (v.id === baseVersion.id ? nextBaseVersion : v)));
+        void persistVersion(nextBaseVersion).catch(() => {});
+      }
+    }
+
     if (nextVersion.id === baseVersion.id) {
       const nextBaseResume: BaseResumeModel = {
         id: nextVersion.baseResumeId ?? baseResumeModel?.id ?? `base-${resumeId || 'local'}`,
@@ -2899,7 +2969,7 @@ export default function Workspace() {
         className={`w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide transition-transform duration-200 ease-out md:relative md:translate-x-0 md:shadow-none ${isMobile ? 'fixed inset-y-0 left-0 z-50 shadow-[0_12px_30px_rgba(0,0,0,0.2)]' : ''} ${isMobile && !isMobileSidebarOpen ? '-translate-x-full' : 'translate-x-0'}`}
       >
         <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]">
-          <img src={cvBlackLogo} alt="CV Stack" className="w-6 h-6 object-contain" />
+          <img src={cvLogo} alt="CV Stack" className="w-6 h-6 object-contain" />
         </div>
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
