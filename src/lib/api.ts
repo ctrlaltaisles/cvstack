@@ -94,7 +94,11 @@ export async function requestEmailOtp(email: string) {
   const response = await fetch(`${authBase}/otp`, {
     method: 'POST',
     headers: supabaseHeaders(),
-    body: JSON.stringify({ email, create_user: true }),
+    body: JSON.stringify({
+      email,
+      create_user: true,
+      email_redirect_to: `${window.location.origin}/login`,
+    }),
   });
 
   if (!response.ok) {
