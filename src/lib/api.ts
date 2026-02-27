@@ -145,6 +145,31 @@ export async function verifyEmailOtp(email: string, token: string) {
   return accessToken;
 }
 
+export async function verifySupabaseTokenHash(tokenHash: string, type: string) {
+  const authBase = getSupabaseAuthBase();
+  if (!authBase) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL.');
+  }
+
+  const response = await fetch(`${authBase}/verify`, {
+    method: 'POST',
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ token_hash: tokenHash, type }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error_description || payload.msg || payload.error || 'Failed to verify magic link');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const accessToken = String(payload?.access_token || payload?.session?.access_token || '').trim();
+  if (!accessToken) {
+    throw new Error('Could not complete sign in from magic link.');
+  }
+  return accessToken;
+}
+
 export function loginWithSupabaseAccessToken(accessToken: string) {
   return requestJson<AuthResponse>('/api/auth/supabase', { accessToken });
 }
