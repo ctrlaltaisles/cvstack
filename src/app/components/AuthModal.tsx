@@ -196,7 +196,7 @@ export default function AuthModal({
             disabled={loading || oauthLoading !== null || !email || (otpStage && otp.length !== 6)}
             className="w-full bg-[#1A1A1A] text-white px-5 py-3 rounded-[12px] text-sm disabled:opacity-40"
           >
-            {loading ? 'Please wait...' : otpStage ? 'Verify & Continue' : 'Send OTP'}
+            {loading ? 'Please wait...' : 'Continue'}
           </button>
         </div>
       </div>

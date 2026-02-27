@@ -1483,7 +1483,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
 
 // ─── FloatingToolbar — Granola/Awwwards style capsule ────────────────────────
 
-function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, onAcceptAll, onRejectAll, onUpdateAllVariations, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; canCurate: boolean; curateHint?: string; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
+function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCount, isCurating, jdPanelOpen, canUpdateAllVariations, hasUploadedResumePdf, canManageBaseResumePdf, onAcceptAll, onRejectAll, onUpdateAllVariations, onOpenResumeModal, onJDClick, onCurate, onExportPDF, onExportWord, onShareLink }: { isBaseResume: boolean; hasJD: boolean; canCurate: boolean; curateHint?: string; pendingCount: number; isCurating: boolean; jdPanelOpen: boolean; canUpdateAllVariations: boolean; hasUploadedResumePdf: boolean; canManageBaseResumePdf: boolean; onAcceptAll: () => void; onRejectAll: () => void; onUpdateAllVariations: () => void; onOpenResumeModal: () => void; onJDClick: () => void; onCurate: () => void; onExportPDF: () => void; onExportWord: () => void; onShareLink: () => void }) {
   const CURATING_LOADING_MESSAGES = [
     'I swear we’re doing something…',
     'Not just copy-pasting, promise.',
@@ -1634,13 +1634,17 @@ function FloatingToolbar({ isBaseResume, hasJD, canCurate, curateHint, pendingCo
           <>
             {isBaseResume ? (
               <>
+                <button onClick={onOpenResumeModal} disabled={!canManageBaseResumePdf} className={`${segBase} ${canManageBaseResumePdf ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}>
+                  <span>{hasUploadedResumePdf ? 'View Resume' : '+ Add Resume'}</span>
+                </button>
+                <div className="w-px bg-white/55 my-2.5 shrink-0" />
                 <button onClick={onCurate} className={`${segBase} ${segIdle}`}>
                   <Sparkles size={14} className="text-[#1A1A1A]" />
                   <span>Curate</span>
                 </button>
                 <div className="w-px bg-white/55 my-2.5 shrink-0" />
                 <button onClick={onUpdateAllVariations} disabled={!canUpdateAllVariations} className={`${segBase} ${canUpdateAllVariations ? segIdle : 'text-[#AFAFAF] cursor-not-allowed'}`}>
-                  <span>Update All Variations</span>
+                  <span>Update All</span>
                 </button>
               </>
             ) : (
@@ -2716,19 +2720,6 @@ export default function Workspace() {
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
             <button onClick={() => handleSidebarVersionSelect(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
-            {canManageBaseResumePdf && (
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowBaseFileModal(true);
-                }}
-                className="opacity-0 group-hover/base:opacity-100 text-[#9B9B9B] hover:text-[#5B5B5B] transition-opacity p-1 rounded"
-                title="Preview or replace uploaded resume"
-                aria-label="Preview uploaded resume"
-              >
-                <FileText size={13} strokeWidth={1.8} />
-              </button>
-            )}
           </div>
           {sidebarGroups.map(group => {
             const isOpen = expandedGroups.has(group.key);
@@ -2872,9 +2863,12 @@ export default function Workspace() {
                 isCurating={isCurating}
                 jdPanelOpen={showJDPanel}
                 canUpdateAllVariations={hasUpdatableVariants}
+                hasUploadedResumePdf={hasUploadedResumePdf}
+                canManageBaseResumePdf={canManageBaseResumePdf}
                 onAcceptAll={handleAcceptAll}
                 onRejectAll={handleRejectAll}
                 onUpdateAllVariations={() => { void handleUpdateAllVariations(); }}
+                onOpenResumeModal={() => setShowBaseFileModal(true)}
                 onJDClick={() => setShowJDPanel(p => !p)}
                 onCurate={handleCurate}
                 onExportPDF={handleExportPdf}
