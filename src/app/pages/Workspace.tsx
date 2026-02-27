@@ -976,15 +976,71 @@ function mergeProjectNotesAcrossSources(primaryNotes: string, secondaryNotes: st
   return serializeProjectNotesSections(merged);
 }
 
+function parseProjectNotesSectionsForCurationScope(value: string): ProjectNotesSection[] {
+  const parsedSections = parseProjectNotesSections(value);
+  if (parsedSections.length !== 1 || normalizeProjectNotesSourceLabel(parsedSections[0].source) !== PROJECT_NOTES_BASE_SOURCE_LABEL) {
+    return parsedSections;
+  }
+
+  const normalized = normalizeClipboardLineEndings(value).trim();
+  if (!normalized) return parsedSections;
+
+  const lines = normalized.split('\n');
+  const headingPattern = /^From\s+(.+?)\s*$/;
+  const headingIndices: number[] = [];
+  lines.forEach((line, index) => {
+    if (headingPattern.test(line.trim())) headingIndices.push(index);
+  });
+  const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  const isStructured = headingIndices.length >= 1 && firstNonEmptyLineIndex === headingIndices[0];
+  if (!isStructured) return parsedSections;
+
+  const sections: ProjectNotesSection[] = [];
+  for (let i = 0; i < headingIndices.length; i += 1) {
+    const start = headingIndices[i];
+    const end = i + 1 < headingIndices.length ? headingIndices[i + 1] : lines.length;
+    const heading = lines[start].trim();
+    const match = heading.match(headingPattern);
+    if (!match) continue;
+    const source = normalizeProjectNotesSourceLabel(match[1]);
+    const content = lines.slice(start + 1, end).join('\n').trim();
+    if (!content) continue;
+    sections.push({ source, content });
+  }
+  return sections.length > 0 ? sections : parsedSections;
+}
+
+function buildAllowedProjectNotesSourcesForCuration(version: ResumeVersion): Set<string> {
+  const allowed = new Set<string>([PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase()]);
+  const candidateSources = [
+    composeRoleCompanyTitle(version.jobTitle ?? '', version.jobCompany ?? ''),
+    version.name ?? '',
+  ];
+  candidateSources.forEach((source) => {
+    const normalized = compactText(source).toLowerCase();
+    if (normalized) allowed.add(normalized);
+  });
+  return allowed;
+}
+
+function scopeBaseProjectNotesForCuration(baseNotes: string, allowedSources: Set<string>): string {
+  const sections = parseProjectNotesSectionsForCurationScope(baseNotes);
+  if (sections.length === 0) return '';
+  const filteredSections = sections.filter((section) => allowedSources.has(normalizeProjectNotesSourceLabel(section.source).toLowerCase()));
+  return serializeProjectNotesSections(filteredSections);
+}
+
 function buildResumeDataForCuration(version: ResumeVersion, baseVersion: ResumeVersion): ResumeData {
   if (version.id === baseVersion.id) return version.data;
+  const allowedSources = buildAllowedProjectNotesSourcesForCuration(version);
   const baseById = new Map(baseVersion.data.workExperience.map((exp) => [exp.id, exp]));
   const baseByRoleKey = new Map(baseVersion.data.workExperience.map((exp) => [normalizeRoleKey(exp), exp]));
 
   const mergedWorkExperience = (version.data.workExperience ?? []).map((exp) => {
     const baseExp = baseById.get(exp.id) ?? baseByRoleKey.get(normalizeRoleKey(exp));
     if (!baseExp) return exp;
-    const mergedNotes = mergeProjectNotesAcrossSources(exp.projectNotes ?? '', baseExp.projectNotes ?? '');
+    const scopedBaseNotes = scopeBaseProjectNotesForCuration(baseExp.projectNotes ?? '', allowedSources);
+    const mergedNotes = mergeProjectNotesAcrossSources(exp.projectNotes ?? '', scopedBaseNotes);
     if (mergedNotes === (exp.projectNotes ?? '')) return exp;
     return { ...exp, projectNotes: mergedNotes };
   });
