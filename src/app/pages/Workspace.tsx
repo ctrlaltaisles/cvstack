@@ -1352,8 +1352,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
     <div className="relative">
       <div className="print-main-content text-[13px] leading-[1.55]">
         {/* Header */}
-        <div className="flex items-start gap-5 mb-5">
-          <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>AJ</div>
+        <div className="mb-5">
           <div className="flex-1 min-w-0 space-y-1 pt-1">
             <InlineText disabled={isReviewLocked} value={data.name} onChange={v => update({ name: v })} className="text-[#1A1A1A] text-[22px]" />
             <p className="text-base text-[#6B6B6B] px-1 -mx-1">{headerTitle}</p>
