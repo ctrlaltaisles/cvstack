@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { ParsedResume, ResumeData } from './types';
 
 export interface UserRecord {
@@ -60,8 +62,83 @@ export interface DbState {
 
 let prismaSingleton: any = null;
 let dbMutationQueue: Promise<unknown> = Promise.resolve();
+const DB_FILE_PATH = path.resolve(process.cwd(), process.env.DB_FILE ?? './data/db.json');
+let forceJsonFallback = false;
+let loggedJsonFallback = false;
+
+const EMPTY_DB_STATE: DbState = {
+  users: [],
+  profiles: [],
+  resumes: [],
+  versions: [],
+};
+
+function cloneDbState(state: DbState): DbState {
+  return {
+    users: [...state.users],
+    profiles: [...state.profiles],
+    resumes: [...state.resumes],
+    versions: [...state.versions],
+  };
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function shouldUseJsonFallback(error: unknown) {
+  const code = String((error as { code?: string } | undefined)?.code ?? '');
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    code === 'P1001'
+    || code === 'P1012'
+    || message.includes('prisma client not available')
+    || message.includes('environment variable not found: database_url')
+    || message.includes("can't reach database server")
+    || message.includes('unable to connect to database')
+    || message.includes('connection refused')
+  );
+}
+
+function logJsonFallback(reason: unknown) {
+  if (loggedJsonFallback) return;
+  loggedJsonFallback = true;
+  console.warn(`[db] Falling back to JSON storage (${DB_FILE_PATH}) because Prisma/Postgres is unavailable: ${getErrorMessage(reason)}`);
+}
+
+function ensureJsonDbFile() {
+  const dir = path.dirname(DB_FILE_PATH);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(DB_FILE_PATH)) {
+    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(EMPTY_DB_STATE, null, 2), 'utf8');
+  }
+}
+
+async function readJsonDb(): Promise<DbState> {
+  ensureJsonDbFile();
+  const raw = await fs.promises.readFile(DB_FILE_PATH, 'utf8');
+  try {
+    const parsed = JSON.parse(raw) as Partial<DbState>;
+    return {
+      users: Array.isArray(parsed.users) ? parsed.users as UserRecord[] : [],
+      profiles: Array.isArray(parsed.profiles) ? parsed.profiles as ProfileRecord[] : [],
+      resumes: Array.isArray(parsed.resumes) ? parsed.resumes as ResumeRecord[] : [],
+      versions: Array.isArray(parsed.versions) ? parsed.versions as VersionRecord[] : [],
+    };
+  } catch {
+    return cloneDbState(EMPTY_DB_STATE);
+  }
+}
+
+async function writeJsonDb(state: DbState): Promise<void> {
+  ensureJsonDbFile();
+  await fs.promises.writeFile(DB_FILE_PATH, JSON.stringify(state, null, 2), 'utf8');
+}
 
 async function getPrisma() {
+  if (forceJsonFallback) {
+    throw new Error('Prisma disabled: using JSON fallback');
+  }
   if (prismaSingleton) return prismaSingleton;
 
   const prismaModule = await new Function('m', 'return import(m)')('@prisma/client').catch(() => {
@@ -100,20 +177,52 @@ function versionFromContent(resumeId: string, id: string, createdAt: Date, updat
 }
 
 export async function initDb() {
-  const prisma = await getPrisma();
-  await prisma.$queryRawUnsafe('SELECT 1');
+  try {
+    const prisma = await getPrisma();
+    await prisma.$queryRawUnsafe('SELECT 1');
+  } catch (error) {
+    if (!shouldUseJsonFallback(error)) {
+      throw error;
+    }
+    forceJsonFallback = true;
+    logJsonFallback(error);
+    await writeJsonDb(await readJsonDb());
+  }
 }
 
 export async function readDb(): Promise<DbState> {
-  const prisma = await getPrisma();
+  if (forceJsonFallback) {
+    return readJsonDb();
+  }
+  let prisma: any;
+  try {
+    prisma = await getPrisma();
+  } catch (error) {
+    if (!shouldUseJsonFallback(error)) throw error;
+    forceJsonFallback = true;
+    logJsonFallback(error);
+    return readJsonDb();
+  }
 
-  const [users, profiles, resumes, versions, uploads] = await Promise.all([
-    prisma.user.findMany(),
-    prisma.profile.findMany(),
-    prisma.resume.findMany(),
-    prisma.resumeVersion.findMany(),
-    prisma.uploadedFile.findMany({ orderBy: { createdAt: 'desc' } }),
-  ]);
+  let users: any[];
+  let profiles: any[];
+  let resumes: any[];
+  let versions: any[];
+  let uploads: any[];
+  try {
+    [users, profiles, resumes, versions, uploads] = await Promise.all([
+      prisma.user.findMany(),
+      prisma.profile.findMany(),
+      prisma.resume.findMany(),
+      prisma.resumeVersion.findMany(),
+      prisma.uploadedFile.findMany({ orderBy: { createdAt: 'desc' } }),
+    ]);
+  } catch (error) {
+    if (!shouldUseJsonFallback(error)) throw error;
+    forceJsonFallback = true;
+    logJsonFallback(error);
+    return readJsonDb();
+  }
 
   const latestUploadByResumeId = new Map<string, any>();
   for (const upload of uploads) {
@@ -162,116 +271,136 @@ export async function readDb(): Promise<DbState> {
 }
 
 export async function writeDb(state: DbState): Promise<void> {
-  const prisma = await getPrisma();
+  if (forceJsonFallback) {
+    await writeJsonDb(state);
+    return;
+  }
+  let prisma: any;
+  try {
+    prisma = await getPrisma();
+  } catch (error) {
+    if (!shouldUseJsonFallback(error)) throw error;
+    forceJsonFallback = true;
+    logJsonFallback(error);
+    await writeJsonDb(state);
+    return;
+  }
 
-  await prisma.$transaction(async (tx: any) => {
-    await tx.uploadedFile.deleteMany();
-    await tx.resumeVersion.deleteMany();
-    await tx.profile.deleteMany();
-    await tx.resume.deleteMany();
-    await tx.user.deleteMany();
+  try {
+    await prisma.$transaction(async (tx: any) => {
+      await tx.uploadedFile.deleteMany();
+      await tx.resumeVersion.deleteMany();
+      await tx.profile.deleteMany();
+      await tx.resume.deleteMany();
+      await tx.user.deleteMany();
 
-    if (state.users.length > 0) {
-      await tx.user.createMany({
-        data: state.users.map((u) => ({
-          id: u.id,
-          email: u.email,
-          passwordHash: u.passwordHash,
-          createdAt: new Date(u.createdAt),
-        })),
-      });
-    }
+      if (state.users.length > 0) {
+        await tx.user.createMany({
+          data: state.users.map((u) => ({
+            id: u.id,
+            email: u.email,
+            passwordHash: u.passwordHash,
+            createdAt: new Date(u.createdAt),
+          })),
+        });
+      }
 
-    for (const profile of state.profiles) {
-      await tx.profile.create({
-        data: {
-          id: `prf_${profile.userId}`,
-          userId: profile.userId,
-          name: profile.fullName,
-          headline: profile.headline,
-          summary: profile.summary,
-          detailsJson: {
-            contactEmail: profile.contactEmail,
-            phone: profile.phone,
-            location: profile.location,
-            linkedin: profile.linkedin,
-            website: profile.website,
-          },
-          updatedAt: new Date(profile.updatedAt),
-        },
-      });
-    }
-
-    if (state.resumes.length > 0) {
-      await tx.resume.createMany({
-        data: state.resumes.map((r) => ({
-          id: r.id,
-          userId: r.userId,
-          title: r.title,
-          metaJson: {
-            source: r.source,
-            parsed: r.parsed,
-          },
-          createdAt: new Date(r.createdAt),
-          updatedAt: new Date(r.updatedAt),
-        })),
-      });
-    }
-
-    for (const resume of state.resumes) {
-      if (!resume.filePath && !resume.fileName) continue;
-      await tx.uploadedFile.create({
-        data: {
-          id: `upl_${resume.id}`,
-          userId: resume.userId,
-          resumeId: resume.id,
-          originalName: resume.fileName || 'resume.pdf',
-          mimeType: 'application/pdf',
-          size: 0,
-          storagePath: resume.filePath || '',
-          extractedText: resume.extractedText || null,
-          createdAt: new Date(resume.createdAt),
-        },
-      });
-    }
-
-    const groupedByResume = new Map<string, VersionRecord[]>();
-    for (const version of state.versions) {
-      const list = groupedByResume.get(version.resumeId) ?? [];
-      list.push(version);
-      groupedByResume.set(version.resumeId, list);
-    }
-
-    for (const [resumeId, list] of groupedByResume) {
-      list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      let versionNumber = 1;
-      for (const version of list) {
-        await tx.resumeVersion.create({
+      for (const profile of state.profiles) {
+        await tx.profile.create({
           data: {
-            id: version.id,
-            resumeId,
-            versionNumber,
-            contentJson: {
-              versionName: version.versionName,
-              isBase: version.isBase,
-              isAI: version.isAI,
-              matchScore: version.matchScore,
-              jobTitle: version.jobTitle,
-              jobCompany: version.jobCompany,
-              jobDescription: version.jobDescription,
-              jobLink: version.jobLink,
-              lastCurationInputHash: version.lastCurationInputHash,
-              data: version.data,
-              aiChanges: version.aiChanges,
+            id: `prf_${profile.userId}`,
+            userId: profile.userId,
+            name: profile.fullName,
+            headline: profile.headline,
+            summary: profile.summary,
+            detailsJson: {
+              contactEmail: profile.contactEmail,
+              phone: profile.phone,
+              location: profile.location,
+              linkedin: profile.linkedin,
+              website: profile.website,
             },
-            createdAt: new Date(version.createdAt),
-            updatedAt: new Date(version.updatedAt),
+            updatedAt: new Date(profile.updatedAt),
           },
         });
-        versionNumber += 1;
       }
-    }
-  });
+
+      if (state.resumes.length > 0) {
+        await tx.resume.createMany({
+          data: state.resumes.map((r) => ({
+            id: r.id,
+            userId: r.userId,
+            title: r.title,
+            metaJson: {
+              source: r.source,
+              parsed: r.parsed,
+            },
+            createdAt: new Date(r.createdAt),
+            updatedAt: new Date(r.updatedAt),
+          })),
+        });
+      }
+
+      for (const resume of state.resumes) {
+        if (!resume.filePath && !resume.fileName) continue;
+        await tx.uploadedFile.create({
+          data: {
+            id: `upl_${resume.id}`,
+            userId: resume.userId,
+            resumeId: resume.id,
+            originalName: resume.fileName || 'resume.pdf',
+            mimeType: 'application/pdf',
+            size: 0,
+            storagePath: resume.filePath || '',
+            extractedText: resume.extractedText || null,
+            createdAt: new Date(resume.createdAt),
+          },
+        });
+      }
+
+      const groupedByResume = new Map<string, VersionRecord[]>();
+      for (const version of state.versions) {
+        const list = groupedByResume.get(version.resumeId) ?? [];
+        list.push(version);
+        groupedByResume.set(version.resumeId, list);
+      }
+
+      for (const [resumeId, list] of groupedByResume) {
+        list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        let versionNumber = 1;
+        for (const version of list) {
+          await tx.resumeVersion.create({
+            data: {
+              id: version.id,
+              resumeId,
+              versionNumber,
+              contentJson: {
+                versionName: version.versionName,
+                isBase: version.isBase,
+                isAI: version.isAI,
+                matchScore: version.matchScore,
+                jobTitle: version.jobTitle,
+                jobCompany: version.jobCompany,
+                jobDescription: version.jobDescription,
+                jobLink: version.jobLink,
+                lastCurationInputHash: version.lastCurationInputHash,
+                data: version.data,
+                aiChanges: version.aiChanges,
+              },
+              createdAt: new Date(version.createdAt),
+              updatedAt: new Date(version.updatedAt),
+            },
+          });
+          versionNumber += 1;
+        }
+      }
+    });
+  } catch (error) {
+    if (!shouldUseJsonFallback(error)) throw error;
+    forceJsonFallback = true;
+    logJsonFallback(error);
+    await writeJsonDb(state);
+  }
 }
 
 export async function withDb<T>(fn: (state: DbState) => Promise<T> | T): Promise<T> {
@@ -325,6 +454,40 @@ export async function createVersionRecord(params: {
   createdAt: string;
   updatedAt: string;
 }): Promise<VersionRecord> {
+  if (forceJsonFallback) {
+    let createdRecord: VersionRecord | null = null;
+    await withDb(async (state) => {
+      const now = new Date(params.createdAt).toISOString();
+      const normalized = mapVersionContent(params.content);
+      createdRecord = {
+        id: params.id,
+        resumeId: params.resumeId,
+        versionName: normalized.versionName,
+        isBase: normalized.isBase,
+        isAI: normalized.isAI,
+        matchScore: normalized.matchScore,
+        jobTitle: normalized.jobTitle,
+        jobCompany: normalized.jobCompany,
+        jobDescription: normalized.jobDescription,
+        jobLink: normalized.jobLink,
+        lastCurationInputHash: normalized.lastCurationInputHash,
+        data: normalized.data,
+        aiChanges: normalized.aiChanges,
+        createdAt: now,
+        updatedAt: new Date(params.updatedAt).toISOString(),
+      };
+      state.versions.push(createdRecord as VersionRecord);
+      const resume = state.resumes.find((r) => r.id === params.resumeId);
+      if (resume) {
+        resume.updatedAt = new Date(params.updatedAt).toISOString();
+      }
+    });
+    if (!createdRecord) {
+      throw new Error(`Failed to create version record for resume ${params.resumeId} in JSON fallback mode.`);
+    }
+    return createdRecord;
+  }
+
   const prisma = await getPrisma();
   const normalized = mapVersionContent(params.content);
   const createdAt = new Date(params.createdAt);
@@ -365,6 +528,33 @@ export async function patchVersionRecord(params: {
   content: any;
   updatedAt: string;
 }): Promise<VersionRecord | null> {
+  if (forceJsonFallback) {
+    let updatedRecord: VersionRecord | null = null;
+    await withDb(async (state) => {
+      const existing = state.versions.find((v) => v.id === params.versionId && v.resumeId === params.resumeId);
+      if (!existing) return;
+      const normalized = mapVersionContent(params.content);
+      existing.versionName = normalized.versionName;
+      existing.isBase = normalized.isBase;
+      existing.isAI = normalized.isAI;
+      existing.matchScore = normalized.matchScore;
+      existing.jobTitle = normalized.jobTitle;
+      existing.jobCompany = normalized.jobCompany;
+      existing.jobDescription = normalized.jobDescription;
+      existing.jobLink = normalized.jobLink;
+      existing.lastCurationInputHash = normalized.lastCurationInputHash;
+      existing.data = normalized.data;
+      existing.aiChanges = normalized.aiChanges;
+      existing.updatedAt = new Date(params.updatedAt).toISOString();
+      updatedRecord = existing;
+      const resume = state.resumes.find((r) => r.id === params.resumeId);
+      if (resume) {
+        resume.updatedAt = existing.updatedAt;
+      }
+    });
+    return updatedRecord;
+  }
+
   const prisma = await getPrisma();
   const updatedAt = new Date(params.updatedAt);
   const normalized = mapVersionContent(params.content);

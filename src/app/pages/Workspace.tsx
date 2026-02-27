@@ -6,7 +6,7 @@ import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCe
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
   Copy, GripVertical, FileText, Share2, Trash2, Menu, Minus,
-  Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
+  Paperclip, ExternalLink, AlertCircle, Info, Mic, Square, LoaderCircle,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
@@ -2434,6 +2434,7 @@ export default function Workspace() {
   const [isCurating, setIsCurating] = useState(false);
   const [isGeneratingVersion, setIsGeneratingVersion] = useState(false);
   const [isTldrLoading, setIsTldrLoading] = useState(false);
+  const [deletingVariantId, setDeletingVariantId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ visible: boolean; message: string; tone: 'success' | 'info' | 'error' }>({ visible: false, message: '', tone: 'success' });
   const [baseResumeModel, setBaseResumeModel] = useState<BaseResumeModel | null>(null);
   const [jdVariants, setJDVariants] = useState<JDVariantModel[]>([]);
@@ -2865,10 +2866,12 @@ export default function Workspace() {
   };
 
   const handleDeleteVariant = (versionId: string) => {
+    if (deletingVariantId) return;
     const target = versions.find((v) => v.id === versionId);
     if (!target || target.isBase) return;
     const confirmed = window.confirm(`Delete ${target.name}? This cannot be undone.`);
     if (!confirmed) return;
+    setDeletingVariantId(versionId);
     const fallbackSelectedId = baseVersion?.id ?? versions[0]?.id ?? '';
     const nextJDVariants = target.jdVariantId ? jdVariants.filter((item) => item.id !== target.jdVariantId) : jdVariants;
     if (resumeId) {
@@ -2881,6 +2884,9 @@ export default function Workspace() {
         })
         .catch((error) => {
           showToast(error instanceof Error ? error.message : 'Failed to delete variant');
+        })
+        .finally(() => {
+          setDeletingVariantId((current) => (current === versionId ? null : current));
         });
       return;
     }
@@ -2888,6 +2894,7 @@ export default function Workspace() {
     if (selectedVersionId === versionId) setSelectedVersionId(fallbackSelectedId);
     syncLocalStore(baseResumeModel, nextJDVariants);
     showToast('Variant deleted');
+    setDeletingVariantId((current) => (current === versionId ? null : current));
   };
   useEffect(() => {
     if (!showBaseFileModal || !effectiveResumeId) return;
@@ -3119,7 +3126,9 @@ export default function Workspace() {
                 </button>
                 {isOpen && (
                   <div className="mt-0.5 mb-1 animate-[fadeIn_150ms_ease-out]">
-                    {group.items.map(v => (
+                    {group.items.map(v => {
+                      const isDeleting = deletingVariantId === v.id;
+                      return (
                       <div key={v.id} className={`group/item w-[calc(100%-16px)] mx-2 pl-4 pr-2 py-1.5 rounded-[10px] mb-0.5 transition-colors flex items-center gap-1 ${selectedVersionId === v.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
                         <span className="w-[21px] shrink-0" />
                         <button onClick={() => handleSidebarVersionSelect(v.id)} className={`flex-1 text-left text-[13px] truncate ${selectedVersionId === v.id ? 'text-[#111] font-medium' : 'text-[#7F7F7F]'}`}>
@@ -3130,14 +3139,16 @@ export default function Workspace() {
                             e.stopPropagation();
                             handleDeleteVariant(v.id);
                           }}
-                          className="opacity-0 group-hover/item:opacity-100 text-[#B5B5B5] hover:text-[#7A7A7A] transition-opacity p-1 rounded"
-                          aria-label={`Delete ${v.name}`}
-                          title="Delete variant"
+                          disabled={isDeleting}
+                          className={`${isDeleting ? 'opacity-100 text-[#9C9C9C] cursor-wait' : 'opacity-0 group-hover/item:opacity-100 text-[#B5B5B5] hover:text-[#7A7A7A]'} transition-opacity p-1 rounded`}
+                          aria-label={isDeleting ? `Deleting ${v.name}` : `Delete ${v.name}`}
+                          title={isDeleting ? 'Deleting variant...' : 'Delete variant'}
                         >
-                          <Trash2 size={12} strokeWidth={1.8} />
+                          {isDeleting ? <LoaderCircle size={12} strokeWidth={1.8} className="animate-spin" /> : <Trash2 size={12} strokeWidth={1.8} />}
                         </button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -4,12 +4,14 @@ import { FileUp, PenLine } from 'lucide-react';
 import { motion } from 'motion/react';
 import { clearAuthStorage, createResume, uploadResumePdf, userStore } from '../../lib/api';
 
+const MAX_UPLOAD_SIZE_BYTES = 1024 * 1024;
+
 const methods = [
   {
     id: 'upload',
     icon: FileUp,
     title: 'Upload Existing CV (PDF)',
-    description: 'Upload a PDF and pre-fill the master resume editor',
+    description: 'Upload a PDF (max 1MB) and pre-fill the master resume editor',
   },
   {
     id: 'manual',
@@ -66,6 +68,12 @@ export default function MethodSelection() {
     if (!file) return;
     if (file.type !== 'application/pdf') {
       setError('Please upload a PDF file.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError('File size must be 1MB or less.');
+      event.target.value = '';
       return;
     }
 
@@ -142,7 +150,7 @@ export default function MethodSelection() {
 
         <div className="w-full max-w-lg rounded-[24px] border border-white/70 bg-white/82 p-7 shadow-[0_16px_54px_rgba(68,79,106,0.18)] backdrop-blur-sm md:p-8">
           <h1 className="text-[30px] tracking-tight text-[#151a27] mb-2">Upload your resume to get started</h1>
-          <p className="text-sm text-[#7f8798] mb-8">No account required for upload, extraction preview, editing, and export.</p>
+          <p className="text-sm text-[#7f8798] mb-8">No account required for upload, extraction preview, editing, and export. PDF uploads are limited to 1MB.</p>
 
           <div className="space-y-3">
             {methods.map((method) => {
