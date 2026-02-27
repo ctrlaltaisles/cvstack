@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
-  Copy, GripVertical, MoreHorizontal, FileText, Share2, Trash2,
+  Copy, GripVertical, FileText, Share2, Trash2,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
@@ -128,6 +128,14 @@ function appendDictatedText(existing: string, dictated: string): string {
   if (!existing.trim()) return clean;
   const needsSpacing = /[.!?]$/.test(existing.trim()) ? '\n\n' : ' ';
   return `${existing.trim()}${needsSpacing}${clean}`;
+}
+function appendUniqueDictatedText(existing: string, dictated: string): string {
+  const clean = dictated.trim();
+  if (!clean) return existing;
+  const existingNormalized = existing.trim().replace(/\s+/g, ' ').toLowerCase();
+  const cleanNormalized = clean.replace(/\s+/g, ' ').toLowerCase();
+  if (existingNormalized.endsWith(cleanNormalized)) return existing;
+  return appendDictatedText(existing, clean);
 }
 const PROJECT_NOTES_PROMPTS = [
   'What were the 2-3 biggest projects you owned in this role?',
@@ -948,17 +956,22 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
 // ─── BulletRow ───────────────────────────────────────────────────────────────
 
 function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, autoEdit, onAutoEditConsumed, isReviewLocked = false }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; isReviewLocked?: boolean }) {
-  const [rowHov, setRowHov] = useState(false); const [active, setActive] = useState(false); const [showMenu, setShowMenu] = useState(false); const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (!showMenu) return; const h = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [showMenu]);
+  const [rowHov, setRowHov] = useState(false); const [active, setActive] = useState(false);
   return (
-    <div className={`relative flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => { if (!showMenu) setRowHov(false); }}>
+    <div className={`relative flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => setRowHov(false)}>
       {!isReviewLocked && <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`absolute -left-4 top-[3px] shrink-0 cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} strokeWidth={1.8} /></div>}
       <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
       <div className="flex-1 min-w-0"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
-      {!isReviewLocked && <div className="relative shrink-0" ref={menuRef}>
-        <button onClick={() => setShowMenu(!showMenu)} className={`p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-opacity mt-0.5 ${rowHov || showMenu ? 'opacity-100' : 'opacity-0'}`}><MoreHorizontal size={13} /></button>
-        {showMenu && <div className="absolute right-0 top-6 w-28 bg-white border border-[#EBEBEB] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.08)] overflow-hidden z-50 animate-[fadeInDown_150ms_ease-out]"><button onClick={() => { onDuplicate(); setShowMenu(false); setRowHov(false); }} className="w-full text-left px-3 py-2.5 text-sm text-[#2B2B2B] hover:bg-[#F7F7F8]">Duplicate</button><div className="h-px bg-[#F0F0F0]" /><button onClick={() => { onDelete(); setShowMenu(false); }} className="w-full text-left px-3 py-2.5 text-sm text-red-500 hover:bg-red-50">Delete</button></div>}
-      </div>}
+      {!isReviewLocked && (
+        <div className={`shrink-0 flex items-center gap-0.5 mt-0.5 transition-opacity ${rowHov || active || isHighlighted ? 'opacity-100' : 'opacity-0'}`}>
+          <button onClick={onDuplicate} aria-label="Duplicate bullet" title="Duplicate bullet" className="p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-colors">
+            <Copy size={13} />
+          </button>
+          <button onClick={onDelete} aria-label="Delete bullet" title="Delete bullet" className="p-0.5 rounded text-[#CBCBCB] hover:text-red-500 transition-colors">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -986,11 +999,16 @@ function ProjectNotesEditor({ value, onChange, disabled = false }: { value: stri
   }, []);
 
   const stopDictation = useCallback(() => {
+    if (interimTranscript.trim()) {
+      const nextValue = appendUniqueDictatedText(valueRef.current, interimTranscript);
+      valueRef.current = nextValue;
+      onChange(nextValue);
+    }
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsRecording(false);
     setInterimTranscript('');
-  }, []);
+  }, [interimTranscript, onChange]);
 
   const startDictation = useCallback(() => {
     const RecognitionCtor = getSpeechRecognitionCtor();
@@ -1033,7 +1051,7 @@ function ProjectNotesEditor({ value, onChange, disabled = false }: { value: stri
       }
 
       if (finalChunk.trim()) {
-        const nextValue = appendDictatedText(valueRef.current, finalChunk);
+        const nextValue = appendUniqueDictatedText(valueRef.current, finalChunk);
         valueRef.current = nextValue;
         onChange(nextValue);
       }
@@ -1739,7 +1757,13 @@ function JDSidePanel({
   }, [isTldrLoading]);
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[440px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 animate-[slideInRight_250ms_ease-out] print-hide">
+    <motion.aside
+      initial={{ x: 42, opacity: 0, filter: 'blur(4px)' }}
+      animate={{ x: 0, opacity: 1, filter: 'blur(0px)' }}
+      exit={{ x: 30, opacity: 0, filter: 'blur(4px)' }}
+      transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+      className="absolute right-0 top-0 bottom-0 w-[440px] bg-white border-l border-[#F0F0F0] shadow-[-4px_0_24px_rgba(0,0,0,0.06)] flex flex-col z-10 print-hide"
+    >
       {/* Header */}
       <div className="px-6 py-4 border-b border-[#F0F0F0] flex items-center justify-between shrink-0">
         <div>
@@ -1865,7 +1889,7 @@ function JDSidePanel({
           <p className="text-xs text-[#CBCBCB] mt-1.5 max-w-[200px] leading-relaxed">Create a new tailored version with "+ Add new" to attach a JD</p>
         </div>
       )}
-    </div>
+    </motion.aside>
   );
 }
 
@@ -2727,26 +2751,36 @@ export default function Workspace() {
           </div>
 
           {/* JD Side Panel — slides in from right */}
-          {showJDPanel && (
-            <>
-              <button
-                aria-label="Close job description panel"
-                onClick={() => setShowJDPanel(false)}
-                className="absolute inset-0 z-[9] cursor-default"
-              />
-              <JDSidePanel
-                version={activeVersion}
-                tldr={jdTldrByVersion[activeVersion.id]}
-                isTldrLoading={isTldrLoading}
-                onClose={() => setShowJDPanel(false)}
-                onSave={handleSaveJDDetails}
-              />
-            </>
-          )}
+          <AnimatePresence>
+            {showJDPanel && (
+              <>
+                <motion.button
+                  key="jd-panel-backdrop"
+                  aria-label="Close job description panel"
+                  onClick={() => setShowJDPanel(false)}
+                  className="absolute inset-0 z-[9] cursor-default"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                />
+                <JDSidePanel
+                  version={activeVersion}
+                  tldr={jdTldrByVersion[activeVersion.id]}
+                  isTldrLoading={isTldrLoading}
+                  onClose={() => setShowJDPanel(false)}
+                  onSave={handleSaveJDDetails}
+                />
+              </>
+            )}
+          </AnimatePresence>
 
           <div
-            className={`absolute inset-0 z-30 bg-white/20 backdrop-blur-[3px] transition-all duration-400 ${isCurating ? 'opacity-100 pointer-events-auto cursor-default' : 'opacity-0 pointer-events-none'}`}
-          />
+            className={`absolute inset-0 z-30 transition-opacity duration-500 ${isCurating ? 'opacity-100 pointer-events-auto cursor-default' : 'opacity-0 pointer-events-none'}`}
+          >
+            <div className="absolute inset-0 bg-white/24 backdrop-blur-[4px]" />
+            <div className="absolute inset-0 opacity-90 bg-[radial-gradient(130%_100%_at_10%_10%,rgba(127,230,218,0.26)_0%,rgba(127,230,218,0)_55%),radial-gradient(120%_110%_at_90%_12%,rgba(159,174,255,0.24)_0%,rgba(159,174,255,0)_52%),radial-gradient(115%_100%_at_52%_92%,rgba(240,155,231,0.22)_0%,rgba(240,155,231,0)_52%)] bg-[length:170%_170%,170%_170%,170%_170%] animate-[curationBackdropDrift_8s_ease-in-out_infinite]" />
+          </div>
 
           {/* ── Floating toolbar — centered at bottom, above scroll ── */}
           <div className="absolute bottom-8 inset-x-0 flex justify-center z-40 pointer-events-none print-hide">

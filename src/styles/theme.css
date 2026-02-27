@@ -181,6 +181,18 @@
     }
   }
 
+  @keyframes curationBackdropDrift {
+    0% {
+      background-position: 0% 35%, 100% 55%, 50% 100%;
+    }
+    50% {
+      background-position: 100% 50%, 0% 40%, 52% 0%;
+    }
+    100% {
+      background-position: 0% 35%, 100% 55%, 50% 100%;
+    }
+  }
+
   @keyframes textShimmer {
     0% {
       background-position: 160% 50%;
