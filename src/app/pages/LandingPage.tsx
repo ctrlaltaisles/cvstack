@@ -50,7 +50,7 @@ export default function LandingPage() {
             onClick={() => navigate('/start')}
             className="bg-[#1A1A1A] text-white px-8 py-3 rounded-[12px] text-sm hover:bg-black transition-colors"
           >
-            Start Stacking ->
+            Start Stacking →
           </button>
           <p className="text-xs text-[#CBCBCB] mt-4">Free to try · No credit card needed</p>
         </div>
