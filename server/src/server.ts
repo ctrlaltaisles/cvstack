@@ -48,46 +48,11 @@ type CompressionResult = {
   method: 'none' | 'qpdf' | 'ghostscript';
 };
 
-const configuredCorsOrigins = String(process.env.CORS_ORIGIN ?? '')
-  .split(',')
-  .map((v) => v.trim())
-  .filter(Boolean);
-const defaultCorsOrigins = [
-  'https://cvstack.app',
-  'https://www.cvstack.app',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-];
-const allowedCorsOrigins = new Set([...defaultCorsOrigins, ...configuredCorsOrigins]);
-
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow server-side and same-origin calls with no Origin header.
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-
-    if (allowedCorsOrigins.has(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    // Allow production subdomains like preview environments.
-    try {
-      const parsed = new URL(origin);
-      if (parsed.protocol === 'https:' && parsed.hostname.endsWith('.cvstack.app')) {
-        callback(null, true);
-        return;
-      }
-    } catch {
-      // Invalid origin string: fall through to deny.
-    }
-
-    callback(null, false);
-  },
+  origin: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'apikey', 'x-client-info', 'X-CVStack-Guest-Id'],
+  optionsSuccessStatus: 200,
 }));
 app.use(express.json({ limit: '5mb' }));
 
