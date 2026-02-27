@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { AuthGateProvider } from './components/AuthGate';
-import { consumeSupabaseAccessTokenFromUrl, loginWithSupabaseAccessToken, tokenStore, userStore, verifySupabaseTokenHash } from '../lib/api';
+import { consumeSupabaseAccessTokenFromUrl, loginWithSupabaseAccessToken, resolvePostLoginPath, tokenStore, userStore, verifySupabaseTokenHash } from '../lib/api';
 
 export default function App() {
   useEffect(() => {
@@ -29,9 +29,13 @@ export default function App() {
         if (!result) return;
         tokenStore.set(result.token);
         userStore.set(result.user);
+        return resolvePostLoginPath();
+      })
+      .then((destination) => {
+        if (!destination) return;
         window.history.replaceState(null, '', window.location.pathname);
-        if (window.location.pathname !== '/start') {
-          window.location.replace('/start');
+        if (window.location.pathname + window.location.search !== destination) {
+          window.location.replace(destination);
         }
       })
       .catch(() => {

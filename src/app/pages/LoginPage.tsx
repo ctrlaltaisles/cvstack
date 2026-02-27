@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router';
 import AuthModal from '../components/AuthModal';
+import { resolvePostLoginPath } from '../../lib/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -9,7 +10,9 @@ export default function LoginPage() {
       <AuthModal
         open
         onClose={() => navigate('/')}
-        onSuccess={() => navigate('/start')}
+        onSuccess={() => {
+          void resolvePostLoginPath().then((destination) => navigate(destination));
+        }}
       />
     </div>
   );

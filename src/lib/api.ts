@@ -427,3 +427,15 @@ export function createResumeShareLink(resumeId: string, versionId: string) {
 export function getSharedResume(token: string) {
   return request<SharedResumeResponse>(`/api/public/resume/${encodeURIComponent(token)}`);
 }
+
+export async function resolvePostLoginPath(): Promise<string> {
+  try {
+    const { resumes } = await listResumes();
+    if (resumes.length > 0) {
+      return `/workspace?resumeId=${resumes[0].id}`;
+    }
+  } catch {
+    // Ignore and fallback.
+  }
+  return '/start';
+}
