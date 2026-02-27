@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { defaultResumeData } from '../defaults';
 import type { ResumeData } from '../types';
+import { extractTextFromPdfBuffer, isExtractionFailure } from '../parser';
 
 const execFileAsync = promisify(execFile);
 
@@ -565,6 +566,37 @@ for pageIndex in 0..<doc.pageCount {
   }
 }
 
+function extractLinesFromPlainText(text: string): ExtractedLine[] {
+  const cleaned = String(text ?? '').replace(/\r/g, '\n');
+  if (!cleaned.trim()) return [];
+
+  const lines: ExtractedLine[] = [];
+  const rawLines = cleaned.split('\n').map((line) => cleanLineText(line)).filter(Boolean);
+  let page = 1;
+  let lineIdx = 0;
+
+  for (const textLine of rawLines) {
+    // Keep synthetic layout stable enough for downstream section heuristics.
+    const y = 1000 - (lineIdx * 14);
+    lines.push({
+      page,
+      x0: 40,
+      y0: y,
+      x1: 560,
+      y1: y + 12,
+      fontSize: 12,
+      text: textLine,
+    });
+    lineIdx += 1;
+    if (lineIdx > 65) {
+      page += 1;
+      lineIdx = 0;
+    }
+  }
+
+  return lines;
+}
+
 export async function extractLayoutAwareLines(buffer: Buffer): Promise<ExtractedLine[]> {
   const isLowQuality = (lines: ExtractedLine[]) => {
     if (lines.length === 0) return true;
@@ -591,6 +623,18 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
     if (fromPdfJs.length > 0 && !isLowQuality(fromPdfJs)) return fromPdfJs;
   } catch {
     // fallback below
+  }
+
+  // Cross-platform text extraction fallback (especially useful in Linux prod
+  // where native PDFKit is unavailable).
+  try {
+    const extracted = await extractTextFromPdfBuffer(buffer);
+    if (extracted.text && !isExtractionFailure(extracted.text)) {
+      const fromPlainText = extractLinesFromPlainText(extracted.text);
+      if (fromPlainText.length > 0 && !isLowQuality(fromPlainText)) return fromPlainText;
+    }
+  } catch {
+    // final fallback below
   }
 
   return [];
