@@ -81,6 +81,12 @@ export interface CurateResumeOutput {
   changes: ElevateChange[];
   ats: ElevateATS;
   questions: string[];
+  evidenceQuotes?: Array<{
+    expId: string;
+    bulletIdx: number;
+    quote: string;
+    source: 'projectNotes' | 'legacyBullets';
+  }>;
   quality: ElevateQuality;
   meta?: {
     providerStatus: 'ok' | 'fallback';
@@ -310,6 +316,36 @@ function wordCount(text: string): number {
   const trimmed = String(text ?? '').trim();
   if (!trimmed) return 0;
   return trimmed.split(/\s+/).length;
+}
+
+function splitSentences(text: string): string[] {
+  return String(text ?? '')
+    .split(/[\n.!?]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 10);
+}
+
+function normalizeWords(text: string): string[] {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
+function hasNGramOverlap(a: string, b: string, n = 7): boolean {
+  const aWords = normalizeWords(a);
+  const bWords = normalizeWords(b);
+  if (aWords.length < n || bWords.length < n) return false;
+  const bGrams = new Set<string>();
+  for (let i = 0; i <= bWords.length - n; i += 1) {
+    bGrams.add(bWords.slice(i, i + n).join(' '));
+  }
+  for (let i = 0; i <= aWords.length - n; i += 1) {
+    if (bGrams.has(aWords.slice(i, i + n).join(' '))) return true;
+  }
+  return false;
 }
 
 function buildProjectNotesSignalMap(resumeData: ResumeData): Map<string, string[]> {
@@ -764,7 +800,9 @@ export function validateElevateSchema(payload: unknown): { valid: boolean; error
     if (!Array.isArray(ats.keywordsAdded)) errors.push('ats.keywordsAdded must be an array');
     if (!Array.isArray(ats.keywordsMissing)) errors.push('ats.keywordsMissing must be an array');
   }
-  if (!Array.isArray(raw.questions)) errors.push('Missing questions array');
+  if (!Array.isArray(raw.questions) && !Array.isArray(raw.missing_info_questions)) {
+    errors.push('Missing questions array (or missing_info_questions array)');
+  }
   return { valid: errors.length === 0, errors };
 }
 
@@ -867,7 +905,17 @@ function sanitizeElevateOutput(
       keywordsAdded,
       keywordsMissing: asStringArray(atsRaw.keywordsMissing),
     },
-    questions: asStringArray(raw.questions).slice(0, 5),
+    questions: asStringArray(raw.questions).concat(asStringArray(raw.missing_info_questions)).slice(0, 5),
+    evidenceQuotes: Array.isArray(raw.evidence_quotes)
+      ? (raw.evidence_quotes as Array<Record<string, unknown>>)
+        .map((row) => ({
+          expId: String(row.expId ?? '').trim(),
+          bulletIdx: Number(row.bulletIdx ?? -1),
+          quote: String(row.quote ?? '').trim(),
+          source: (String(row.source ?? 'projectNotes').trim() === 'legacyBullets' ? 'legacyBullets' : 'projectNotes') as 'projectNotes' | 'legacyBullets',
+        }))
+        .filter((row) => row.expId && Number.isFinite(row.bulletIdx) && row.bulletIdx >= 0 && row.quote)
+      : [],
     quality: {
       similarityScore: round2(Number(qualityRaw.similarityScore ?? 0)),
       impactScore: round2(Number(qualityRaw.impactScore ?? 0)),
@@ -1001,6 +1049,79 @@ export function detectMetricHallucination(beforeAfterPairs: Array<{ before: stri
   return { suspicious: details.length > 0, details };
 }
 
+function hasPlaceholderPattern(text: string): boolean {
+  return /\[[^\]]*(x|tbd|na|n\/a|l)\s*%?[^\]]*]/i.test(text) || /\b(x|tbd)\s*%/i.test(text);
+}
+
+function evaluateGroundingViolations(
+  resumeData: ResumeData,
+  improved: CurateResumeOutput['improved'],
+  jdText: string,
+  evidenceQuotes?: CurateResumeOutput['evidenceQuotes'],
+): { suspicious: boolean; details: string[] } {
+  const details: string[] = [];
+  const jdTokens = new Set(tokenize(jdText).filter((t) => t.length >= 4));
+  const jdSentences = splitSentences(jdText);
+  const skillsText = (resumeData.skills ?? []).join(' ');
+  const globalSourceText = [resumeData.bio, skillsText].filter(Boolean).join(' ');
+
+  for (const exp of improved.experience) {
+    const original = resumeData.workExperience.find((item) => item.id === exp.expId);
+    const sourceText = [
+      original?.role ?? '',
+      original?.company ?? '',
+      original?.projectNotes ?? '',
+      ...(original?.bullets ?? []),
+      globalSourceText,
+    ].join(' ');
+    const sourceTokens = new Set(tokenize(sourceText).filter((t) => t.length >= 3));
+    const sourceSentences = splitSentences(sourceText);
+
+    for (const bullet of exp.bullets) {
+      const b = bullet.trim();
+      if (!b) continue;
+      if (hasPlaceholderPattern(b)) {
+        details.push(`Unsupported placeholder pattern in bullet: "${b.slice(0, 90)}..."`);
+        continue;
+      }
+
+      const bulletTokens = tokenize(b).filter((t) => t.length >= 3);
+      const jdHits = bulletTokens.filter((t) => jdTokens.has(t)).length;
+      const sourceHits = bulletTokens.filter((t) => sourceTokens.has(t)).length;
+      const maxJdSim = jdSentences.length > 0 ? Math.max(...jdSentences.map((s) => lexicalSimilarity(s, b))) : 0;
+      const maxSourceSim = sourceSentences.length > 0 ? Math.max(...sourceSentences.map((s) => lexicalSimilarity(s, b))) : 0;
+
+      const jdLeak = jdHits >= 4 && sourceHits < 3;
+      const jdCopy = maxJdSim >= 0.72 && maxSourceSim < 0.45;
+      const jdNgramCopy = hasNGramOverlap(b, jdText, 7);
+      if (jdLeak || jdCopy || jdNgramCopy) {
+        details.push(`Likely JD-anchored unsupported bullet: "${b.slice(0, 90)}..."`);
+      }
+    }
+  }
+
+  const quoteList = evidenceQuotes ?? [];
+  for (const exp of improved.experience) {
+    const original = resumeData.workExperience.find((item) => item.id === exp.expId);
+    const sourceText = `${original?.projectNotes ?? ''}\n${(original?.bullets ?? []).join('\n')}`.toLowerCase();
+    for (let idx = 0; idx < exp.bullets.length; idx += 1) {
+      const bullet = exp.bullets[idx]?.trim();
+      if (!bullet) continue;
+      const quotesForBullet = quoteList.filter((q) => q.expId === exp.expId && q.bulletIdx === idx && q.quote.trim());
+      if (quotesForBullet.length === 0) {
+        details.push(`Missing evidence quote for expId=${exp.expId} bulletIdx=${idx}.`);
+        continue;
+      }
+      const hasGroundedQuote = quotesForBullet.some((q) => sourceText.includes(q.quote.trim().toLowerCase()));
+      if (!hasGroundedQuote) {
+        details.push(`Evidence quote not grounded in source for expId=${exp.expId} bulletIdx=${idx}.`);
+      }
+    }
+  }
+
+  return { suspicious: details.length > 0, details: details.slice(0, 8) };
+}
+
 export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRole?: string; jdText?: string }, output: CurateResumeOutput): ElevateQuality {
   const beforeAfterPairs: Array<{ before: string; after: string }> = [];
   if (output.improved.about && output.improved.about.trim() !== input.resumeData.bio.trim()) {
@@ -1043,8 +1164,9 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   const mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
   const notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
   const notesLiftPass = !notesDrivenLift.hasEligibleRoles || notesDrivenLift.deficits.length === 0;
+  const grounding = evaluateGroundingViolations(input.resumeData, output.improved, input.jdText ?? '', output.evidenceQuotes);
 
-  const passed = !lowValue.lowValue && !hallucination.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky && notesLiftPass;
+  const passed = !lowValue.lowValue && !hallucination.suspicious && !grounding.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && !mirrorRisk.risky && notesLiftPass;
   const notes = [
     lowValue.notes,
     hallucination.suspicious ? hallucination.details.join(' | ') : 'No fabricated metric pattern detected.',
@@ -1059,6 +1181,7 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
     notesDrivenLift.hasEligibleRoles
       ? `Notes-driven new-bullet lift=${notesDrivenLift.passedRoles}/${notesDrivenLift.totalEligibleRoles} eligible roles met >=2 new bullets.`
       : 'No >=100-word project notes roles requiring forced new-bullet lift.',
+    grounding.suspicious ? `Grounding violations detected: ${grounding.details.join(' | ')}` : 'No JD-leakage grounding violations detected.',
   ].join(' ');
 
   return {
@@ -1341,6 +1464,10 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'Project-notes-first rebuild: for roles with notes, start from a blank bullet canvas and reconstruct the narrative from notes before checking legacy bullets for factual consistency.',
     ],
     editing_rules: [
+      'The JD is a prioritization filter, not evidence. You may only write bullets supported by resume bullets or projectNotes.',
+      'For each bullet, provide exact supporting phrases under evidence_quotes.',
+      'If evidence is missing, put it under missing_info_questions instead of fabricating.',
+      'Do not copy the JD. No more than 6 consecutive words may match the JD.',
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
       'Keep each role to 3-5 bullets in most cases (up to 6 only when truly necessary) and prioritize strongest evidence.',
       'For removals, use empty string in improved bullets at that index.',
@@ -1350,6 +1477,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'Do not overfit to the current job title if projectNotes show additional credible capabilities useful for the target role.',
       'Do not preserve original bullet structure if it obscures higher-order capability.',
       'If projectNotes for a role are >= 100 words, produce at least 2 new bullets that are not near-paraphrases of legacy bullets.',
+      'Never copy, paraphrase, or mirror JD-only responsibilities unless directly grounded in resume/projectNotes evidence for that role.',
+      'Never output placeholder metrics or bracket placeholders (e.g., [X%], [L%], [TBD]).',
     ],
     resumeData: compactResumeData,
     output_schema: {
@@ -1365,6 +1494,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         keywordsMissing: 'string[]',
       },
       questions: 'string[] max 5, only critical missing info (metrics/tools/scope/ownership)',
+      missing_info_questions: 'string[] max 5 when evidence is insufficient',
       changeSummary: 'string[]',
       redFlags: 'string[]',
       aboutPointers: 'string[]',
@@ -1378,6 +1508,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         evidence: 'string[] max 4',
       },
       suggestions: [{ field: 'bio|bullet', expId: 'string when bullet', bulletIdx: 'number when bullet', suggested: 'string', reason: 'string with recruiter heuristic' }],
+      evidence_quotes: [{ expId: 'string', bulletIdx: 'number', quote: 'exact phrase from projectNotes or legacy bullets', source: 'projectNotes|legacyBullets' }],
     },
   };
 
@@ -1397,11 +1528,13 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     let strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
     let mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
     let notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
+    let grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText, output.evidenceQuotes);
     const requiresProjectNotesRescue = projectNotesCoverage.hasSignals
       && (projectNotesCoverage.coverageRatio < 0.65 || projectNotesCoverage.newSignalRatio < 0.25);
     const requiresStrategicThemeRescue = strategicThemeCoverage.hasThemes && strategicThemeCoverage.coverageRatio < 0.6;
     const requiresNarrativeRestructureRescue = mirrorRisk.risky;
     const requiresNotesDrivenLiftRescue = notesDrivenLift.hasEligibleRoles && notesDrivenLift.deficits.length > 0;
+    const requiresGroundingRescue = grounding.suspicious;
     if (requiresProjectNotesRescue) {
       output.redFlags = [
         ...new Set([
@@ -1434,9 +1567,17 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         ]),
       ];
     }
+    if (requiresGroundingRescue) {
+      output.redFlags = [
+        ...new Set([
+          ...output.redFlags,
+          `Grounding rescue triggered: ${grounding.details.join(' | ')}`,
+        ]),
+      ];
+    }
 
-    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue);
-    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue) && shouldRunSecondPass) {
+    const shouldRunSecondPass = (!quality.passed || quality.similarityScore >= 0.86 || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue);
+    if ((CURATE_SECOND_PASS_ENABLED || requiresProjectNotesRescue || requiresStrategicThemeRescue || requiresNarrativeRestructureRescue || requiresNotesDrivenLiftRescue || requiresGroundingRescue) && shouldRunSecondPass) {
       const elapsedBeforeSecondPass = Date.now() - started;
       const remainingBudget = CURATE_TIMEOUT_MS - elapsedBeforeSecondPass;
       if (remainingBudget >= SECOND_PASS_MIN_REMAINING_MS) {
@@ -1465,6 +1606,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
             strategicThemeCoverage,
             mirrorRisk,
             notesDrivenLift,
+            groundingViolations: grounding,
             missingSignalsToRecover: missingSignalList,
             missingStrategicThemesToRecover: missingStrategicThemes,
             minNewBulletsForLongNotes: notesDrivenLift.deficits.map((row) => ({
@@ -1474,7 +1616,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
               required: row.requiredNewBullets,
               detected: row.detectedNewBullets,
             })),
-            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, structure must avoid one-to-one category mirroring, and every role with >=100-word projectNotes must contain at least 2 genuinely new bullets.',
+            enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, structure must avoid one-to-one category mirroring, every role with >=100-word projectNotes must contain at least 2 genuinely new bullets, no bullet may contain JD-only unsupported claims or placeholders, every bullet must include grounded evidence_quotes, and no bullet may share more than 6 consecutive words with the JD.',
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
           output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
@@ -1487,6 +1629,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           strategicThemeCoverage = evaluateStrategicThemeCoverage(input.resumeData, output.improved);
           mirrorRisk = detectCategoryMirrorRisk(input.resumeData, output.improved);
           notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
+          grounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText, output.evidenceQuotes);
           output.redFlags = [...new Set([...output.redFlags, 'Second pass guardrail applied for low-value rephrase risk.'])];
         } catch (secondPassError) {
           const elapsedSecondPassMs = Date.now() - started;
@@ -1525,6 +1668,11 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         ? 'Need more details; ask user for metrics, scope, tooling, and ownership signals.'
         : 'Need more details from existing resume content; add concrete ownership, scope, tools, and measurable outcomes to unlock stronger base curation.';
       return buildFallbackCurateOutput(input, reason, companyContext);
+    }
+
+    const finalGrounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText, output.evidenceQuotes);
+    if (finalGrounding.suspicious) {
+      return buildFallbackCurateOutput(input, `Grounding guardrail blocked unsupported JD-derived content: ${finalGrounding.details.join(' | ')}`, companyContext);
     }
 
     const elapsedMs = Date.now() - started;

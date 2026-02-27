@@ -62,6 +62,9 @@ function normalizePastedText(value: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
+function stripLeadingListMarker(value: string): string {
+  return value.replace(/^\s*(?:(?:[•◦▪‣◉●○◆◇■□►▸▹▫-]|\d+[.)])\s*)+/u, '').trimStart();
+}
 function scorePastedText(value: string): number {
   const bulletMatches = value.match(/(^|\n)\s*[•◦▪‣◉●○◆◇■□►▸▹▫-]\s+/g)?.length ?? 0;
   const numberedMatches = value.match(/(^|\n)\s*\d+[.)]\s+/g)?.length ?? 0;
@@ -86,17 +89,25 @@ function serializeClipboardNode(node: Node): string {
   if (tag === 'ul') {
     return Array.from(element.children)
       .filter((child) => child.tagName.toLowerCase() === 'li')
-      .map((child) => `• ${serializeClipboardNode(child).trim()}`)
+      .map((child) => {
+        const content = stripLeadingListMarker(serializeClipboardNode(child).trim());
+        return content ? `• ${content}` : '';
+      })
+      .filter(Boolean)
       .join('\n');
   }
   if (tag === 'ol') {
     return Array.from(element.children)
       .filter((child) => child.tagName.toLowerCase() === 'li')
-      .map((child, index) => `${index + 1}. ${serializeClipboardNode(child).trim()}`)
+      .map((child, index) => {
+        const content = stripLeadingListMarker(serializeClipboardNode(child).trim());
+        return content ? `${index + 1}. ${content}` : '';
+      })
+      .filter(Boolean)
       .join('\n');
   }
   if (tag === 'li' || element.getAttribute('role') === 'listitem') {
-    return `• ${Array.from(element.childNodes).map(serializeClipboardNode).join('').trim()}\n`;
+    return `${stripLeadingListMarker(Array.from(element.childNodes).map(serializeClipboardNode).join('').trim())}\n`;
   }
   const childrenText = Array.from(element.childNodes).map(serializeClipboardNode).join('');
   if (['p', 'div', 'section', 'article', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
