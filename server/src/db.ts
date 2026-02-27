@@ -44,6 +44,7 @@ export interface VersionRecord {
   jobCompany: string;
   jobDescription: string;
   jobLink: string;
+  lastCurationInputHash: string;
   data: ResumeData;
   aiChanges: unknown[];
   createdAt: string;
@@ -90,6 +91,7 @@ function versionFromContent(resumeId: string, id: string, createdAt: Date, updat
     jobCompany: String(content?.jobCompany ?? ''),
     jobDescription: String(content?.jobDescription ?? ''),
     jobLink: String(content?.jobLink ?? ''),
+    lastCurationInputHash: String(content?.lastCurationInputHash ?? ''),
     data: (content?.data ?? {}) as ResumeData,
     aiChanges: (content?.aiChanges ?? []) as unknown[],
     createdAt: createdAt.toISOString(),
@@ -258,6 +260,7 @@ export async function writeDb(state: DbState): Promise<void> {
               jobCompany: version.jobCompany,
               jobDescription: version.jobDescription,
               jobLink: version.jobLink,
+              lastCurationInputHash: version.lastCurationInputHash,
               data: version.data,
               aiChanges: version.aiChanges,
             },
@@ -309,6 +312,7 @@ function mapVersionContent(content: any) {
     jobCompany: String(content?.jobCompany ?? ''),
     jobDescription: String(content?.jobDescription ?? ''),
     jobLink: String(content?.jobLink ?? ''),
+    lastCurationInputHash: String(content?.lastCurationInputHash ?? ''),
     data: (content?.data ?? {}) as ResumeData,
     aiChanges: (content?.aiChanges ?? []) as unknown[],
   };

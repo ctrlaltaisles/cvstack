@@ -60,6 +60,7 @@ async function run() {
     jobCompany: '',
     jobDescription: '',
     jobLink: '',
+    lastCurationInputHash: '',
     data,
     aiChanges: [],
     createdAt: now,

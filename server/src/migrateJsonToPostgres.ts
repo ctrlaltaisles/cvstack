@@ -19,7 +19,7 @@ async function main() {
     users: Array<{ id: string; email: string; passwordHash: string; createdAt: string }>;
     profiles: Array<{ userId: string; fullName: string; headline: string; summary: string; contactEmail: string; phone: string; location: string; linkedin: string; website: string; updatedAt: string }>;
     resumes: Array<{ id: string; userId: string; title: string; source: 'manual' | 'upload' | 'linkedin'; filePath: string; fileName: string; extractedText: string; parsed: unknown; createdAt: string; updatedAt: string }>;
-    versions: Array<{ id: string; resumeId: string; versionName: string; isBase: boolean; isAI: boolean; matchScore: number | null; jobTitle: string; jobCompany: string; jobDescription: string; jobLink: string; data: unknown; aiChanges: unknown[]; createdAt: string; updatedAt: string }>;
+    versions: Array<{ id: string; resumeId: string; versionName: string; isBase: boolean; isAI: boolean; matchScore: number | null; jobTitle: string; jobCompany: string; jobDescription: string; jobLink: string; lastCurationInputHash?: string; data: unknown; aiChanges: unknown[]; createdAt: string; updatedAt: string }>;
   };
 
   let usersInserted = 0;
@@ -147,6 +147,7 @@ async function main() {
             jobCompany: v.jobCompany,
             jobDescription: v.jobDescription,
             jobLink: v.jobLink,
+            lastCurationInputHash: v.lastCurationInputHash ?? '',
             data: v.data,
             aiChanges: v.aiChanges,
           },
@@ -166,6 +167,7 @@ async function main() {
             jobCompany: v.jobCompany,
             jobDescription: v.jobDescription,
             jobLink: v.jobLink,
+            lastCurationInputHash: v.lastCurationInputHash ?? '',
             data: v.data,
             aiChanges: v.aiChanges,
           },

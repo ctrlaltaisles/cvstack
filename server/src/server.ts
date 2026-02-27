@@ -563,6 +563,7 @@ async function createResumeWithBaseVersion(params: {
     jobCompany: '',
     jobDescription: '',
     jobLink: '',
+    lastCurationInputHash: '',
     data: params.data,
     aiChanges: [],
     createdAt: now,
@@ -788,6 +789,7 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
     if (baseVersion) {
       baseVersion.data = parsed.data;
       baseVersion.aiChanges = [];
+      baseVersion.lastCurationInputHash = '';
       baseVersion.updatedAt = now;
       updatedBaseVersion = baseVersion;
     }
@@ -863,6 +865,7 @@ function versionToDto(v: VersionRecord): ResumeVersionDTO {
     jobCompany: v.jobCompany || undefined,
     jobDescription: v.jobDescription || undefined,
     jobLink: v.jobLink || undefined,
+    lastCurationInputHash: v.lastCurationInputHash || undefined,
     data: v.data,
     aiChanges: v.aiChanges as any,
   };
@@ -958,6 +961,7 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
     jobCompany: input.jobCompany ?? '',
     jobDescription: input.jobDescription ?? '',
     jobLink: input.jobLink ?? '',
+    lastCurationInputHash: input.lastCurationInputHash ?? '',
     data: (input.data as ResumeData) ?? defaultResumeData(),
     aiChanges: input.aiChanges ?? [],
     createdAt: now,
@@ -976,6 +980,7 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
       jobCompany: version.jobCompany,
       jobDescription: version.jobDescription,
       jobLink: version.jobLink,
+      lastCurationInputHash: version.lastCurationInputHash,
       data: version.data,
       aiChanges: version.aiChanges,
     },
@@ -1016,6 +1021,7 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
       jobCompany: input.jobCompany ?? existing.jobCompany,
       jobDescription: input.jobDescription ?? existing.jobDescription,
       jobLink: input.jobLink ?? existing.jobLink,
+      lastCurationInputHash: input.lastCurationInputHash ?? existing.lastCurationInputHash,
       data: (input.data as ResumeData) ?? existing.data,
       aiChanges: input.aiChanges ?? existing.aiChanges,
     },

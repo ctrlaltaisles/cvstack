@@ -553,7 +553,12 @@ function applyChange(change: AIChange, d: ResumeData): ResumeData {
   }
   return d;
 }
-function buildPendingAIChangesFromCuration(version: ResumeVersion, result: Awaited<ReturnType<typeof curateResume>>, seed = Date.now()): AIChange[] {
+function buildPendingAIChangesFromCuration(
+  version: ResumeVersion,
+  result: Awaited<ReturnType<typeof curateResume>>,
+  seed = Date.now(),
+  options: { includePreviouslyAccepted?: boolean } = {},
+): AIChange[] {
   const nextChanges: AIChange[] = [];
   let hasBioSuggestion = false;
 
@@ -579,7 +584,7 @@ function buildPendingAIChangesFromCuration(version: ResumeVersion, result: Await
     const currentBulletText = bullet ?? '';
     if (bullet === undefined && !suggested) continue;
     if (bullet !== undefined && suggested === bullet.trim()) continue;
-    if (isAcceptedAiBulletUnchanged(version, suggestion.expId, suggestion.bulletIdx, currentBulletText)) continue;
+    if (!options.includePreviouslyAccepted && isAcceptedAiBulletUnchanged(version, suggestion.expId, suggestion.bulletIdx, currentBulletText)) continue;
     nextChanges.push({
       id: `c-ai-bullet-${seed}-${idx}`,
       field: 'bullet',
@@ -652,6 +657,34 @@ function hasCuratableBullets(version: ResumeVersion): boolean {
     }
   }
   return false;
+}
+
+function buildCurationInputHash(version: ResumeVersion): string {
+  const normalize = (value?: string) => (value ?? '').trim().replace(/\s+/g, ' ');
+  const hashSource = {
+    role: normalize(version.jobTitle || version.data.title),
+    company: normalize(version.jobCompany),
+    jd: normalize(version.jobDescription),
+    link: normalize(version.jobLink),
+    bio: normalize(version.data.bio),
+    workExperience: (version.data.workExperience ?? []).map((exp) => ({
+      id: exp.id,
+      role: normalize(exp.role),
+      company: normalize(exp.company),
+      bullets: (exp.bullets ?? []).map((bullet) => normalize(bullet)),
+      projectNotes: normalize(exp.projectNotes),
+    })),
+    skills: (version.data.skills ?? []).map((skill) => normalize(skill)),
+  };
+  return JSON.stringify(hashSource);
+}
+
+function hasNewCurationContext(version: ResumeVersion): boolean {
+  return version.lastCurationInputHash !== buildCurationInputHash(version);
+}
+
+function markVersionCurated(version: ResumeVersion): ResumeVersion {
+  return { ...version, lastCurationInputHash: buildCurationInputHash(version) };
 }
 
 function mergeAIChangesWithoutRepeats(existing: AIChange[], incoming: AIChange[]): AIChange[] {
@@ -2247,6 +2280,7 @@ export default function Workspace() {
     baseResumeId: version.baseResumeId,
     jdVariantId: version.jdVariantId,
     variantContent: version.variantContent,
+    lastCurationInputHash: version.lastCurationInputHash,
     data: version.data,
     aiChanges: version.aiChanges,
   });
@@ -2359,7 +2393,8 @@ export default function Workspace() {
 
         let finalVersion = nextVersion;
         try {
-          if (!hasCuratableBullets(nextVersion)) {
+          const includePreviouslyAccepted = hasNewCurationContext(nextVersion);
+          if (!includePreviouslyAccepted && !hasCuratableBullets(nextVersion)) {
             showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
           } else {
             const curation = await curateResume({
@@ -2376,7 +2411,7 @@ export default function Workspace() {
                 setShowJDPanel(true);
               }
             } else {
-              const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now());
+              const changes = buildPendingAIChangesFromCuration(nextVersion, curation, Date.now(), { includePreviouslyAccepted });
               if (changes.length > 0) {
                 const curatedData = applyAllChanges(nextVersion.data, changes);
                 finalVersion = {
@@ -2386,7 +2421,11 @@ export default function Workspace() {
                   aiChanges: [],
                 };
               } else {
+                finalVersion = markVersionCurated(nextVersion);
                 showToast(getCurationNoChangeMessage(curation), 'info');
+              }
+              if (changes.length > 0) {
+                finalVersion = markVersionCurated(finalVersion);
               }
             }
           }
@@ -2424,7 +2463,8 @@ export default function Workspace() {
     }
     setIsCurating(true);
     try {
-      if (!hasCuratableBullets(snapshot)) {
+      const includePreviouslyAccepted = hasNewCurationContext(snapshot);
+      if (!includePreviouslyAccepted && !hasCuratableBullets(snapshot)) {
         showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
         return;
       }
@@ -2443,14 +2483,26 @@ export default function Workspace() {
         }
         return;
       }
-      const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now());
+      const curatedSnapshot = markVersionCurated(snapshot);
+      const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now(), { includePreviouslyAccepted });
+      if (nextChanges.length === 0) {
+        setVersions((prev) => prev.map((v) => (
+          v.id === versionId
+            ? { ...v, lastCurationInputHash: curatedSnapshot.lastCurationInputHash }
+            : v
+        )));
+      }
       if (nextChanges.length === 0) {
         showToast(getCurationNoChangeMessage(result), 'info');
         return;
       }
       setVersions((prev) => prev.map((v) => (
         v.id === versionId
-          ? { ...v, aiChanges: mergeAIChangesWithoutRepeats(v.aiChanges ?? [], nextChanges) }
+          ? {
+            ...v,
+            aiChanges: mergeAIChangesWithoutRepeats(v.aiChanges ?? [], nextChanges),
+            lastCurationInputHash: curatedSnapshot.lastCurationInputHash,
+          }
           : v
       )));
       showToast(`${nextChanges.length} curation suggestion${nextChanges.length === 1 ? '' : 's'} ready to review.`);

@@ -8,4 +8,4 @@ export interface ContactInfo { email: string; phone: string; location: string; w
 export interface ResumeData { name: string; title: string; contact: ContactInfo; bio: string; workExperience: WorkExperience[]; education: EducationEntry[]; certifications: Certification[]; skills: string[]; }
 export interface BaseResumeModel { id: string; content: string; updatedAt: string; }
 export interface JDVariantModel { id: string; baseResumeId: string; title: string; jdText: string; variantContent: string; createdAt: string; }
-export interface ResumeVersion { id: string; name: string; isAI: boolean; isBase?: boolean; matchScore?: number; jobTitle?: string; jobCompany?: string; jobDescription?: string; jobLink?: string; baseResumeId?: string; jdVariantId?: string; variantContent?: string; data: ResumeData; aiChanges: AIChange[]; }
+export interface ResumeVersion { id: string; name: string; isAI: boolean; isBase?: boolean; matchScore?: number; jobTitle?: string; jobCompany?: string; jobDescription?: string; jobLink?: string; baseResumeId?: string; jdVariantId?: string; variantContent?: string; lastCurationInputHash?: string; data: ResumeData; aiChanges: AIChange[]; }
