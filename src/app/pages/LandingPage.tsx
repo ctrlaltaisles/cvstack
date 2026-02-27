@@ -27,30 +27,18 @@ export default function LandingPage() {
       {/* Hero */}
       <div className="flex-1 min-h-0 flex items-center justify-center px-8 py-10">
         <div className="text-center max-w-xl">
-          <p className="text-xs uppercase tracking-widest text-[#CBCBCB] mb-6 leading-relaxed">
-            <span className="sm:hidden">
-              BUILD.<br />STACK.<br />STORE.
-            </span>
-            <span className="hidden sm:inline">BUILD. STACK. STORE.</span>
-          </p>
+          <p className="text-xs uppercase tracking-widest text-[#CBCBCB] mb-6">AI-powered resume platform</p>
           <h1 className="text-[40px] tracking-tight text-[#1A1A1A] mb-4 leading-[1.15]">
             Your Resume.<br />Leveled Up.
           </h1>
           <p className="text-base text-[#6B6B6B] mb-10 leading-relaxed">
-            <span className="sm:hidden">
-              Stop rewriting. Start stacking.<br />
-              Tailor your resume intentionally<br />
-              with AI-powered suggestions.
-            </span>
-            <span className="hidden sm:inline">
-              Stop rewriting. Start stacking. Tailor your resume intentionally with AI-powered suggestions.
-            </span>
+            Stop rewriting. Start stacking. Tailor your resume to any job<br />in seconds with AI-powered suggestions.
           </p>
           <button
             onClick={() => navigate('/start')}
             className="bg-[#1A1A1A] text-white px-8 py-3 rounded-[12px] text-sm hover:bg-black transition-colors"
           >
-            Start Stacking ->
+            Start Building →
           </button>
           <p className="text-xs text-[#CBCBCB] mt-4">Free to try · No credit card needed</p>
         </div>
