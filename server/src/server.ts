@@ -1106,6 +1106,18 @@ app.post('/api/dev/seed', async (req, res) => {
   res.json({ ok: true, credentials: { email, password }, created });
 });
 
+app.use((error: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = Number(error?.statusCode ?? error?.status ?? 500);
+  const requestId = makeId('err');
+  const detail = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+  console.error(`[api-error][${requestId}] ${req.method} ${req.originalUrl} status=${status} detail="${detail}"`);
+  res.status(Number.isFinite(status) && status >= 400 ? status : 500).json({
+    error: status >= 500 ? 'Internal server error' : detail,
+    detail,
+    requestId,
+  });
+});
+
 async function bootstrap() {
   await initDb();
   startUploadCleanupScheduler();
@@ -1114,4 +1126,8 @@ async function bootstrap() {
   });
 }
 
-void bootstrap();
+void bootstrap().catch((error) => {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`[bootstrap] failed: ${detail}`);
+  process.exit(1);
+});

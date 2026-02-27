@@ -92,11 +92,16 @@ function shouldUseJsonFallback(error: unknown) {
   return (
     code === 'P1001'
     || code === 'P1012'
+    || code === 'P2021'
+    || code === 'P2022'
     || message.includes('prisma client not available')
     || message.includes('environment variable not found: database_url')
     || message.includes("can't reach database server")
     || message.includes('unable to connect to database')
     || message.includes('connection refused')
+    || message.includes('does not exist in the current database')
+    || message.includes('table')
+    || message.includes('relation')
   );
 }
 

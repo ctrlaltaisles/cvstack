@@ -25,6 +25,8 @@ export interface CurateSuggestion {
   reason?: string;
 }
 
+export type TargetRoleMode = 'pm' | 'product' | 'designer' | 'dev' | 'analyst' | 'ops' | 'strategy' | 'bizdev';
+
 export interface ElevateExperience {
   expId: string;
   role: string;
@@ -114,7 +116,6 @@ const SECOND_PASS_MIN_REMAINING_MS = Number(process.env.OPENAI_SECOND_PASS_MIN_R
 const CURATE_SECOND_PASS_ENABLED = String(process.env.OPENAI_CURATE_SECOND_PASS ?? 'false').trim().toLowerCase() === 'true';
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
 const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
-const COMPANY_RESEARCH_TIMEOUT_MS = Number(process.env.COMPANY_RESEARCH_TIMEOUT_MS ?? 4500);
 const CURATION_ROLE_CLUSTERS = [
   'Product Manager',
   'Software Developer',
@@ -139,6 +140,12 @@ const CURATION_HARD_RULES = [
   'Do not discard transferable skills in projectNotes (e.g., design, visual communication, motion, storytelling) when they are relevant to the target JD',
   'If source evidence shows scope beyond nominal title level, position by demonstrated scope and ownership, not title seniority bias',
   'You may re-architect bullet structure (merge, replace, reorder) when needed to surface strategic signal hidden in task-level wording',
+  'ROLE-LENS MODE (Level 3): change framing and positioning, not just wording',
+  'SOURCE OF TRUTH: resume bullets + workExperience.projectNotes are the only evidence of what the candidate has done',
+  'JD is only a prioritization rubric: emphasize matched evidence and keywords only when grounded in source evidence',
+  'ANTI-JD-COPY: do not copy or paraphrase JD line-by-line',
+  'ANTI-JD-COPY: do not reuse more than 6 consecutive words from JD',
+  'ANTI-JD-COPY: do not mirror JD bullet order',
 ];
 const BASE_CURATION_HARD_RULES = [
   'No fabricated metrics or tools',
@@ -165,8 +172,8 @@ const CURATION_VARIANT_SYSTEM_PROMPT = [
   'You are a principal tech recruiter and hiring panel advisor with 12+ years placing candidates into high-bar technology roles.',
   'Specialize in Product Manager, Software Developer, Front-End Developer, Product Designer, Business Development, and Data Analytics hiring.',
   'Your edits must sound sharp, distinct, and impact-first, aligned with what employers screen for in tech hiring loops.',
-  'When company context is provided, align edits and TLDR to that company focus and the expected profile of a top performer in that role.',
-  'Always reason from this lens: "If I am applying for this role and level at this company, how should I position my responsibilities through CV experience and skills?"',
+  'Analyze only the provided JD text to identify role expectations and the profile of a strong applicant.',
+  'Always reason from this lens: "If I am applying for this role and level, how should I position my responsibilities through CV experience and skills?"',
   'Amend work experience and skills to reflect role-level expectations while staying truthful to source evidence.',
   'Return valid JSON only.',
   'NON-NEGOTIABLE: if output is mostly synonym swaps without stronger ownership, scope, outcomes, tooling, and decision signal, it fails.',
@@ -203,6 +210,41 @@ const CURATION_BASE_SYSTEM_PROMPT = [
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with', 'was', 'were', 'this', 'these', 'those',
 ]);
+
+const TARGET_ROLE_MODE_HINTS: Array<{ mode: TargetRoleMode; hints: string[] }> = [
+  {
+    mode: 'designer',
+    hints: ['product designer', 'ux designer', 'ui designer', 'experience designer', 'design lead', 'lead designer', 'design manager', 'interaction designer'],
+  },
+  {
+    mode: 'product',
+    hints: ['product manager', 'product management', 'pm ', 'group product manager', 'senior product manager', 'director of product'],
+  },
+  {
+    mode: 'pm',
+    hints: ['project manager', 'program manager', 'delivery manager', 'scrum master', 'pmo', 'implementation manager'],
+  },
+  {
+    mode: 'dev',
+    hints: ['software engineer', 'software developer', 'frontend developer', 'front-end developer', 'full stack', 'backend developer', 'web developer', 'engineer'],
+  },
+  {
+    mode: 'analyst',
+    hints: ['data analyst', 'analytics', 'business analyst', 'insights analyst', 'reporting analyst', 'bi analyst'],
+  },
+  {
+    mode: 'ops',
+    hints: ['operations', 'ops manager', 'operational excellence', 'process improvement', 'supply chain', 'service delivery'],
+  },
+  {
+    mode: 'strategy',
+    hints: ['strategy', 'bizops', 'business operations', 'chief of staff', 'strategic planning', 'corporate strategy'],
+  },
+  {
+    mode: 'bizdev',
+    hints: ['business development', 'partnerships', 'alliances', 'account executive', 'sales development', 'growth partnerships'],
+  },
+];
 
 function isAbortLikeError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -251,6 +293,14 @@ function jaccard(tokensA: string[], tokensB: string[]): number {
 
 export function lexicalSimilarity(before: string, after: string): number {
   return round2(jaccard(tokenize(before), tokenize(after)));
+}
+
+export function inferTargetRoleMode(targetRole: string): TargetRoleMode {
+  const text = String(targetRole ?? '').toLowerCase();
+  for (const entry of TARGET_ROLE_MODE_HINTS) {
+    if (entry.hints.some((hint) => text.includes(hint))) return entry.mode;
+  }
+  return 'product';
 }
 
 function hasMetric(text: string): boolean {
@@ -607,132 +657,6 @@ function uniqueStrings(values: string[]): string[] {
   return out;
 }
 
-function normalizeCompanyName(company?: string, jobLink?: string): string {
-  const explicit = truncate(company ?? '', 120);
-  if (explicit) return explicit;
-  try {
-    const parsed = new URL(String(jobLink ?? '').trim());
-    const host = parsed.hostname.replace(/^www\./i, '');
-    const firstPart = host.split('.').filter(Boolean)[0] ?? '';
-    return firstPart
-      .replace(/[-_]+/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-      .trim();
-  } catch {
-    return '';
-  }
-}
-
-async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: { 'User-Agent': 'CVStackBot/1.0 (+company-context)' },
-      signal: controller.signal,
-    });
-    if (!response.ok) return '';
-    return await response.text();
-  } catch {
-    return '';
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function htmlToText(input: string): string {
-  return String(input ?? '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildCompanyFocusSummary(text: string, targetRole: string): string {
-  const normalized = text.toLowerCase();
-  const focusSignals = [
-    ['growth', 'growth and demand generation'],
-    ['customer', 'customer value and user-centric execution'],
-    ['ai', 'applied AI and intelligent product capabilities'],
-    ['platform', 'platform reliability and scalable systems'],
-    ['enterprise', 'enterprise-grade delivery and stakeholder alignment'],
-    ['design', 'design quality and user experience'],
-    ['data', 'data-driven decisions and analytics rigor'],
-    ['experiment', 'experimentation and measurable optimization'],
-    ['security', 'security and trust standards'],
-    ['performance', 'performance, quality, and execution speed'],
-  ] as const;
-
-  const matched = uniqueStrings(
-    focusSignals
-      .filter(([needle]) => normalized.includes(needle))
-      .map(([, label]) => label),
-  ).slice(0, 3);
-
-  if (matched.length === 0) {
-    return targetRole
-      ? `${targetRole} at this company is likely evaluated on ownership, execution quality, and measurable outcomes.`
-      : 'This company likely evaluates talent on ownership, execution quality, and measurable outcomes.';
-  }
-  return `Current emphasis appears to be ${matched.join(', ')}.`;
-}
-
-function buildStellarProfile(targetRole: string, focus: string): string[] {
-  const role = truncate(targetRole || 'this role', 80) || 'this role';
-  return [
-    `Owns priorities end-to-end in ${role}, not just task execution.`,
-    'Translates ambiguity into clear plans with measurable business or user outcomes.',
-    'Communicates decisions crisply across product, engineering, design, and commercial stakeholders.',
-    `Demonstrates strong tooling fluency and execution aligned to company focus: ${focus}`,
-  ].map((line) => truncate(line, 220));
-}
-
-async function researchCompanyContext(input: CurateResumeInput): Promise<CompanyContext | undefined> {
-  const company = normalizeCompanyName(input.jobCompany, input.jobLink);
-  const jdText = truncate(input.jdText ?? '', 5000);
-  const targetRole = truncate(input.targetRole ?? input.resumeData.title ?? '', 120);
-
-  const evidence: string[] = [];
-  if (jdText) evidence.push(`JD highlights: ${truncate(htmlToText(jdText), 320)}`);
-
-  const jobLink = String(input.jobLink ?? '').trim();
-  if (jobLink) {
-    const jobPage = await fetchTextWithTimeout(jobLink, COMPANY_RESEARCH_TIMEOUT_MS);
-    const jobPageText = truncate(htmlToText(jobPage), 1200);
-    if (jobPageText) evidence.push(`Job posting text: ${jobPageText}`);
-  }
-
-  if (company) {
-    const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(company)}`;
-    const wikiRaw = await fetchTextWithTimeout(wikiUrl, COMPANY_RESEARCH_TIMEOUT_MS);
-    if (wikiRaw) {
-      try {
-        const wiki = JSON.parse(wikiRaw) as { extract?: string };
-        const extract = truncate(wiki.extract ?? '', 420);
-        if (extract) evidence.push(`Company background: ${extract}`);
-      } catch {
-        // Ignore parsing errors and continue with available signals.
-      }
-    }
-  }
-
-  const combinedEvidence = uniqueStrings(evidence).slice(0, 4);
-  if (!company && combinedEvidence.length === 0) return undefined;
-
-  const focus = buildCompanyFocusSummary(combinedEvidence.join(' '), targetRole);
-  return {
-    company: company || 'Target company',
-    focus,
-    stellarProfile: buildStellarProfile(targetRole, focus).slice(0, 4),
-    evidence: combinedEvidence.map((line) => truncate(line, 340)),
-  };
-}
-
 function sanitizeOutput(payload: unknown): TailorResumeOutput {
   if (!payload || typeof payload !== 'object') {
     throw new TailorResumeError('Model output was not valid JSON object', 502);
@@ -786,7 +710,6 @@ function sanitizeElevateOutput(
   resumeData: ResumeData,
   targetRole: string,
   jdKeywords: string[],
-  researchedCompanyContext?: CompanyContext,
 ): CurateResumeOutput {
   if (!payload || typeof payload !== 'object') {
     throw new TailorResumeError('Model output was not valid JSON object', 502);
@@ -850,12 +773,12 @@ function sanitizeElevateOutput(
   const companyContextRaw = (raw.companyContext && typeof raw.companyContext === 'object') ? (raw.companyContext as Record<string, unknown>) : null;
   const parsedCompanyContext: CompanyContext | undefined = companyContextRaw
     ? {
-      company: truncate(String(companyContextRaw.company ?? researchedCompanyContext?.company ?? ''), 120) || (researchedCompanyContext?.company ?? 'Target company'),
-      focus: truncate(String(companyContextRaw.focus ?? researchedCompanyContext?.focus ?? ''), 320) || (researchedCompanyContext?.focus ?? ''),
+      company: truncate(String(companyContextRaw.company ?? ''), 120) || 'Target role',
+      focus: truncate(String(companyContextRaw.focus ?? ''), 320),
       stellarProfile: asStringArray(companyContextRaw.stellarProfile).slice(0, 4).map((line) => truncate(line, 220)),
       evidence: asStringArray(companyContextRaw.evidence).slice(0, 4).map((line) => truncate(line, 340)),
     }
-    : researchedCompanyContext;
+    : undefined;
   const output: CurateResumeOutput = {
     changeSummary: asStringArray(raw.changeSummary),
     redFlags: asStringArray(raw.redFlags),
@@ -1137,7 +1060,7 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   };
 }
 
-function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, companyContext?: CompanyContext): CurateResumeOutput {
+function buildFallbackCurateOutput(input: CurateResumeInput, reason: string): CurateResumeOutput {
   const role = (input.targetRole || input.resumeData.title || 'this role').trim();
   const hasJD = Boolean((input.jdText ?? '').trim());
   const jdFocusAreas = extractJDKeywords(input.jdText ?? '', role).slice(0, 3);
@@ -1169,16 +1092,14 @@ function buildFallbackCurateOutput(input: CurateResumeInput, reason: string, com
     aboutPointers,
     jdFocusAreas,
     positioningSummary: hasJD
-      ? `Position for ${role} by showing ownership level, scope, and business outcomes relevant to ${companyContext?.company || 'the target company'}.`
+      ? `Position for ${role} by showing ownership level, scope, and business outcomes prioritized by the JD.`
       : `Position for ${role} by showing ownership level, scope, tooling depth, and business outcomes from existing experience.`,
     jdTldr: {
       roleAsks: `Role focus for ${role}: execution quality, ownership, and business-relevant outcomes.`,
-      candidateNeeds: companyContext?.focus
-        ? `Candidate needs: clear scope, decision-making signal, and measurable impact aligned with company focus on ${companyContext.focus.toLowerCase()}.`
-        : 'Candidate needs: clear scope, decision-making signal, and measurable impact where available.',
+      candidateNeeds: 'Candidate needs: clear scope, decision-making signal, and measurable impact where available.',
       keyFocusAreas: jdFocusAreas,
     },
-    companyContext,
+    companyContext: undefined,
     suggestions: [],
     improved: {
       about: input.resumeData.bio,
@@ -1321,10 +1242,10 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
   const curateSignal = CURATE_TIMEOUT_DISABLED ? undefined : controller.signal;
   const started = Date.now();
   const targetRole = (input.targetRole || input.resumeData.title || '').trim();
+  const targetRoleMode = inferTargetRoleMode(targetRole);
   const jdText = (input.jdText ?? '').trim();
   const hasJD = jdText.length > 0;
   const jdKeywords = extractJDKeywords(input.jdText ?? '', targetRole);
-  const companyContext = hasJD ? await researchCompanyContext(input) : undefined;
 
   const systemPrompt = hasJD ? CURATION_VARIANT_SYSTEM_PROMPT : CURATION_BASE_SYSTEM_PROMPT;
   const projectNotesPrimaryData = buildProjectNotesPrimaryResumeData(input.resumeData);
@@ -1348,10 +1269,10 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     curationPersona: 'Principal Tech Recruiter',
     roleClusters: CURATION_ROLE_CLUSTERS,
     roleTarget: targetRole,
-    company: hasJD ? (companyContext?.company ?? input.jobCompany ?? '') : '',
-    companyResearch: hasJD ? (companyContext ?? null) : null,
+    targetRoleMode,
+    company: hasJD ? (input.jobCompany ?? '') : '',
     positioningQuestion: hasJD
-      ? `If applying for ${targetRole || 'this role'} at ${companyContext?.company || input.jobCompany || 'this company'}, how should this profile present role-level responsibilities through experience and skills?`
+      ? `From this JD, what role is this and how should this profile present role-level responsibilities through experience and skills?`
       : `How should this base resume be elevated for ${targetRole || 'this role'} to increase recruiter confidence through ownership, scope, tool fluency, and outcomes based only on existing facts?`,
     baseResumeObjectives: hasJD
       ? []
@@ -1368,12 +1289,14 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     recruiter_rubric: {
       bullet_formula: '[Action Verb] + [What] + [How] + [Outcome/Metric] + [Scope] + [Tools]',
       required_signal_coverage: 'At least 70% of bullets should gain scope, outcome, tools, or ownership signal',
-      narrative_compression_target: 'Prefer 3-5 strategic bullets per role unless evidence strongly requires 6',
+      narrative_compression_target: hasJD
+        ? 'Prefer 5-7 strategic bullets per role and prioritize strongest evidence.'
+        : 'Prefer 3-5 strategic bullets per role unless evidence strongly requires 6',
       notes_expansion_rule: 'If a role has projectNotes >= 100 words, include at least 2 genuinely new bullets mined from notes (not paraphrases of existing bullets).',
       ranking_priorities: ['business impact', 'ownership level', 'scope complexity', 'tool fluency', 'clear execution signal'],
       generic_phrases_to_reduce: CURATION_GENERIC_PHRASES_TO_REDUCE,
       role_level_positioning: hasJD
-        ? 'Experience and skills must reflect the responsibility level expected for the target role at the target company.'
+        ? 'Experience and skills must reflect the responsibility level expected for the target role based on JD requirements.'
         : 'Experience and skills must reflect the responsibility level implied by the candidate history and current title.',
       transferable_signal_rule: 'If projectNotes include credible capabilities outside the formal job title, retain them when relevant to the target role instead of pruning them away.',
       title_bias_override: 'Position by demonstrated scope. Nominal title (e.g., Intern) must not suppress proven ownership, system design, or leadership signals.',
@@ -1406,10 +1329,71 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'Avoid one-to-one mirroring of original bullet categories when notes support a more strategic narrative architecture.',
       'Compress and elevate: combine overlapping task clusters into fewer, higher-leverage bullets with clearer strategic signal.',
       'Project-notes-first rebuild: for roles with notes, start from a blank bullet canvas and reconstruct the narrative from notes before checking legacy bullets for factual consistency.',
+      'ROLE-LENS MODE (Level 3 Transformation): change framing of the same evidence into the recruiter signals expected for targetRoleMode; synonym-only rewrites fail.',
+      'Every bullet must add at least one of: stronger ownership, clearer scope, clearer mechanism/how, or decision/impact signal (without fabricating).',
     ],
+    roleLensModeRules: hasJD ? {
+      mode: targetRoleMode,
+      sourceOfTruth: [
+        'Resume bullets + workExperience.projectNotes are the only evidence.',
+        'JD is a prioritization rubric only.',
+        'Never introduce responsibilities, tools, systems, metrics, or outcomes that appear only in JD.',
+        'If a metric is not explicit in source evidence, do not invent numbers and do not use placeholders. Ask a concise question instead.',
+      ],
+      antiJdCopy: [
+        'Do not copy or paraphrase the JD line-by-line.',
+        'Do not reuse more than 6 consecutive words from the JD.',
+        'Do not mirror JD bullet order.',
+        'Use JD keywords only when they map to existing source evidence.',
+      ],
+      lensByMode: {
+        pm: {
+          emphasize: ['scope', 'timeline', 'milestones', 'dependencies', 'stakeholder coordination', 'meeting cadence', 'progress reporting', 'risk/issues', 'change tracking', 'documentation'],
+          useLanguage: ['defined scope', 'built project plan/trackers', 'coordinated stakeholders', 'tracked risks/issues/changes', 'reported progress', 'managed dependencies'],
+          avoidUnlessExplicit: ['UAT', 'SIT', 'user stories', 'acceptance criteria'],
+        },
+        product: {
+          emphasize: ['problem framing', 'discovery', 'requirements/specs', 'prioritization', 'metrics', 'adoption', 'tradeoffs', 'cross-functional alignment'],
+          useLanguage: ['synthesized inputs', 'drafted lightweight spec', 'defined success metrics', 'identified bottlenecks', 'prioritized interventions'],
+          avoidUnlessExplicit: ['roadmap ownership', 'PRD', 'backlog', 'sprint planning'],
+        },
+        designer: {
+          emphasize: ['user journeys', 'flows', 'information architecture', 'prototyping', 'testing/iteration', 'storytelling', 'collaboration with PM/Eng'],
+          useLanguage: ['mapped end-to-end journey', 'designed flows', 'validated with feedback', 'improved clarity/usability'],
+          avoidUnlessExplicit: ['tool names like Figma'],
+        },
+        dev: {
+          emphasize: ['shipped features', 'implementation', 'reliability', 'performance', 'testing/debugging', 'ownership'],
+          useLanguage: ['implemented', 'shipped', 'debugged', 'stabilized', 'improved reliability'],
+          avoidUnlessExplicit: ['stacks/tools not present in evidence'],
+        },
+        analyst: {
+          emphasize: ['KPI definitions', 'dashboards', 'reporting cadence', 'insights to decisions', 'data quality', 'analysis'],
+          useLanguage: ['defined KPIs', 'built reporting cadence', 'translated insights into decisions'],
+          avoidUnlessExplicit: ['SQL/Python/BI tool names'],
+        },
+        ops: {
+          emphasize: ['SOPs', 'process standardization', 'scaling', 'cost controls', 'vendor management', 'operational visibility', 'issue resolution'],
+          useLanguage: ['standardized process', 'improved operational visibility', 'resolved operational blockers'],
+          avoidUnlessExplicit: ['strategy claims'],
+        },
+        strategy: {
+          emphasize: ['business cases', 'scenario planning', 'cost/ROI modeling', 'executive recommendations', 'prioritization frameworks'],
+          useLanguage: ['built business case', 'modeled scenarios', 'recommended priorities'],
+          avoidUnlessExplicit: ['market claims'],
+        },
+        bizdev: {
+          emphasize: ['pipeline', 'partnerships', 'negotiation', 'stakeholder management', 'revenue impact'],
+          useLanguage: ['advanced pipeline', 'structured partnerships', 'negotiated terms'],
+          avoidUnlessExplicit: ['revenue metrics'],
+        },
+      },
+    } : undefined,
     editing_rules: [
       'You may rewrite, add, or remove bullets when it improves clarity and impact.',
-      'Keep each role to 3-5 bullets in most cases (up to 6 only when truly necessary) and prioritize strongest evidence.',
+      hasJD
+        ? 'Keep each role to 5-7 bullets maximum and prioritize strongest evidence.'
+        : 'Keep each role to 3-5 bullets in most cases (up to 6 only when truly necessary) and prioritize strongest evidence.',
       'For removals, use empty string in improved bullets at that index.',
       'Treat resumeData.workExperience[].projectNotes as private source context for bullet improvements.',
       'If projectNotes conflict with existing bullets, preserve truthfulness and ask concise clarification questions instead of inventing details.',
@@ -1419,6 +1403,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       'If projectNotes for a role are >= 100 words, produce at least 2 new bullets that are not near-paraphrases of legacy bullets.',
       'Treat JD as a scoring rubric only, not as content to rewrite from.',
       'Never copy, paraphrase, or mirror JD responsibilities.',
+      'Do not reuse more than 6 consecutive words from the JD.',
+      'Do not mirror JD bullet order.',
       'If a responsibility appears only in JD and not in resume bullets/projectNotes evidence, do not include it.',
       'Never output placeholder metrics or bracket placeholders (e.g., [X%], [L%], [TBD]).',
     ],
@@ -1440,7 +1426,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       redFlags: 'string[]',
       aboutPointers: 'string[]',
       jdFocusAreas: 'string[] max 3',
-      positioningSummary: 'string concise role-level positioning summary tailored to target company',
+      positioningSummary: 'string concise role-level positioning summary tailored to JD expectations',
       jdTldr: { roleAsks: 'string', candidateNeeds: 'string', keyFocusAreas: 'string[] max 3' },
       companyContext: {
         company: 'string',
@@ -1449,6 +1435,14 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         evidence: 'string[] max 4',
       },
       suggestions: [{ field: 'bio|bullet', expId: 'string when bullet', bulletIdx: 'number when bullet', suggested: 'string', reason: 'string with recruiter heuristic' }],
+      roleLensOutput: {
+        targetRoleMode: 'pm|product|designer|dev|analyst|ops|strategy|bizdev',
+        bullets: [{
+          bullet: 'string',
+          evidenceQuotes: 'string[] (1-2 short phrases copied from resume bullets/projectNotes)',
+        }],
+        missingInfoQuestions: 'string[] max 5; use instead of inventing unsupported claims',
+      },
     },
   };
 
@@ -1456,7 +1450,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     console.info(`[ai-curate][${requestId}] start roleLen=${targetRole.length} jdLen=${jdText.length} mode=${hasJD ? 'jd' : 'base'}`);
 
     let { parsed } = await runCurateModelParsed(client, systemPrompt, JSON.stringify(basePayload), curateSignal);
-    let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
+    let output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
 
     if (output.suggestions.length === 0) {
       output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
@@ -1559,7 +1553,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
             enforcement: 'At least 65% of project-notes signals should be represented in improved bullets, at least 25% of new signals (not present in original bullets) must be introduced when truthful, at least 60% of strategic themes from notes must be visible, structure must avoid one-to-one category mirroring, every role with >=100-word projectNotes must contain at least 2 genuinely new bullets, and no bullet may contain JD-only unsupported claims or placeholders.',
           });
           ({ parsed } = await runCurateModelParsed(client, systemPrompt, secondPassPrompt, curateSignal));
-          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords, companyContext);
+          output = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
           if (output.suggestions.length === 0) {
             output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
           }
@@ -1607,12 +1601,12 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       const reason = hasJD
         ? 'Need more details; ask user for metrics, scope, tooling, and ownership signals.'
         : 'Need more details from existing resume content; add concrete ownership, scope, tools, and measurable outcomes to unlock stronger base curation.';
-      return buildFallbackCurateOutput(input, reason, companyContext);
+      return buildFallbackCurateOutput(input, reason);
     }
 
     const finalGrounding = evaluateGroundingViolations(input.resumeData, output.improved, jdText);
     if (finalGrounding.suspicious) {
-      return buildFallbackCurateOutput(input, `Grounding guardrail blocked unsupported JD-derived content: ${finalGrounding.details.join(' | ')}`, companyContext);
+      return buildFallbackCurateOutput(input, `Grounding guardrail blocked unsupported JD-derived content: ${finalGrounding.details.join(' | ')}`);
     }
 
     const elapsedMs = Date.now() - started;
@@ -1630,7 +1624,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         ? 'AI curation timed out'
         : `AI curation failed: ${String((error as { message?: string }).message ?? 'unknown error')}`;
     console.warn(`[ai-curate][${requestId}] fallback reason="${reason}" elapsedMs=${elapsedMs}`);
-    return buildFallbackCurateOutput(input, reason, companyContext);
+    return buildFallbackCurateOutput(input, reason);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
