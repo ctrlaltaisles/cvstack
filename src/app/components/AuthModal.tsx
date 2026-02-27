@@ -61,12 +61,12 @@ export default function AuthModal({
     }
   };
 
-  const startOAuth = (provider: OAuthProvider) => {
+  const startOAuth = async (provider: OAuthProvider) => {
     setError('');
     setHint('');
     setOauthLoading(provider);
     try {
-      beginOAuthSignIn(provider);
+      await beginOAuthSignIn(provider);
     } catch (err) {
       setOauthLoading(null);
       setError(err instanceof Error ? err.message : 'Unable to start social login');
@@ -90,7 +90,7 @@ export default function AuthModal({
         <div className="px-6 py-5">
           <div className="grid grid-cols-3 gap-3 mb-4">
             <button
-              onClick={() => startOAuth('google')}
+              onClick={() => { void startOAuth('google'); }}
               disabled={loading || oauthLoading !== null}
               className="h-12 rounded-[12px] bg-[#F6F6F7] hover:bg-[#EFEFF0] text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center"
               aria-label="Continue with Google"
@@ -98,7 +98,7 @@ export default function AuthModal({
               <img src={googleLogo} alt="Google" className="w-5 h-5 object-contain" />
             </button>
             <button
-              onClick={() => startOAuth('github')}
+              onClick={() => { void startOAuth('github'); }}
               disabled={loading || oauthLoading !== null}
               className="h-12 rounded-[12px] bg-[#F6F6F7] hover:bg-[#EFEFF0] text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center"
               aria-label="Continue with GitHub"
@@ -108,7 +108,7 @@ export default function AuthModal({
               </svg>
             </button>
             <button
-              onClick={() => startOAuth('linkedin_oidc')}
+              onClick={() => { void startOAuth('linkedin_oidc'); }}
               disabled={loading || oauthLoading !== null}
               className="h-12 rounded-[12px] bg-[#F6F6F7] hover:bg-[#EFEFF0] text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center"
               aria-label="Continue with LinkedIn"

@@ -1,3 +1,5 @@
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
 function resolveApiBase() {
   const envBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (envBase) return envBase;
@@ -21,6 +23,7 @@ const GUEST_KEY = 'cvstack_guest_id';
 export const AUTH_EVENT_KEY = 'cvstack_auth_event';
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
+let supabaseClient: SupabaseClient | null = null;
 
 export interface StoredUser {
   id: string;
@@ -67,24 +70,38 @@ export function clearAuthStorage() {
 
 export type OAuthProvider = 'google' | 'github' | 'linkedin_oidc';
 
+function getSupabaseClient() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  if (supabaseClient) return supabaseClient;
+  supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  return supabaseClient;
+}
+
 function getSupabaseAuthBase() {
   if (!SUPABASE_URL) return '';
   return `${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1`;
 }
 
-export function beginOAuthSignIn(provider: OAuthProvider) {
-  const authBase = getSupabaseAuthBase();
-  if (!authBase || !SUPABASE_ANON_KEY) {
-    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
-  }
-
-  const redirectTo = `${window.location.origin}/login`;
-  const params = new URLSearchParams({
+export async function beginOAuthSignIn(provider: OAuthProvider) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
-    redirect_to: redirectTo,
+    options: {
+      redirectTo: `${window.location.origin}/login`,
+      skipBrowserRedirect: true,
+    },
   });
-
-  window.location.assign(`${authBase}/authorize?${params.toString()}`);
+  if (error) throw new Error(error.message || 'Unable to start social sign-in');
+  if (!data?.url) throw new Error('Could not start social sign-in redirect.');
+  window.location.assign(data.url);
 }
 
 function supabaseHeaders() {
@@ -99,24 +116,16 @@ function supabaseHeaders() {
 }
 
 export async function requestEmailOtp(email: string) {
-  const authBase = getSupabaseAuthBase();
-  if (!authBase) {
-    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL.');
-  }
-
-  const response = await fetch(`${authBase}/otp`, {
-    method: 'POST',
-    headers: supabaseHeaders(),
-    body: JSON.stringify({
-      email,
-      create_user: true,
-      email_redirect_to: `${window.location.origin}/login`,
-    }),
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: true,
+      emailRedirectTo: `${window.location.origin}/login`,
+    },
   });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error_description || payload.msg || payload.error || 'Failed to send OTP');
+  if (error) {
+    throw new Error(error.message || 'Failed to send magic link');
   }
 }
 
@@ -172,6 +181,27 @@ export async function verifySupabaseTokenHash(tokenHash: string, type: string) {
 
 export function loginWithSupabaseAccessToken(accessToken: string) {
   return requestJson<AuthResponse>('/api/auth/supabase', { accessToken });
+}
+
+export async function consumeSupabaseAccessTokenFromUrl(): Promise<string | null> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  const supabase = getSupabaseClient();
+
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
+  const hashToken = hashParams.get('access_token');
+  if (hashToken) return hashToken;
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const code = searchParams.get('code');
+  if (code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw new Error(error.message || 'Failed to complete OAuth sign-in');
+    return data.session?.access_token ?? null;
+  }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  return sessionData.session?.access_token ?? null;
 }
 
 type ReqOpts = RequestInit & { auth?: boolean };
