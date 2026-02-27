@@ -338,9 +338,32 @@ function startUploadCleanupScheduler() {
 async function parseUploadOrRespond(buffer: Buffer, res: express.Response) {
   try {
     return await parseUploadedResumeBuffer(buffer);
-  } catch {
-    res.status(422).json({ error: 'PDF text extraction failed; try a text-based PDF' });
-    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown parser error';
+    const fallbackParsedData = {
+      name: null,
+      phone: null,
+      email: null,
+      linkedin: null,
+      website: null,
+      country: null,
+      currentTitle: null,
+      experiences: [],
+      education: [],
+      skills: [],
+    };
+
+    // Keep upload flow resilient in production: when parsing fails, continue
+    // with a blank base resume and surface warnings for manual editing.
+    return {
+      parsedData: fallbackParsedData,
+      warnings: [
+        'Structured extraction failed for this PDF; opened editor with a blank base resume.',
+        `Parser detail: ${message}`,
+      ],
+      extractedText: '',
+      data: defaultResumeData(),
+    };
   }
 }
 
