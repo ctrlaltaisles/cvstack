@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { login, register, tokenStore, userStore } from '../../lib/api';
+import { beginOAuthSignIn, login, register, tokenStore, userStore, type OAuthProvider } from '../../lib/api';
 
 type AuthMode = 'login' | 'register';
 
@@ -19,6 +19,7 @@ export default function AuthModal({
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
 
   if (!open) return null;
 
@@ -36,6 +37,17 @@ export default function AuthModal({
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startOAuth = (provider: OAuthProvider) => {
+    setError('');
+    setOauthLoading(provider);
+    try {
+      beginOAuthSignIn(provider);
+    } catch (err) {
+      setOauthLoading(null);
+      setError(err instanceof Error ? err.message : 'Unable to start social login');
     }
   };
 
@@ -68,6 +80,44 @@ export default function AuthModal({
           </div>
           <div className="space-y-3">
             {mode === 'register' && (
+              <>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => startOAuth('google')}
+                    disabled={loading || oauthLoading !== null}
+                    className="w-full bg-white border border-[#E6E6E6] hover:bg-[#F8F8F8] rounded-[12px] p-3 text-sm text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span aria-hidden>G</span>
+                    Continue with Google
+                  </button>
+                  <button
+                    onClick={() => startOAuth('github')}
+                    disabled={loading || oauthLoading !== null}
+                    className="w-full bg-white border border-[#E6E6E6] hover:bg-[#F8F8F8] rounded-[12px] p-3 text-sm text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span aria-hidden>GH</span>
+                    Continue with GitHub
+                  </button>
+                  <button
+                    onClick={() => startOAuth('linkedin_oidc')}
+                    disabled={loading || oauthLoading !== null}
+                    className="w-full bg-white border border-[#E6E6E6] hover:bg-[#F8F8F8] rounded-[12px] p-3 text-sm text-[#1A1A1A] disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span aria-hidden>in</span>
+                    Continue with LinkedIn
+                  </button>
+                </div>
+                <div className="relative py-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-[#EFEFEF]" />
+                  </div>
+                  <div className="relative flex justify-center">
+                    <span className="bg-white px-2 text-[11px] text-[#9B9B9B]">or sign up with email</span>
+                  </div>
+                </div>
+              </>
+            )}
+            {mode === 'register' && (
               <input
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
@@ -95,7 +145,7 @@ export default function AuthModal({
         <div className="px-6 py-5 border-t border-[#F0F0F0]">
           <button
             onClick={submit}
-            disabled={loading || !email || !password || (mode === 'register' && password.length < 8)}
+            disabled={loading || oauthLoading !== null || !email || !password || (mode === 'register' && password.length < 8)}
             className="w-full bg-[#1A1A1A] text-white px-5 py-3 rounded-[12px] text-sm disabled:opacity-40"
           >
             {loading ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create account'}

@@ -2090,16 +2090,7 @@ export default function Workspace() {
         const resumeListResponse = await listResumes();
         const targetResumeId = resumeId || resumeListResponse.resumes[0]?.id;
         if (!targetResumeId) {
-          const initialBase = {
-            id: 'base-local',
-            content: buildTextResume(INITIAL_VERSIONS[0].data),
-            updatedAt: new Date().toISOString(),
-          };
-          const initialVersion = { ...INITIAL_VERSIONS[0], isBase: true, baseResumeId: initialBase.id, variantContent: initialBase.content };
-          setVersions([initialVersion]);
-          setSelectedVersionId(initialVersion.id);
-          setResumeMeta(null);
-          syncLocalStore(initialBase, []);
+          navigate('/start', { replace: true });
           return;
         }
         if (!resumeId) setResumeId(targetResumeId);
@@ -2156,7 +2147,7 @@ export default function Workspace() {
     return () => {
       mounted = false;
     };
-  }, [resumeId, syncLocalStore]);
+  }, [navigate, resumeId, syncLocalStore]);
 
   useEffect(() => {
     activeVersionRef.current = (versions.find(v => v.id === selectedVersionId) || versions[0] || null);
@@ -2164,8 +2155,9 @@ export default function Workspace() {
 
   const activeVersion = versions.find(v => v.id === selectedVersionId) || versions[0];
   const baseVersion = versions.find(v => v.isBase) ?? versions[0];
+  const effectiveResumeId = resumeId || resumeMeta?.id || '';
   const hasUploadedResumePdf = Boolean(resumeMeta?.source === 'upload' && resumeMeta.file_name);
-  const canManageBaseResumePdf = Boolean(resumeId);
+  const canManageBaseResumePdf = Boolean(effectiveResumeId);
   const hasUpdatableVariants = versions.some((version) => version.isAI && hasSyncDiffForVariant(baseVersion.data, version.data));
   const sidebarGroups = versions.filter((v) => v.isAI).reduce((acc, v) => {
     const roleFamily = normalizeRoleFamilyTitle(v.jobTitle || v.name);
@@ -2199,6 +2191,13 @@ export default function Workspace() {
     data: version.data,
     aiChanges: version.aiChanges,
   });
+
+  useEffect(() => {
+    if (isLoading || loadError) return;
+    if (!activeVersion || !baseVersion) {
+      navigate('/start', { replace: true });
+    }
+  }, [activeVersion, baseVersion, isLoading, loadError, navigate]);
 
   useEffect(() => {
     if (!resumeId) return;
@@ -2454,7 +2453,7 @@ export default function Workspace() {
   };
 
   useEffect(() => {
-    if (!showBaseFileModal || !resumeId) return;
+    if (!showBaseFileModal || !effectiveResumeId) return;
     if (!hasUploadedResumePdf) {
       setBasePdfUrl('');
       setBasePdfLoading(false);
@@ -2462,7 +2461,7 @@ export default function Workspace() {
     }
     let revokedUrl: string | null = null;
     setBasePdfLoading(true);
-    void getResumePdfBlob(resumeId)
+    void getResumePdfBlob(effectiveResumeId)
       .then((blob) => {
         const url = URL.createObjectURL(blob);
         revokedUrl = url;
@@ -2479,17 +2478,17 @@ export default function Workspace() {
     return () => {
       if (revokedUrl) URL.revokeObjectURL(revokedUrl);
     };
-  }, [showBaseFileModal, resumeId, basePdfRefreshKey, hasUploadedResumePdf]);
+  }, [showBaseFileModal, effectiveResumeId, basePdfRefreshKey, hasUploadedResumePdf]);
 
   const handleReplaceBasePdf = async (file: File) => {
-    if (!resumeId) return;
+    if (!effectiveResumeId) return;
     if (file.type !== 'application/pdf') {
       showToast('Please upload a PDF file');
       return;
     }
     setIsReplacingBasePdf(true);
     try {
-      const response = await replaceResumePdf(resumeId, file, resumeMeta?.title || 'Uploaded Resume');
+      const response = await replaceResumePdf(effectiveResumeId, file, resumeMeta?.title || 'Uploaded Resume');
       const incomingVersion = applyHeaderTitleToVersion({
         ...(response.version as ResumeVersion),
         data: normalizeResumeDataShape((response.version as ResumeVersion).data),
@@ -2507,7 +2506,7 @@ export default function Workspace() {
       )));
 
       const refreshedBase = {
-        id: baseResumeModel?.id ?? incomingVersion.baseResumeId ?? `base-${resumeId}`,
+        id: baseResumeModel?.id ?? incomingVersion.baseResumeId ?? `base-${effectiveResumeId}`,
         content: buildTextResume(incomingVersion.data),
         updatedAt: new Date().toISOString(),
       };
@@ -2641,7 +2640,7 @@ export default function Workspace() {
   }
 
   if (!activeVersion || !baseVersion) {
-    return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">No resume found. Go back to start and import/create one.</div>;
+    return <div className="min-h-screen flex items-center justify-center text-sm text-[#6B6B6B]">Redirecting…</div>;
   }
 
   return (

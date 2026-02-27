@@ -18,6 +18,8 @@ const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'cvstack_token';
 const USER_KEY = 'cvstack_user';
 const GUEST_KEY = 'cvstack_guest_id';
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
 
 export interface StoredUser {
   id: string;
@@ -48,6 +50,28 @@ export const userStore = {
 export function clearAuthStorage() {
   tokenStore.clear();
   userStore.clear();
+}
+
+export type OAuthProvider = 'google' | 'github' | 'linkedin_oidc';
+
+function getSupabaseAuthBase() {
+  if (!SUPABASE_URL) return '';
+  return `${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1`;
+}
+
+export function beginOAuthSignIn(provider: OAuthProvider) {
+  const authBase = getSupabaseAuthBase();
+  if (!authBase || !SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase OAuth config. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+
+  const redirectTo = `${window.location.origin}/login`;
+  const params = new URLSearchParams({
+    provider,
+    redirect_to: redirectTo,
+  });
+
+  window.location.assign(`${authBase}/authorize?${params.toString()}`);
 }
 
 type ReqOpts = RequestInit & { auth?: boolean };

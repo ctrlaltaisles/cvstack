@@ -2,7 +2,7 @@ import { type ChangeEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { FileUp, PenLine } from 'lucide-react';
 import { motion } from 'motion/react';
-import { createResume, uploadResumePdf } from '../../lib/api';
+import { clearAuthStorage, createResume, uploadResumePdf, userStore } from '../../lib/api';
 
 const methods = [
   {
@@ -24,6 +24,7 @@ export default function MethodSelection() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const currentUser = userStore.get();
 
   const startManual = async () => {
     setError('');
@@ -78,19 +79,25 @@ export default function MethodSelection() {
       transition={{ duration: 0.25, ease: 'easeOut' }}
       className="relative min-h-screen bg-white flex flex-col items-center justify-center px-8"
     >
-      <div className="absolute top-6 left-8 right-8 flex items-center justify-between">
-        <button
-          onClick={() => navigate('/')}
-          className="text-sm text-[#9B9B9B] hover:text-[#1A1A1A] transition-colors"
-        >
-          ← Back
-        </button>
-        <button
-          onClick={() => navigate('/login')}
-          className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"
-        >
-          Sign in
-        </button>
+      <div className="absolute top-6 right-8">
+        {currentUser ? (
+          <button
+            onClick={() => {
+              clearAuthStorage();
+              navigate('/', { replace: true });
+            }}
+            className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"
+          >
+            Log out
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate('/login')}
+            className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"
+          >
+            Sign in
+          </button>
+        )}
       </div>
 
       <div className="w-full max-w-md">
