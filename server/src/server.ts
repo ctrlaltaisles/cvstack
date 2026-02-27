@@ -25,8 +25,13 @@ const PORT = Number(process.env.PORT ?? 4000);
 const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
 const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
-const SUPABASE_URL = String(process.env.SUPABASE_URL ?? '').trim();
-const SUPABASE_AUTH_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? '').trim();
+const SUPABASE_URL = String(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').trim();
+const SUPABASE_AUTH_KEY = String(
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+  ?? process.env.SUPABASE_ANON_KEY
+  ?? process.env.VITE_SUPABASE_ANON_KEY
+  ?? '',
+).trim();
 let supabaseAuthClient: ReturnType<typeof createClient> | null = null;
 
 function getSupabaseAuthClient() {
@@ -166,7 +171,9 @@ app.post('/api/auth/supabase', async (req, res) => {
 
   const supabase = getSupabaseAuthClient();
   if (!supabase) {
-    res.status(500).json({ error: 'Supabase auth is not configured on server' });
+    res.status(500).json({
+      error: 'Supabase auth is not configured on server. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY).',
+    });
     return;
   }
 

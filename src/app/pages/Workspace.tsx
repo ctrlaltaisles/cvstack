@@ -1185,8 +1185,8 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
     .filter(([idx, change]) => idx >= exp.bullets.length && change.suggested.trim())
     .sort((a, b) => a[0] - b[0]);
   return (
-    <div className={`flex gap-10 group/exp transition-all duration-300 ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
-      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
+    <div className={`flex flex-col gap-3 md:flex-row md:gap-10 group/exp transition-all duration-300 ${isDraggingExperience ? 'opacity-35' : 'opacity-100'}`}>
+      <div className="w-full md:w-44 md:shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
         {!isReviewLocked && <button
           draggable
           onDragStart={onDragStartExperience}
@@ -1195,7 +1195,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
         >
           <GripVertical size={12} strokeWidth={1.8} />
         </button>}
-        <div onClick={() => { if (!isReviewLocked) setEditingDate(!editingDate); }} className={`${isReviewLocked ? '' : 'cursor-pointer'}`}><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
+        <div onClick={() => { if (!isReviewLocked) setEditingDate(!editingDate); }} className={`${isReviewLocked ? '' : 'cursor-pointer'}`}><p className="text-xs text-[#9B9B9B] leading-snug hover:text-[#6B6B6B] transition-colors md:whitespace-nowrap">{formatDateRange(exp.startDate, exp.endDate)}</p>{duration && <p className="mt-1" style={{ fontSize: 11, color: '#C4C4C4' }}>{duration}</p>}</div>
         {editingDate && <DateRangeEditor startDate={exp.startDate} endDate={exp.endDate} onChangeStart={v => onUpdateExp({ ...exp, startDate: v })} onChangeEnd={v => onUpdateExp({ ...exp, endDate: v })} onClose={() => setEditingDate(false)} />}
       </div>
       <div className="flex-1 min-w-0">
