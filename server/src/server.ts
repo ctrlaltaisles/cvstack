@@ -424,9 +424,9 @@ async function createResumeWithBaseVersion(params: {
 async function parseUploadedResumeBuffer(buffer: Buffer) {
   const parsedPayload = await parseResumePdf(buffer, { debug: true });
   const parsedData = parsedPayload.data;
-  const warnings = parsedPayload.warnings;
+  const warnings = [...parsedPayload.warnings];
 
-  const extractedText = [
+  const structuredExtractedText = [
     parsedData.name,
     parsedData.currentTitle,
     ...(parsedData.experiences ?? []).flatMap((exp) => [exp.role, exp.company, ...exp.description]),
@@ -434,17 +434,28 @@ async function parseUploadedResumeBuffer(buffer: Buffer) {
     ...(parsedData.skills ?? []),
   ]
     .filter((v): v is string => Boolean(v))
-    .join('\n')
-    .slice(0, 5000);
+    .join('\n');
 
-  if (!parsedData.name && parsedData.experiences.length === 0 && parsedData.education.length === 0 && parsedData.skills.length === 0) {
-    throw new Error('PDF text extraction failed; try a text-based PDF');
-  }
+  const debugExtractedText = (parsedPayload.debug?.lines ?? [])
+    .map((line) => line.text)
+    .filter((v): v is string => Boolean(v))
+    .join('\n');
+
+  const extractedText = (structuredExtractedText || debugExtractedText).slice(0, 5000);
 
   const data = toResumeDataFromParsedResume(parsedData);
   const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
   if (inferredSummary) {
     data.bio = inferredSummary.slice(0, 1200);
+  }
+
+  // Don't hard-fail upload when structured parsing confidence is low.
+  // Let users proceed into manual editing with a warning instead.
+  if (!parsedData.name && parsedData.experiences.length === 0 && parsedData.education.length === 0 && parsedData.skills.length === 0) {
+    warnings.push('Low-confidence extraction: no structured fields were detected. You can still edit manually.');
+    if (!extractedText) {
+      warnings.push('Could not extract readable text from this PDF. If this is a scanned file, try OCR first.');
+    }
   }
 
   return {
