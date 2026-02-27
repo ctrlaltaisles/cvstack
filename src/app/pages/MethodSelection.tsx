@@ -79,6 +79,21 @@ export default function MethodSelection() {
       transition={{ duration: 0.25, ease: 'easeOut' }}
       className="relative min-h-screen bg-white flex flex-col items-center justify-center px-8"
     >
+      <div className="absolute top-6 left-8">
+        <button
+          onClick={() => {
+            if (window.history.length > 1) {
+              navigate(-1);
+              return;
+            }
+            navigate('/', { replace: true });
+          }}
+          className="text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors"
+        >
+          Back
+        </button>
+      </div>
+
       <div className="absolute top-6 right-8">
         {currentUser ? (
           <button

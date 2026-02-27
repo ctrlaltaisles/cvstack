@@ -5,12 +5,13 @@ import { jsPDF } from 'jspdf';
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import {
   Plus, Sparkles, Check, X, Settings, LogOut, ChevronDown, ChevronRight,
-  Copy, GripVertical, FileText, Share2, Trash2,
+  Copy, GripVertical, FileText, Share2, Trash2, Menu,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
 import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
+import { useIsMobile } from '../components/ui/use-mobile';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2048,6 +2049,7 @@ export default function Workspace() {
   const [isReplacingBasePdf, setIsReplacingBasePdf] = useState(false);
   const [showJDPanel, setShowJDPanel] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isCurating, setIsCurating] = useState(false);
   const [isTldrLoading, setIsTldrLoading] = useState(false);
@@ -2065,11 +2067,29 @@ export default function Workspace() {
     .map((v) => normalizeRoleFamilyTitle(v.jobTitle || v.name).toLowerCase());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(initialExpanded));
   const localStoreKey = storageKeyForResume(resumeId);
+  const isMobile = useIsMobile();
+
+  const handleSidebarVersionSelect = useCallback((versionId: string) => {
+    setSelectedVersionId(versionId);
+    if (isMobile) setIsMobileSidebarOpen(false);
+  }, [isMobile]);
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) setShowAvatarMenu(false); };
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) setIsMobileSidebarOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return undefined;
+    document.body.style.overflow = isMobileSidebarOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobile, isMobileSidebarOpen]);
 
   const showToast = (msg: string, tone: 'success' | 'info' | 'error' = 'success') => {
     setToast({ visible: true, message: msg, tone });
@@ -2651,13 +2671,23 @@ export default function Workspace() {
       transition={{ duration: 0.2 }}
       className="h-screen flex bg-white overflow-hidden workspace-shell"
     >
+      {isMobile && isMobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close sidebar"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="absolute inset-0 z-40 bg-black/30 print-hide"
+        />
+      )}
 
       {/* ── Sidebar ── */}
-      <div className="w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide">
+      <div
+        className={`w-[220px] shrink-0 border-r border-[#EAEAEA] bg-[#F5F5F5] flex flex-col print-hide transition-transform duration-200 ease-out md:relative md:translate-x-0 md:shadow-none ${isMobile ? 'fixed inset-y-0 left-0 z-50 shadow-[0_12px_30px_rgba(0,0,0,0.2)]' : ''} ${isMobile && !isMobileSidebarOpen ? '-translate-x-full' : 'translate-x-0'}`}
+      >
         <div className="px-6 py-5 border-b border-[#ECECEC] bg-[#F5F5F5]"><span className="text-base tracking-tight text-[#1A1A1A]" style={{ fontWeight: 700 }}>cv stack</span></div>
         <div className="flex-1 overflow-y-auto py-3">
           <div className={`group/base w-[calc(100%-16px)] mx-2 px-4 py-2 rounded-[10px] mb-1 transition-colors flex items-center gap-2 ${selectedVersionId === baseVersion.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
-            <button onClick={() => setSelectedVersionId(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
+            <button onClick={() => handleSidebarVersionSelect(baseVersion.id)} className={`flex-1 text-left text-sm ${selectedVersionId === baseVersion.id ? 'text-[#111]' : 'text-[#6B6B6B]'}`}>Base Resume</button>
             {canManageBaseResumePdf && (
               <button
                 onClick={(event) => {
@@ -2686,7 +2716,7 @@ export default function Workspace() {
                     {group.items.map(v => (
                       <div key={v.id} className={`group/item w-[calc(100%-16px)] mx-2 pl-4 pr-2 py-1.5 rounded-[10px] mb-0.5 transition-colors flex items-center gap-1 ${selectedVersionId === v.id ? 'bg-[#E9E9E9]' : 'hover:bg-[#ECECEC]'}`}>
                         <span className="w-[21px] shrink-0" />
-                        <button onClick={() => setSelectedVersionId(v.id)} className={`flex-1 text-left text-[13px] truncate ${selectedVersionId === v.id ? 'text-[#111] font-medium' : 'text-[#7F7F7F]'}`}>
+                        <button onClick={() => handleSidebarVersionSelect(v.id)} className={`flex-1 text-left text-[13px] truncate ${selectedVersionId === v.id ? 'text-[#111] font-medium' : 'text-[#7F7F7F]'}`}>
                           {v.jobCompany}
                         </button>
                         <button
@@ -2715,8 +2745,16 @@ export default function Workspace() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* Top bar */}
-        <div className="h-14 px-6 flex items-center justify-between shrink-0 print-hide relative bg-white">
+        <div className="h-14 px-4 md:px-6 flex items-center justify-between shrink-0 print-hide relative bg-white">
             <div className="flex items-center gap-2 min-w-0 text-sm">
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen((open) => !open)}
+                className="md:hidden inline-flex h-8 w-8 items-center justify-center rounded-md text-[#6B6B6B] hover:bg-[#F2F2F2] hover:text-[#2B2B2B] transition-colors"
+                aria-label="Toggle sidebar"
+              >
+                <Menu size={18} />
+              </button>
               <span className="text-[#CBCBCB]">Resumes</span><span className="text-[#E0E0E0]">/</span>
               <span className="text-[#1A1A1A] truncate">{activeVersion.name}</span>
               {activeVersion.matchScore && <span className="px-2 py-0.5 bg-[#F5F5F5] rounded-full text-[10px] text-[#9B9B9B] shrink-0">{activeVersion.matchScore}% match</span>}
