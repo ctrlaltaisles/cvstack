@@ -10,8 +10,8 @@ const methods = [
   {
     id: 'upload',
     icon: FileUp,
-    title: 'Upload Existing CV (PDF)',
-    description: 'Upload a PDF (max 1MB) and pre-fill the master resume editor',
+    title: 'Upload Your Resume (PDF)',
+    description: 'Upload a PDF to pre-fill the master resume editor. File size limited to 1MB.',
   },
   {
     id: 'manual',
@@ -149,8 +149,8 @@ export default function MethodSelection() {
         </div>
 
         <div className="w-full max-w-lg rounded-[24px] border border-white/70 bg-white/82 p-7 shadow-[0_16px_54px_rgba(68,79,106,0.18)] backdrop-blur-sm md:p-8">
-          <h1 className="text-[30px] tracking-tight text-[#151a27] mb-2">Upload your resume to get started</h1>
-          <p className="text-sm text-[#7f8798] mb-8">No account required for upload, extraction preview, editing, and export. PDF uploads are limited to 1MB.</p>
+          <h1 className="text-[30px] tracking-tight text-[#151a27] mb-2">Let's start building</h1>
+          <p className="text-sm text-[#7f8798] mb-8">No account required for upload, extraction preview, editing, and export.</p>
 
           <div className="space-y-3">
             {methods.map((method) => {
