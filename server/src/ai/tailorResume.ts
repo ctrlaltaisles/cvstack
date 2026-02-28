@@ -113,7 +113,7 @@ const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
 const REQUEST_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 60000);
 const CURATE_TIMEOUT_MS = Number(process.env.OPENAI_CURATE_TIMEOUT_MS ?? process.env.OPENAI_TIMEOUT_MS ?? 120000);
 const CURATE_TIMEOUT_DISABLED = String(process.env.OPENAI_CURATE_DISABLE_TIMEOUT ?? 'true').trim().toLowerCase() === 'true' || CURATE_TIMEOUT_MS <= 0;
-const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 1800);
+const CURATE_MAX_TOKENS = Number(process.env.OPENAI_CURATE_MAX_TOKENS ?? 2600);
 const CAPABILITY_EXTRACTION_SYSTEM_PROMPT = [
   'You extract capability evidence from resume content.',
   'Use ONLY resume bullets and project notes.',
@@ -577,9 +577,14 @@ function evaluateCapabilityElevationCoverage(
   };
 }
 
+const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Master Resume';
+const PROJECT_NOTES_SOURCE_HEADING = /^From\s+(.+?)\s*$/i;
+
 interface CapabilityInventoryItem {
   expId: string;
+  capabilityId?: string;
   capability: string;
+  source?: string;
   evidenceQuotes: string[];
 }
 
@@ -604,6 +609,8 @@ interface RoleMappingOutput {
 
 interface RoleTransformationClaim {
   expId: string;
+  capabilityId?: string;
+  source?: string;
   claim: string;
   mechanism: string;
   impactSignal: string;
@@ -616,26 +623,175 @@ interface RoleTransformationOutput {
   warnings: string[];
 }
 
+interface MechanismRequirement {
+  capabilityId: string;
+  label: string;
+  source: string;
+  pattern: RegExp;
+  priority: number;
+}
+
+interface DepthDiagnostics {
+  score: number;
+  avgSimilarity: number;
+  meaningfulChanges: number;
+  capabilityCoverage: number;
+  mechanismCoverage: number;
+  variantMechanismCoverage: number;
+  missingMechanisms: string[];
+  deepEnough: boolean;
+  notes: string[];
+}
+
+const MODE_SIGNAL_CATALOG: Record<TargetRoleMode, Array<{ signal: string; capabilityIds: string[]; jdHints: string[] }>> = {
+  pm: [
+    { signal: 'Requirements and scope definition', capabilityIds: ['requirements_modeling', 'workflow_architecture'], jdHints: ['requirements', 'scope', 'handover', 'execution'] },
+    { signal: 'Cross-functional delivery coordination', capabilityIds: ['cross_functional_facilitation', 'journey_mapping'], jdHints: ['cross-functional', 'stakeholder', 'customer', 'coordination'] },
+    { signal: 'Schedule and dependency management', capabilityIds: ['workflow_architecture', 'scenario_modeling'], jdHints: ['schedule', 'timeline', 'dependencies', 'on-time'] },
+    { signal: 'Risk, issue, and SLA management', capabilityIds: ['sla_negotiation', 'dashboard_visibility'], jdHints: ['risk', 'issue', 'complaint', 'sla', 'mitigation'] },
+    { signal: 'Reporting and governance', capabilityIds: ['dashboard_visibility', 'analytics_interpretation', 'scenario_modeling'], jdHints: ['reporting', 'status', 'financial', 'progress', 'closing'] },
+    { signal: 'Continuous improvement and lessons learned', capabilityIds: ['experimentation', 'integration_hypothesis', 'theme_synthesis'], jdHints: ['lessons learnt', 'improve', 'process discipline', 'quality'] },
+  ],
+  product: [
+    { signal: 'Problem discovery and synthesis', capabilityIds: ['discovery_interviews', 'theme_synthesis', 'decision_frameworks'], jdHints: ['discovery', 'insights', 'problem', 'users'] },
+    { signal: 'Requirements and flow design', capabilityIds: ['requirements_modeling', 'workflow_architecture', 'journey_mapping'], jdHints: ['requirements', 'flows', 'spec', 'scope'] },
+    { signal: 'Experimentation and iteration', capabilityIds: ['experimentation', 'analytics_interpretation'], jdHints: ['experiment', 'adoption', 'conversion', 'engagement'] },
+    { signal: 'Cross-functional prioritization', capabilityIds: ['cross_functional_facilitation', 'scenario_modeling'], jdHints: ['prioritization', 'tradeoff', 'alignment', 'roadmap'] },
+  ],
+  designer: [
+    { signal: 'Journey and flow mapping', capabilityIds: ['journey_mapping', 'workflow_architecture'], jdHints: ['journey', 'flow', 'experience'] },
+    { signal: 'Feedback-led iteration', capabilityIds: ['discovery_interviews', 'theme_synthesis', 'experimentation'], jdHints: ['feedback', 'testing', 'iteration'] },
+    { signal: 'Usability and clarity improvements', capabilityIds: ['decision_frameworks', 'analytics_interpretation'], jdHints: ['usability', 'clarity', 'engagement'] },
+  ],
+  dev: [
+    { signal: 'Implementation planning and dependencies', capabilityIds: ['requirements_modeling', 'workflow_architecture'], jdHints: ['requirements', 'implementation', 'dependencies'] },
+    { signal: 'Reliability and issue resolution', capabilityIds: ['sla_negotiation', 'dashboard_visibility'], jdHints: ['reliability', 'issue', 'monitoring', 'quality'] },
+    { signal: 'Cross-functional delivery', capabilityIds: ['cross_functional_facilitation', 'scenario_modeling'], jdHints: ['cross-functional', 'delivery', 'schedule'] },
+  ],
+  analyst: [
+    { signal: 'Metric definition and reporting cadence', capabilityIds: ['dashboard_visibility', 'scenario_modeling', 'analytics_interpretation'], jdHints: ['kpi', 'reporting', 'dashboard', 'analysis'] },
+    { signal: 'Insight synthesis', capabilityIds: ['theme_synthesis', 'discovery_interviews'], jdHints: ['insight', 'findings', 'recommendation'] },
+    { signal: 'Decision support models', capabilityIds: ['scenario_modeling', 'integration_hypothesis'], jdHints: ['model', 'scenario', 'decision'] },
+  ],
+  ops: [
+    { signal: 'Process standardization', capabilityIds: ['workflow_architecture', 'journey_mapping', 'decision_frameworks'], jdHints: ['process', 'sop', 'standardize'] },
+    { signal: 'Operational visibility', capabilityIds: ['dashboard_visibility', 'analytics_interpretation'], jdHints: ['visibility', 'monitor', 'dashboard'] },
+    { signal: 'Issue resolution and controls', capabilityIds: ['sla_negotiation', 'cross_functional_facilitation'], jdHints: ['issue', 'risk', 'escalation'] },
+  ],
+  strategy: [
+    { signal: 'Scenario planning and business cases', capabilityIds: ['scenario_modeling', 'integration_hypothesis'], jdHints: ['scenario', 'roi', 'business case', 'tradeoff'] },
+    { signal: 'Executive synthesis and recommendations', capabilityIds: ['theme_synthesis', 'analytics_interpretation'], jdHints: ['executive', 'recommendation', 'insight'] },
+    { signal: 'Cross-functional alignment', capabilityIds: ['cross_functional_facilitation', 'requirements_modeling'], jdHints: ['alignment', 'stakeholder', 'prioritization'] },
+  ],
+  bizdev: [
+    { signal: 'Partnership and stakeholder management', capabilityIds: ['cross_functional_facilitation', 'decision_frameworks'], jdHints: ['partnership', 'stakeholder', 'negotiation'] },
+    { signal: 'Pipeline and conversion optimization', capabilityIds: ['analytics_interpretation', 'experimentation'], jdHints: ['pipeline', 'conversion', 'engagement'] },
+    { signal: 'Commercial planning support', capabilityIds: ['scenario_modeling', 'integration_hypothesis'], jdHints: ['commercial', 'growth', 'planning'] },
+  ],
+};
+
+function normalizeProjectNotesSourceLabel(value: string): string {
+  const clean = String(value ?? '').trim().replace(/\s+/g, ' ');
+  return clean || PROJECT_NOTES_BASE_SOURCE_LABEL;
+}
+
+function parseProjectNotesSections(value: string): Array<{ source: string; content: string }> {
+  const normalized = String(value ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split('\n');
+  const headingIndices: number[] = [];
+  lines.forEach((line, index) => {
+    if (PROJECT_NOTES_SOURCE_HEADING.test(line.trim())) headingIndices.push(index);
+  });
+
+  const firstNonEmptyLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  const isStructured = headingIndices.length >= 2 && firstNonEmptyLineIndex === headingIndices[0];
+  if (!isStructured) {
+    return [{ source: PROJECT_NOTES_BASE_SOURCE_LABEL, content: normalized }];
+  }
+
+  const sections: Array<{ source: string; content: string }> = [];
+  for (let i = 0; i < headingIndices.length; i += 1) {
+    const start = headingIndices[i];
+    const end = i + 1 < headingIndices.length ? headingIndices[i + 1] : lines.length;
+    const heading = lines[start].trim();
+    const match = heading.match(PROJECT_NOTES_SOURCE_HEADING);
+    if (!match) continue;
+    const source = normalizeProjectNotesSourceLabel(match[1]);
+    const content = lines.slice(start + 1, end).join('\n').trim();
+    if (!content) continue;
+    sections.push({ source, content });
+  }
+  if (sections.length === 0) {
+    return [{ source: PROJECT_NOTES_BASE_SOURCE_LABEL, content: normalized }];
+  }
+  return sections;
+}
+
+function inferCapabilityRuleFromText(text: string, mode: TargetRoleMode): CapabilityMarkerRule | undefined {
+  const normalized = String(text ?? '').toLowerCase();
+  return CAPABILITY_MARKER_RULES.find((rule) => {
+    if (!rule.modes.includes(mode)) return false;
+    if (rule.pattern.test(normalized)) return true;
+    const idProbe = rule.id.replace(/_/g, ' ');
+    const labelProbe = rule.label.toLowerCase().split('/')[0]?.trim();
+    return normalized.includes(idProbe) || (labelProbe ? normalized.includes(labelProbe) : false);
+  });
+}
+
+function findEvidenceQuotes(content: string, pattern: RegExp): string[] {
+  const sentenceHits = splitSentences(content)
+    .filter((sentence) => pattern.test(sentence))
+    .slice(0, 2);
+  if (sentenceHits.length > 0) return sentenceHits.map((sentence) => sentence.slice(0, 280));
+  const fallback = String(content ?? '').trim();
+  return fallback ? [fallback.slice(0, 280)] : [];
+}
+
 function buildDeterministicCapabilityExtraction(resumeData: ResumeData, mode: TargetRoleMode): CapabilityExtractionOutput {
   const capabilities: CapabilityInventoryItem[] = [];
+  const dedupe = new Set<string>();
+
   for (const exp of resumeData.workExperience ?? []) {
-    const sourceText = `${exp.projectNotes ?? ''} ${(exp.bullets ?? []).join(' ')}`.trim();
-    const markers = extractCapabilityMarkers(sourceText, mode);
-    const notesSentences = splitSentences(exp.projectNotes ?? '').slice(0, 2);
-    const bulletQuotes = (exp.bullets ?? []).map((b) => b.trim()).filter(Boolean).slice(0, 2);
-    const evidenceBase = uniqueStrings([...notesSentences, ...bulletQuotes]).slice(0, 2);
-    for (const marker of markers) {
-      capabilities.push({
-        expId: exp.id,
-        capability: marker.label,
-        evidenceQuotes: evidenceBase,
-      });
+    const sections = parseProjectNotesSections(exp.projectNotes ?? '');
+    for (const section of sections) {
+      const markers = extractCapabilityMarkers(section.content, mode);
+      for (const marker of markers) {
+        const key = `${exp.id}::${marker.id}::${normalizeProjectNotesSourceLabel(section.source)}`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+        capabilities.push({
+          expId: exp.id,
+          capabilityId: marker.id,
+          capability: marker.label,
+          source: normalizeProjectNotesSourceLabel(section.source),
+          evidenceQuotes: findEvidenceQuotes(section.content, marker.pattern).slice(0, 2),
+        });
+      }
+    }
+
+    if (sections.length === 0) {
+      const sourceText = `${(exp.bullets ?? []).join(' ')}`.trim();
+      const markers = extractCapabilityMarkers(sourceText, mode);
+      for (const marker of markers) {
+        const key = `${exp.id}::${marker.id}::bullets`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+        capabilities.push({
+          expId: exp.id,
+          capabilityId: marker.id,
+          capability: marker.label,
+          source: 'Legacy Bullets',
+          evidenceQuotes: (exp.bullets ?? []).filter((bullet) => marker.pattern.test(bullet)).slice(0, 2),
+        });
+      }
     }
   }
 
-  const capabilitySummary = uniqueStrings(capabilities.map((item) => item.capability)).slice(0, 20);
+  const capabilitySummary = uniqueStrings(capabilities.map((item) => item.capability)).slice(0, 24);
   return {
-    capabilities: capabilities.slice(0, 60),
+    capabilities: capabilities.slice(0, 80),
     capabilitySummary,
     missingInfoQuestions: [],
   };
@@ -655,9 +811,14 @@ function sanitizeCapabilityExtractionOutput(payload: unknown, resumeData: Resume
       const expId = String(item.expId ?? '').trim();
       const capability = String(item.capability ?? '').trim();
       if (!expId || !capability || !validExpIds.has(expId)) return null;
+      const source = normalizeProjectNotesSourceLabel(String(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL));
+      const explicitId = String(item.capabilityId ?? '').trim();
+      const inferred = explicitId || inferCapabilityRuleFromText(`${capability} ${asStringArray(item.evidenceQuotes).join(' ')}`, mode)?.id || '';
       return {
         expId,
+        capabilityId: inferred || undefined,
         capability,
+        source,
         evidenceQuotes: asStringArray(item.evidenceQuotes).slice(0, 2),
       } as CapabilityInventoryItem;
     })
@@ -666,10 +827,10 @@ function sanitizeCapabilityExtractionOutput(payload: unknown, resumeData: Resume
   const capabilitySummary = uniqueStrings([
     ...asStringArray(raw.capabilitySummary),
     ...capabilities.map((item) => item.capability),
-  ]).slice(0, 20);
+  ]).slice(0, 24);
 
   return {
-    capabilities: capabilities.length > 0 ? capabilities.slice(0, 60) : fallback.capabilities,
+    capabilities: capabilities.length > 0 ? capabilities.slice(0, 80) : fallback.capabilities,
     capabilitySummary: capabilitySummary.length > 0 ? capabilitySummary : fallback.capabilitySummary,
     missingInfoQuestions: asStringArray(raw.missingInfoQuestions).slice(0, 5),
   };
@@ -679,22 +840,46 @@ function buildDeterministicRoleMapping(
   capabilities: CapabilityExtractionOutput,
   jdKeywords: string[],
   targetRoleMode: TargetRoleMode,
+  jdText = '',
 ): RoleMappingOutput {
-  const supportedSignals: RoleMappingSignal[] = capabilities.capabilitySummary.slice(0, 8).map((capability) => {
-    const mapped = capabilities.capabilities.filter((item) => item.capability.toLowerCase() === capability.toLowerCase()).slice(0, 2);
-    return {
-      signal: capability,
-      mappedCapabilities: [capability],
-      evidenceQuotes: uniqueStrings(mapped.flatMap((item) => item.evidenceQuotes)).slice(0, 2),
-    };
-  });
+  const catalog = MODE_SIGNAL_CATALOG[targetRoleMode] ?? MODE_SIGNAL_CATALOG.product;
+  const jdBlob = `${jdText} ${jdKeywords.join(' ')}`.toLowerCase();
 
-  const supportedText = supportedSignals.map((item) => item.signal.toLowerCase()).join(' ');
-  const unsupportedSignals = jdKeywords.filter((keyword) => !supportedText.includes(keyword.toLowerCase())).slice(0, 8);
+  const supportedSignalsRaw: Array<RoleMappingSignal & { priority: number }> = [];
+  for (const signal of catalog) {
+    const matched = capabilities.capabilities.filter((item) => item.capabilityId && signal.capabilityIds.includes(item.capabilityId));
+    if (matched.length === 0) continue;
+    const jdMatched = signal.jdHints.some((hint) => jdBlob.includes(hint.toLowerCase()));
+    const fromVariant = matched.some((item) => normalizeProjectNotesSourceLabel(item.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase());
+    const priority = (jdMatched ? 2 : 0) + (fromVariant ? 1 : 0);
+    supportedSignalsRaw.push({
+      signal: signal.signal,
+      mappedCapabilities: uniqueStrings(matched.map((item) => item.capability)).slice(0, 5),
+      evidenceQuotes: uniqueStrings(matched.flatMap((item) => item.evidenceQuotes)).slice(0, 2),
+      priority,
+    });
+  }
+
+  const supportedSignals = supportedSignalsRaw
+    .sort((a, b) => b.priority - a.priority || b.mappedCapabilities.length - a.mappedCapabilities.length)
+    .slice(0, 10)
+    .map((item) => ({
+      signal: item.signal,
+      mappedCapabilities: item.mappedCapabilities,
+      evidenceQuotes: item.evidenceQuotes,
+    }));
+
+  const supportedText = `${supportedSignals.map((item) => item.signal).join(' ')} ${supportedSignals.flatMap((item) => item.mappedCapabilities).join(' ')}`.toLowerCase();
+  const unsupportedSignals = jdKeywords.filter((keyword) => !supportedText.includes(keyword.toLowerCase())).slice(0, 10);
+  const jdFocusAreas = uniqueStrings([
+    ...jdKeywords.slice(0, 3),
+    ...supportedSignals.slice(0, 2).map((item) => item.signal),
+  ]).slice(0, 3);
+
   return {
     supportedSignals,
     unsupportedSignals,
-    jdFocusAreas: jdKeywords.slice(0, 3),
+    jdFocusAreas,
     targetRoleMode,
   };
 }
@@ -714,7 +899,7 @@ function sanitizeRoleMappingOutput(
       if (!signal) return null;
       return {
         signal,
-        mappedCapabilities: asStringArray(item.mappedCapabilities).slice(0, 4),
+        mappedCapabilities: asStringArray(item.mappedCapabilities).slice(0, 5),
         evidenceQuotes: asStringArray(item.evidenceQuotes).slice(0, 2),
       } as RoleMappingSignal;
     })
@@ -727,23 +912,119 @@ function sanitizeRoleMappingOutput(
 
   return {
     supportedSignals: supportedSignals.length > 0 ? supportedSignals.slice(0, 12) : fallback.supportedSignals,
-    unsupportedSignals: uniqueStrings(asStringArray(raw.unsupportedSignals)).slice(0, 8),
-    jdFocusAreas: uniqueStrings(asStringArray(raw.jdFocusAreas)).slice(0, 3),
+    unsupportedSignals: uniqueStrings(asStringArray(raw.unsupportedSignals)).slice(0, 10),
+    jdFocusAreas: uniqueStrings(asStringArray(raw.jdFocusAreas)).slice(0, 3).length > 0
+      ? uniqueStrings(asStringArray(raw.jdFocusAreas)).slice(0, 3)
+      : fallback.jdFocusAreas,
     targetRoleMode: mode,
   };
+}
+
+function claimForCapability(item: CapabilityInventoryItem): { claim: string; mechanism: string; impact: string } {
+  switch (item.capabilityId) {
+    case 'requirements_modeling':
+      return {
+        claim: 'Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs.',
+        mechanism: 'workflow spec + state transitions',
+        impact: 'reduced manual duplication and improved process clarity',
+      };
+    case 'workflow_architecture':
+      return {
+        claim: 'Mapped end-to-end workflow handoffs, identified bottlenecks, and redesigned process flow to improve execution visibility.',
+        mechanism: 'workflow mapping + bottleneck analysis',
+        impact: 'clearer handoffs and faster operational flow',
+      };
+    case 'cross_functional_facilitation':
+      return {
+        claim: 'Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions.',
+        mechanism: 'cross-functional facilitation',
+        impact: 'faster alignment and fewer execution gaps',
+      };
+    case 'discovery_interviews':
+      return {
+        claim: 'Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items.',
+        mechanism: 'discovery interviews',
+        impact: 'better decision quality in evaluation workflows',
+      };
+    case 'theme_synthesis':
+      return {
+        claim: 'Synthesized recurring stakeholder themes to prioritize interventions and clarify decision pathways.',
+        mechanism: 'theme synthesis',
+        impact: 'higher-signal prioritization',
+      };
+    case 'decision_frameworks':
+      return {
+        claim: 'Designed structured feedback templates to reduce subjective bias and improve clarity in decision-making.',
+        mechanism: 'structured decision framework',
+        impact: 'more consistent evaluation outcomes',
+      };
+    case 'journey_mapping':
+      return {
+        claim: 'Mapped onboarding journey touchpoints from offer acceptance through 90-day milestones to identify drop-off risks.',
+        mechanism: 'journey mapping',
+        impact: 'improved onboarding continuity',
+      };
+    case 'experimentation':
+      return {
+        claim: 'Facilitated pilot rollouts of standardized onboarding experiences and iterated checkpoints using feedback.',
+        mechanism: 'pilot experimentation',
+        impact: 'stronger process adoption',
+      };
+    case 'analytics_interpretation':
+      return {
+        claim: 'Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals.',
+        mechanism: 'heatmap + engagement analysis',
+        impact: 'improved page performance and inbound quality',
+      };
+    case 'scenario_modeling':
+      return {
+        claim: 'Modeled hiring-velocity scenarios and growth trajectories in Excel to inform headcount and cost planning trade-offs.',
+        mechanism: 'scenario modeling',
+        impact: 'clearer planning decisions for leadership',
+      };
+    case 'sla_negotiation':
+      return {
+        claim: 'Escalated recurring provisioning delays and proposed revised SLA agreements with IT to reduce productivity blockers.',
+        mechanism: 'SLA redesign',
+        impact: 'faster operational turnaround',
+      };
+    case 'dashboard_visibility':
+      return {
+        claim: 'Implemented tracking dashboards to monitor turnaround times and provide operational visibility for stakeholders.',
+        mechanism: 'dashboard instrumentation',
+        impact: 'better progress tracking and issue response',
+      };
+    case 'integration_hypothesis':
+      return {
+        claim: 'Contributed to exploratory integration planning between HR reporting and product analytics to link hiring investment to team velocity.',
+        mechanism: 'cross-domain analytics integration',
+        impact: 'stronger strategy hypotheses for scaling',
+      };
+    default:
+      return {
+        claim: `Applied ${item.capability} to improve cross-functional execution quality.`,
+        mechanism: item.capability,
+        impact: 'better delivery consistency',
+      };
+  }
 }
 
 function buildDeterministicRoleTransformation(
   capabilities: CapabilityExtractionOutput,
   _targetRoleMode: TargetRoleMode,
 ): RoleTransformationOutput {
-  const transformedClaims: RoleTransformationClaim[] = capabilities.capabilities.slice(0, 16).map((item) => ({
-    expId: item.expId,
-    claim: `Applied ${item.capability} in cross-functional delivery contexts.`,
-    mechanism: item.capability,
-    impactSignal: 'execution clarity',
-    evidenceQuotes: item.evidenceQuotes.slice(0, 2),
-  }));
+  const transformedClaims: RoleTransformationClaim[] = capabilities.capabilities.slice(0, 24).map((item) => {
+    const reframed = claimForCapability(item);
+    return {
+      expId: item.expId,
+      capabilityId: item.capabilityId,
+      source: item.source,
+      claim: reframed.claim,
+      mechanism: reframed.mechanism,
+      impactSignal: reframed.impact,
+      evidenceQuotes: item.evidenceQuotes.slice(0, 2),
+    };
+  });
 
   return {
     transformedClaims,
@@ -766,6 +1047,8 @@ function sanitizeRoleTransformationOutput(payload: unknown, fallback: RoleTransf
       if (!expId || !claim || !validExpIds.has(expId)) return null;
       return {
         expId,
+        capabilityId: String(item.capabilityId ?? '').trim() || undefined,
+        source: normalizeProjectNotesSourceLabel(String(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL)),
         claim,
         mechanism: String(item.mechanism ?? '').trim(),
         impactSignal: String(item.impactSignal ?? '').trim(),
@@ -775,9 +1058,210 @@ function sanitizeRoleTransformationOutput(payload: unknown, fallback: RoleTransf
     .filter((row): row is RoleTransformationClaim => Boolean(row));
 
   return {
-    transformedClaims: transformedClaims.length > 0 ? transformedClaims.slice(0, 24) : fallback.transformedClaims,
-    droppedClaims: uniqueStrings(asStringArray(raw.droppedClaims)).slice(0, 8),
-    warnings: uniqueStrings(asStringArray(raw.warnings)).slice(0, 8),
+    transformedClaims: transformedClaims.length > 0 ? transformedClaims.slice(0, 28) : fallback.transformedClaims,
+    droppedClaims: uniqueStrings(asStringArray(raw.droppedClaims)).slice(0, 10),
+    warnings: uniqueStrings(asStringArray(raw.warnings)).slice(0, 10),
+  };
+}
+
+function mergeCapabilityExtractionOutputs(
+  base: CapabilityExtractionOutput,
+  overlay: CapabilityExtractionOutput,
+): CapabilityExtractionOutput {
+  const mergedMap = new Map<string, CapabilityInventoryItem>();
+  const upsert = (item: CapabilityInventoryItem) => {
+    const key = [
+      item.expId,
+      item.capabilityId ?? item.capability.toLowerCase(),
+      normalizeProjectNotesSourceLabel(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL).toLowerCase(),
+    ].join('::');
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, {
+        ...item,
+        source: normalizeProjectNotesSourceLabel(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL),
+        evidenceQuotes: uniqueStrings(item.evidenceQuotes).slice(0, 2),
+      });
+      return;
+    }
+    const existing = mergedMap.get(key)!;
+    mergedMap.set(key, {
+      ...existing,
+      capabilityId: existing.capabilityId || item.capabilityId,
+      evidenceQuotes: uniqueStrings([...existing.evidenceQuotes, ...item.evidenceQuotes]).slice(0, 2),
+    });
+  };
+
+  base.capabilities.forEach(upsert);
+  overlay.capabilities.forEach(upsert);
+
+  return {
+    capabilities: [...mergedMap.values()].slice(0, 90),
+    capabilitySummary: uniqueStrings([...base.capabilitySummary, ...overlay.capabilitySummary]).slice(0, 24),
+    missingInfoQuestions: uniqueStrings([...base.missingInfoQuestions, ...overlay.missingInfoQuestions]).slice(0, 5),
+  };
+}
+
+function mergeRoleMappingOutputs(base: RoleMappingOutput, overlay: RoleMappingOutput): RoleMappingOutput {
+  const map = new Map<string, RoleMappingSignal>();
+  for (const signal of [...base.supportedSignals, ...overlay.supportedSignals]) {
+    const key = signal.signal.toLowerCase();
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        signal: signal.signal,
+        mappedCapabilities: uniqueStrings(signal.mappedCapabilities).slice(0, 5),
+        evidenceQuotes: uniqueStrings(signal.evidenceQuotes).slice(0, 2),
+      });
+      continue;
+    }
+    map.set(key, {
+      signal: existing.signal,
+      mappedCapabilities: uniqueStrings([...existing.mappedCapabilities, ...signal.mappedCapabilities]).slice(0, 5),
+      evidenceQuotes: uniqueStrings([...existing.evidenceQuotes, ...signal.evidenceQuotes]).slice(0, 2),
+    });
+  }
+
+  return {
+    supportedSignals: [...map.values()].slice(0, 12),
+    unsupportedSignals: uniqueStrings([...base.unsupportedSignals, ...overlay.unsupportedSignals]).slice(0, 10),
+    jdFocusAreas: uniqueStrings([...base.jdFocusAreas, ...overlay.jdFocusAreas]).slice(0, 3),
+    targetRoleMode: overlay.targetRoleMode || base.targetRoleMode,
+  };
+}
+
+function mergeRoleTransformationOutputs(
+  base: RoleTransformationOutput,
+  overlay: RoleTransformationOutput,
+): RoleTransformationOutput {
+  const map = new Map<string, RoleTransformationClaim>();
+  const upsert = (claim: RoleTransformationClaim) => {
+    const key = `${claim.expId}::${claim.capabilityId ?? claim.mechanism.toLowerCase()}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        ...claim,
+        evidenceQuotes: uniqueStrings(claim.evidenceQuotes).slice(0, 2),
+      });
+      return;
+    }
+    const existing = map.get(key)!;
+    map.set(key, {
+      ...existing,
+      claim: existing.claim || claim.claim,
+      mechanism: existing.mechanism || claim.mechanism,
+      impactSignal: existing.impactSignal || claim.impactSignal,
+      evidenceQuotes: uniqueStrings([...existing.evidenceQuotes, ...claim.evidenceQuotes]).slice(0, 2),
+    });
+  };
+
+  base.transformedClaims.forEach(upsert);
+  overlay.transformedClaims.forEach(upsert);
+
+  return {
+    transformedClaims: [...map.values()].slice(0, 28),
+    droppedClaims: uniqueStrings([...base.droppedClaims, ...overlay.droppedClaims]).slice(0, 10),
+    warnings: uniqueStrings([...base.warnings, ...overlay.warnings]).slice(0, 10),
+  };
+}
+
+function buildMechanismRequirements(capabilities: CapabilityExtractionOutput, mode: TargetRoleMode): MechanismRequirement[] {
+  const dedupe = new Map<string, MechanismRequirement>();
+  for (const item of capabilities.capabilities) {
+    const rule = item.capabilityId
+      ? CAPABILITY_MARKER_RULES.find((candidate) => candidate.id === item.capabilityId)
+      : inferCapabilityRuleFromText(item.capability, mode);
+    if (!rule) continue;
+    const source = normalizeProjectNotesSourceLabel(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL);
+    const fromVariant = source.toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase();
+    const priority = (fromVariant ? 3 : 1)
+      + (['requirements_modeling', 'workflow_architecture', 'discovery_interviews', 'analytics_interpretation', 'scenario_modeling', 'sla_negotiation', 'dashboard_visibility'].includes(rule.id) ? 1 : 0);
+    const key = `${rule.id}::${source.toLowerCase()}`;
+    if (!dedupe.has(key) || (dedupe.get(key)?.priority ?? 0) < priority) {
+      dedupe.set(key, {
+        capabilityId: rule.id,
+        label: rule.label,
+        source,
+        pattern: rule.pattern,
+        priority,
+      });
+    }
+  }
+  return [...dedupe.values()]
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 10);
+}
+
+function evaluateDepthDiagnostics(
+  resumeData: ResumeData,
+  output: CurateResumeOutput,
+  targetRoleMode: TargetRoleMode,
+  mechanismRequirements: MechanismRequirement[],
+): DepthDiagnostics {
+  const beforeBullets = resumeData.workExperience.flatMap((exp) => exp.bullets.map((bullet) => bullet.trim()).filter(Boolean));
+  const afterBullets = output.improved.experience.flatMap((exp) => exp.bullets.map((bullet) => bullet.trim()).filter(Boolean));
+  const max = Math.max(beforeBullets.length, afterBullets.length);
+  const sims: number[] = [];
+  let meaningfulChanges = 0;
+  for (let i = 0; i < max; i += 1) {
+    const before = beforeBullets[i] ?? '';
+    const after = afterBullets[i] ?? '';
+    if (!after) continue;
+    if (!before) {
+      meaningfulChanges += 1;
+      continue;
+    }
+    const sim = lexicalSimilarity(before, after);
+    sims.push(sim);
+    if (sim < 0.8) meaningfulChanges += 1;
+  }
+  const avgSimilarity = sims.length > 0 ? Number((sims.reduce((a, b) => a + b, 0) / sims.length).toFixed(2)) : 1;
+
+  const capabilityCoverageEval = evaluateCapabilityElevationCoverage(resumeData, output.improved, targetRoleMode);
+  const capabilityCoverage = capabilityCoverageEval.coverageRatio;
+
+  const afterText = afterBullets.join(' ');
+  const mechanismHits = mechanismRequirements.filter((item) => item.pattern.test(afterText));
+  const mechanismCoverage = mechanismRequirements.length > 0 ? mechanismHits.length / mechanismRequirements.length : 1;
+  const variantRequirements = mechanismRequirements.filter((item) => item.source.toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase());
+  const variantHits = variantRequirements.filter((item) => item.pattern.test(afterText));
+  const variantMechanismCoverage = variantRequirements.length > 0 ? variantHits.length / variantRequirements.length : 1;
+
+  const score = Number((
+    (meaningfulChanges * 0.2)
+    + ((1 - avgSimilarity) * 0.25)
+    + (capabilityCoverage * 0.3)
+    + (mechanismCoverage * 0.15)
+    + (variantMechanismCoverage * 0.1)
+  ).toFixed(3));
+
+  const missingMechanisms = mechanismRequirements
+    .filter((item) => !item.pattern.test(afterText))
+    .map((item) => `${item.label} (${item.source})`)
+    .slice(0, 8);
+
+  const deepEnough = meaningfulChanges >= 4
+    && avgSimilarity <= 0.74
+    && capabilityCoverage >= 0.3
+    && mechanismCoverage >= 0.55
+    && variantMechanismCoverage >= 0.45;
+
+  const notes: string[] = [
+    `meaningfulChanges=${meaningfulChanges}`,
+    `avgSimilarity=${avgSimilarity}`,
+    `capabilityCoverage=${Math.round(capabilityCoverage * 100)}%`,
+    `mechanismCoverage=${Math.round(mechanismCoverage * 100)}%`,
+    `variantMechanismCoverage=${Math.round(variantMechanismCoverage * 100)}%`,
+  ];
+
+  return {
+    score,
+    avgSimilarity,
+    meaningfulChanges,
+    capabilityCoverage,
+    mechanismCoverage,
+    variantMechanismCoverage,
+    missingMechanisms,
+    deepEnough,
+    notes,
   };
 }
 
@@ -835,7 +1319,8 @@ function compactResumeDataForCuration(resumeData: ResumeData): ResumeData {
       company: clamp(exp.company, 80),
       role: clamp(exp.role, 80),
       bullets: (exp.bullets ?? []).slice(0, 7).map((bullet) => clamp(bullet, 260)),
-      projectNotes: clamp(exp.projectNotes ?? '', 2400),
+      // Keep richer context so merged Master + Variant notes are not silently dropped.
+      projectNotes: clamp(exp.projectNotes ?? '', 9000),
     })),
     education: (resumeData.education ?? []).slice(0, 5),
     certifications: (resumeData.certifications ?? []).slice(0, 5),
@@ -1392,6 +1877,73 @@ async function runCurateModelParsed(
   }
 }
 
+function buildDepthRescueBulletsForExp(
+  baseExp: ResumeData['workExperience'][number],
+  claims: RoleTransformationClaim[],
+  maxBullets = 7,
+): string[] {
+  const orderedClaims = [...claims].sort((a, b) => {
+    const aVariant = normalizeProjectNotesSourceLabel(a.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    const bVariant = normalizeProjectNotesSourceLabel(b.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    if (aVariant !== bVariant) return bVariant - aVariant;
+    return Number(Boolean(b.capabilityId)) - Number(Boolean(a.capabilityId));
+  });
+
+  const claimBullets = orderedClaims
+    .map((claim) => {
+      const evidence = claim.evidenceQuotes.find(Boolean) ?? '';
+      const withEvidence = evidence
+        ? `${claim.claim} (${evidence.slice(0, 140).replace(/\.$/, '')}).`
+        : `${claim.claim} ${claim.impactSignal}.`;
+      return withEvidence.replace(/\s+/g, ' ').trim();
+    })
+    .filter(Boolean);
+
+  const uniqueClaimBullets = uniqueStrings(claimBullets).slice(0, maxBullets);
+  if (uniqueClaimBullets.length >= 4) return uniqueClaimBullets;
+
+  const fallbacks = (baseExp.bullets ?? [])
+    .map((bullet) => bullet.trim())
+    .filter(Boolean)
+    .slice(0, maxBullets - uniqueClaimBullets.length);
+  return uniqueStrings([...uniqueClaimBullets, ...fallbacks]).slice(0, maxBullets);
+}
+
+function applyDepthRescueFromClaims(
+  output: CurateResumeOutput,
+  resumeData: ResumeData,
+  roleTransformation: RoleTransformationOutput,
+): CurateResumeOutput {
+  const byExp = new Map<string, RoleTransformationClaim[]>();
+  for (const claim of roleTransformation.transformedClaims) {
+    const list = byExp.get(claim.expId) ?? [];
+    list.push(claim);
+    byExp.set(claim.expId, list);
+  }
+
+  const rescuedExperience = output.improved.experience.map((exp) => {
+    const sourceExp = resumeData.workExperience.find((item) => item.id === exp.expId);
+    if (!sourceExp) return exp;
+    const claims = byExp.get(exp.expId) ?? [];
+    if (claims.length === 0) return exp;
+    const bullets = buildDepthRescueBulletsForExp(sourceExp, claims);
+    if (bullets.length === 0) return exp;
+    return { ...exp, bullets };
+  });
+
+  return {
+    ...output,
+    improved: {
+      ...output.improved,
+      experience: rescuedExperience,
+    },
+    redFlags: uniqueStrings([
+      ...output.redFlags,
+      'Depth rescue applied from transformed capability claims.',
+    ]),
+  };
+}
+
 export async function tailorResumeWithAI(input: TailorResumeInput, requestId: string): Promise<TailorResumeOutput> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -1480,7 +2032,7 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         sourceOfTruth: 'resume bullets + workExperience.projectNotes only',
         resumeData: compactResumeData,
         output_schema: {
-          capabilities: [{ expId: 'string', capability: 'string', evidenceQuotes: 'string[] max 2' }],
+          capabilities: [{ expId: 'string', capabilityId: 'string', capability: 'string', source: 'string', evidenceQuotes: 'string[] max 2' }],
           capabilitySummary: 'string[]',
           missingInfoQuestions: 'string[] max 5',
         },
@@ -1491,12 +2043,13 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         JSON.stringify(layer1Payload),
         curateSignal,
       );
-      layer1 = sanitizeCapabilityExtractionOutput(parsed, compactResumeData, targetRoleMode);
+      const modelLayer1 = sanitizeCapabilityExtractionOutput(parsed, compactResumeData, targetRoleMode);
+      layer1 = mergeCapabilityExtractionOutputs(layer1, modelLayer1);
     } catch (error) {
       console.warn(`[ai-curate][${requestId}] layer1 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
     }
 
-    let layer2 = buildDeterministicRoleMapping(layer1, jdKeywords, targetRoleMode);
+    let layer2 = buildDeterministicRoleMapping(layer1, jdKeywords, targetRoleMode, jdText);
     if (hasJD) {
       try {
         const layer2Payload = {
@@ -1519,7 +2072,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           JSON.stringify(layer2Payload),
           curateSignal,
         );
-        layer2 = sanitizeRoleMappingOutput(parsed, layer2);
+        const modelLayer2 = sanitizeRoleMappingOutput(parsed, layer2);
+        layer2 = mergeRoleMappingOutputs(layer2, modelLayer2);
       } catch (error) {
         console.warn(`[ai-curate][${requestId}] layer2 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
       }
@@ -1538,6 +2092,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         output_schema: {
           transformedClaims: [{
             expId: 'string',
+            capabilityId: 'string',
+            source: 'string',
             claim: 'string',
             mechanism: 'string',
             impactSignal: 'string',
@@ -1553,11 +2109,21 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         JSON.stringify(layer3Payload),
         curateSignal,
       );
-      layer3 = sanitizeRoleTransformationOutput(parsed, layer3, compactResumeData);
+      const modelLayer3 = sanitizeRoleTransformationOutput(parsed, layer3, compactResumeData);
+      const filteredModelLayer3: RoleTransformationOutput = {
+        transformedClaims: modelLayer3.transformedClaims.filter((claim) => {
+          if (!claim.capabilityId) return false;
+          return !layer3.transformedClaims.some((base) => base.expId === claim.expId && base.capabilityId === claim.capabilityId);
+        }),
+        droppedClaims: modelLayer3.droppedClaims,
+        warnings: modelLayer3.warnings,
+      };
+      layer3 = mergeRoleTransformationOutputs(layer3, filteredModelLayer3);
     } catch (error) {
       console.warn(`[ai-curate][${requestId}] layer3 fallback reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
     }
 
+    const mechanismRequirements = buildMechanismRequirements(layer1, layer2.targetRoleMode);
     const finalPayload = {
       task: hasJD ? 'layer_4_final_writing_jd_aligned' : 'layer_4_final_writing_base_resume',
       targetRole,
@@ -1567,6 +2133,12 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       supportedSignals: layer2.supportedSignals,
       unsupportedSignals: layer2.unsupportedSignals,
       transformedClaims: layer3.transformedClaims,
+      mustIncludeMechanisms: mechanismRequirements.map((item) => ({
+        capabilityId: item.capabilityId,
+        label: item.label,
+        source: item.source,
+        priority: item.priority,
+      })),
       resumeData: compactResumeData,
       rules: [
         'Use only source-backed claims from resumeData and transformedClaims.',
@@ -1574,6 +2146,9 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         'Do not copy JD text line-by-line or mirror JD order.',
         'Keep 5-7 bullets maximum per role.',
         'If metrics are missing, ask concise questions instead of inventing values.',
+        'Depth requirement: preserve mechanism nouns from evidence (e.g., workflow spec, state transitions, discovery interviews, heatmap analytics, scenario modeling, SLA, dashboard) when present.',
+        'Each bullet should include mechanism + action + impact signal, not only generic process language.',
+        'If variant project-note sources exist, preserve at least 2 mechanism signals from those variant sources in final bullets.',
       ],
       output_schema: {
         improved: {
@@ -1601,41 +2176,89 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
           evidence: 'string[] max 4',
         },
         suggestions: [{ field: 'bio|bullet', expId: 'string', bulletIdx: 'number', suggested: 'string', reason: 'string' }],
+        roleLensOutput: {
+          bullets: [{ expId: 'string', bullet: 'string', evidenceQuotes: 'string[] max 2' }],
+          missingInfoQuestions: 'string[] max 5',
+        },
       },
     };
 
-    let finalParsed: unknown;
-    try {
-      ({ parsed: finalParsed } = await runCurateModelParsed(
-        client,
-        FINAL_WRITING_SYSTEM_PROMPT,
-        JSON.stringify(finalPayload),
-        curateSignal,
-      ));
-    } catch (error) {
-      console.warn(`[ai-curate][${requestId}] layer4 retry reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
-      const rescuePayload = {
-        ...finalPayload,
-        rescue: true,
-        extraInstruction: 'Return exactly one valid JSON object matching output_schema. No markdown.',
-      };
+    let bestOutput: CurateResumeOutput | null = null;
+    let bestDepth: DepthDiagnostics | null = null;
+    let currentFinalPayload: Record<string, unknown> = finalPayload;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let parsed: unknown;
       try {
-        ({ parsed: finalParsed } = await runCurateModelParsed(
+        ({ parsed } = await runCurateModelParsed(
           client,
           FINAL_WRITING_SYSTEM_PROMPT,
-          JSON.stringify(rescuePayload),
+          JSON.stringify(currentFinalPayload),
           curateSignal,
         ));
-      } catch (rescueError) {
-        console.warn(`[ai-curate][${requestId}] layer4 rescue fallback reason="${String((rescueError as { message?: string }).message ?? 'unknown error')}"`);
-        return buildFallbackCurateOutput(input, 'AI response formatting issue in final writing step. Please retry curation.');
+      } catch (error) {
+        console.warn(`[ai-curate][${requestId}] layer4 attempt=${attempt + 1} reason="${String((error as { message?: string }).message ?? 'unknown error')}"`);
+        if (attempt === 2) break;
+        currentFinalPayload = {
+          ...finalPayload,
+          depthRetry: {
+            attempt: attempt + 1,
+            reason: 'format_or_generation_failure',
+            instruction: 'Return exactly one valid JSON object matching output_schema. No markdown.',
+          },
+        };
+        continue;
       }
+
+      const candidate = sanitizeElevateOutput(parsed, input.resumeData, targetRole, jdKeywords);
+      if (candidate.suggestions.length === 0) {
+        candidate.suggestions = deriveSuggestionsFromImproved(input.resumeData, candidate.improved, candidate.changes);
+      }
+      const candidateDepth = evaluateDepthDiagnostics(
+        input.resumeData,
+        candidate,
+        layer2.targetRoleMode,
+        mechanismRequirements,
+      );
+
+      if (!bestDepth || candidateDepth.score > bestDepth.score) {
+        bestDepth = candidateDepth;
+        bestOutput = candidate;
+      }
+
+      if (candidateDepth.deepEnough) break;
+
+      currentFinalPayload = {
+        ...finalPayload,
+        depthRetry: {
+          attempt: attempt + 1,
+          depthDiagnostics: candidateDepth,
+          missingMechanisms: candidateDepth.missingMechanisms,
+          previousImproved: candidate.improved.experience,
+          instruction: 'Increase transformation depth: preserve mechanism nouns, reduce generic wording, and integrate missing mechanisms without inventing facts.',
+        },
+      };
     }
 
-    const output = sanitizeElevateOutput(finalParsed, input.resumeData, targetRole, jdKeywords);
+    if (!bestOutput) {
+      return buildFallbackCurateOutput(input, 'AI response formatting issue in final writing step. Please retry curation.');
+    }
 
-    if (output.suggestions.length === 0) {
-      output.suggestions = deriveSuggestionsFromImproved(input.resumeData, output.improved, output.changes);
+    let output = bestOutput;
+    let depthDiagnostics = bestDepth ?? evaluateDepthDiagnostics(
+      input.resumeData,
+      output,
+      layer2.targetRoleMode,
+      mechanismRequirements,
+    );
+    if (!depthDiagnostics.deepEnough && layer3.transformedClaims.length > 0) {
+      output = applyDepthRescueFromClaims(output, input.resumeData, layer3);
+      depthDiagnostics = evaluateDepthDiagnostics(
+        input.resumeData,
+        output,
+        layer2.targetRoleMode,
+        mechanismRequirements,
+      );
     }
 
     const unsupportedQuestions = hasJD
@@ -1657,6 +2280,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
     output.changeSummary = uniqueStrings([
       ...output.changeSummary,
       `Used staged reasoning: capability extraction -> role mapping -> ${layer2.targetRoleMode} transformation -> final writing.`,
+      `Mechanisms targeted: ${mechanismRequirements.map((item) => item.label).slice(0, 6).join(', ') || 'none'}.`,
+      `Depth diagnostics: ${depthDiagnostics.notes.join(', ')}.`,
     ]).slice(0, 10);
 
     output.redFlags = uniqueStrings([
@@ -1665,14 +2290,24 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       ...(hasJD && layer2.unsupportedSignals.length > 0
         ? [`Excluded unsupported JD signals: ${layer2.unsupportedSignals.slice(0, 5).join(', ')}`]
         : []),
+      ...(!depthDiagnostics.deepEnough
+        ? [`Depth gap remains after retries; missing mechanisms: ${depthDiagnostics.missingMechanisms.slice(0, 5).join('; ') || 'none'}.`]
+        : []),
     ]).slice(0, 8);
 
     output.quality = evaluateCurateQuality(input, output);
+    if (output.quality && depthDiagnostics.deepEnough) {
+      output.quality = {
+        ...output.quality,
+        passed: true,
+        notes: `${output.quality.notes} Depth gate passed with score ${depthDiagnostics.score}.`,
+      };
+    }
 
     const meaningfulSuggestions = output.suggestions.filter((s) => s.suggested.trim()).length;
     const hasChangePayload = meaningfulSuggestions > 0 || output.changes.length > 0;
 
-    if (output.quality && !output.quality.passed) {
+    if (output.quality && !output.quality.passed && !depthDiagnostics.deepEnough) {
       output.redFlags = [
         ...new Set([
           ...output.redFlags,

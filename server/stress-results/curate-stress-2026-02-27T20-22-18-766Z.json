@@ -1,0 +1,507 @@
+{
+  "generatedAt": "2026-02-27T20:22:18.769Z",
+  "scenarios": [
+    {
+      "scenarioId": "S1_base_curate_no_jd",
+      "title": "First Upload + Curate (no project notes, no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 49477,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.17,
+        "impactScore": 0.5,
+        "atsScore": 0.33,
+        "passed": true,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. No project-notes signals detected. No strategic themes detected in project notes. Capability-elevation coverage=100% for mode=product. Category-mirror risk=low (ratio=33%, compared=6). No >=100-word project notes roles requiring forced new-bullet lift. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals, resulting in improved page performance and inbound quality.",
+        "Supported people operations and hiring-related projects in a growing sports technology company, enhancing cross-functional execution quality.",
+        "Assisted with coordination of early-career hiring activities and onboarding workflows, supporting dozens of hires and movements.",
+        "Contributed to operational projects focused on improving documentation, learning resources, and access to HR information.",
+        "Negotiated and closed IT vendor contracts, achieving a 23% reduction in annual recurring costs across Microsoft and AWS.",
+        "Project-managed the redesign and launch of the company careers webpage, delivering the project in 50% of the planned timeline while aligning with employer branding goals, leading to a 128% increase in viewership and a 68% increase in engagement time."
+      ],
+      "avgSimilarityToBase": 0.33,
+      "meaningfulChanges": 4,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 1,
+        "hits": [
+          "heatmap_conversion"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "planning"
+        ]
+      },
+      "questions": [
+        "What specific HR systems and tools did you work with?",
+        "Can you provide examples of the types of documentation and learning resources you improved?",
+        "What metrics did you use to measure operational efficiency improvements?",
+        "How did you engage with stakeholders during the hiring process?",
+        "What challenges did you face during the project management of the careers webpage redesign?"
+      ],
+      "redFlags": [],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing.",
+        "Mechanisms targeted: analytics interpretation.",
+        "Depth diagnostics: meaningfulChanges=4, avgSimilarity=0.33, capabilityCoverage=100%, mechanismCoverage=100%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S2_base_curate_with_master_notes_no_jd",
+      "title": "Add Master Project Notes + Curate (no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 33629,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.06,
+        "impactScore": 0.43,
+        "atsScore": 0.67,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=50%. Capability-elevation coverage=100% for mode=product. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions, resulting in faster alignment and fewer execution gaps.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content, improving page performance and inbound quality, with page viewership increasing by 128% and time spent increasing by 68%.",
+        "Applied HR Operations Management to improve cross-functional execution quality by creating a central onboarding guide and checklist, enhancing delivery consistency.",
+        "Coordinated between marketing, design, and external developers for the careers page project, launching in half the expected timeline while clarifying content structure.",
+        "Supported vendor cost optimization by conducting cost comparisons and usage audits, leading to a 23% reduction in recurring costs.",
+        "Built recurring reports for headcount dashboards and cost visibility, improving decision-making through better data reporting and analysis."
+      ],
+      "avgSimilarityToBase": 0.07,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "day1_workflow",
+          "headcount_reporting",
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 1,
+        "hits": [
+          "heatmap_conversion"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific HR software or tools have you used?",
+        "Can you provide examples of metrics you tracked for HR operations?",
+        "What challenges did you face during the vendor renegotiation process?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What specific cross-functional initiatives did you lead?"
+      ],
+      "redFlags": [],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing.",
+        "Mechanisms targeted: analytics interpretation, cross-functional facilitation.",
+        "Depth diagnostics: meaningfulChanges=6, avgSimilarity=0.07, capabilityCoverage=100%, mechanismCoverage=100%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S3_hitachi_pm_with_master_notes",
+      "title": "Add Hitachi PM JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 59656,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.04,
+        "impactScore": 0.5,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=50%. Capability-elevation coverage=100% for mode=pm. Category-mirror risk=low (ratio=0%, compared=5). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 5,
+      "bullets": [
+        "Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions, resulting in faster alignment and fewer execution gaps.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content, leading to improved page performance with a 128% increase in page viewership and a 68% increase in time spent.",
+        "Applied HR Operations to improve cross-functional execution quality by standardizing workflows and creating onboarding guides, enhancing delivery consistency.",
+        "Coordinated between marketing, design, and external developers to clarify content structure and expedite project timelines, successfully launching the careers page in half the expected time.",
+        "Built recurring reports for leadership using Excel and HRIS exports, improving visibility into headcount and cost metrics, which facilitated informed decision-making."
+      ],
+      "avgSimilarityToBase": 0.05,
+      "meaningfulChanges": 5,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting",
+          "career_page_metrics"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 1,
+        "hits": [
+          "heatmap_conversion"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "questions": [
+        "What specific HRIS systems have you worked with?",
+        "Can you provide examples of metrics you tracked for HR operations?",
+        "What challenges did you face in stakeholder management?",
+        "How did you prioritize tasks in a fast-paced environment?",
+        "What tools did you use for reporting and data analysis?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: communication, execution"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: analytics interpretation, cross-functional facilitation.",
+        "Depth diagnostics: meaningfulChanges=5, avgSimilarity=0.05, capabilityCoverage=100%, mechanismCoverage=100%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 61044,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.02,
+        "impactScore": 0.57,
+        "atsScore": 0.67,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=80%. Capability-elevation coverage=54% for mode=pm. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs, improving process clarity.",
+        "Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items, enhancing decision quality in evaluation workflows.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals, resulting in a 128% increase in page viewership.",
+        "Modeled hiring-velocity scenarios and growth trajectories in Excel to inform headcount and cost planning trade-offs, facilitating clearer planning decisions for leadership.",
+        "Escalated recurring provisioning delays and proposed revised SLA agreements with IT to reduce productivity blockers, leading to faster operational turnaround.",
+        "Implemented tracking dashboards to monitor turnaround times and provide operational visibility for stakeholders, improving risk and issue management."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "day1_workflow",
+          "headcount_reporting",
+          "career_page_metrics"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "heatmap_conversion",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "planning"
+        ]
+      },
+      "questions": [
+        "What specific metrics can you provide for project completion rates or stakeholder satisfaction?",
+        "Can you quantify the impact of the SLA agreements you proposed?",
+        "What was the percentage improvement in onboarding efficiency after implementing the standardized guide?",
+        "How many projects did you manage simultaneously at Hitachi Electronics?",
+        "What tools did you use for tracking project progress and reporting?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: communication, execution"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, discovery interviews, analytics interpretation, scenario modeling, SLA/risk mitigation.",
+        "Depth diagnostics: meaningfulChanges=6, avgSimilarity=0.02, capabilityCoverage=54%, mechanismCoverage=70%, variantMechanismCoverage=70%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 70184,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.02,
+        "impactScore": 0.57,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=60%. Capability-elevation coverage=69% for mode=pm. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs, improving process clarity.",
+        "Mapped end-to-end hiring workflows, identified bottlenecks, and collaborated with IT to migrate tracking logic into the HRIS, reducing manual duplication.",
+        "Ran discovery interviews with hiring managers to surface friction points and proposed structured feedback templates that improved clarity in decision-making.",
+        "Reviewed heatmap analytics to reposition content on the careers page, leading to a 128% increase in page viewership and a 68% increase in time spent.",
+        "Modeled hiring-velocity scenarios in Excel to inform headcount planning, enabling clearer decision-making for leadership.",
+        "Escalated provisioning delays with IT, proposed revised SLA agreements, and implemented a tracking dashboard to monitor turnaround times."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting",
+          "career_page_metrics"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 6,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "feedback_template_bias",
+          "heatmap_conversion",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "stakeholders",
+          "reporting",
+          "planning"
+        ]
+      },
+      "questions": [
+        "What specific HRIS systems have you worked with?",
+        "Can you provide examples of metrics you tracked for HR operations?",
+        "What challenges did you face in stakeholder management and how did you overcome them?",
+        "What tools or software did you use for data analysis and reporting?",
+        "Can you elaborate on any specific process improvement projects you led?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: communication, execution"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, discovery interviews, analytics interpretation, scenario modeling, SLA/risk mitigation.",
+        "Depth diagnostics: meaningfulChanges=6, avgSimilarity=0.02, capabilityCoverage=69%, mechanismCoverage=90%, variantMechanismCoverage=90%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 48117,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.05,
+        "impactScore": 0.71,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=100%. Capability-elevation coverage=62% for mode=pm. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 7,
+      "bullets": [
+        "Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions, resulting in faster alignment and fewer execution gaps.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content, leading to a 128% increase in page viewership and a 68% increase in time spent on the page.",
+        "Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs, reducing manual duplication and improving process clarity.",
+        "Mapped end-to-end workflow handoffs, identified bottlenecks, and redesigned process flow to improve execution visibility, resulting in clearer handoffs and faster operational flow.",
+        "Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items, improving decision quality in evaluation workflows.",
+        "Modeled hiring-velocity scenarios and growth trajectories in Excel to inform headcount and cost planning trade-offs, enabling clearer planning decisions for leadership.",
+        "Implemented tracking dashboards to monitor turnaround times and provide operational visibility for stakeholders, enhancing risk and issue management."
+      ],
+      "avgSimilarityToBase": 0.06,
+      "meaningfulChanges": 7,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "headcount_reporting",
+          "career_page_metrics"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "heatmap_conversion",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "planning"
+        ]
+      },
+      "questions": [
+        "What specific HR software or systems have you worked with?",
+        "Can you provide examples of metrics you tracked in your reporting?",
+        "What challenges did you face in stakeholder management?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What methodologies did you use for process improvement?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: leadership, execution"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, discovery interviews, analytics interpretation, scenario modeling, SLA/risk mitigation.",
+        "Depth diagnostics: meaningfulChanges=7, avgSimilarity=0.06, capabilityCoverage=62%, mechanismCoverage=80%, variantMechanismCoverage=80%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "leadership",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 56104,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.05,
+        "impactScore": 0.71,
+        "atsScore": 1,
+        "passed": false,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=60%. Capability-elevation coverage=54% for mode=pm. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected."
+      },
+      "bulletCount": 7,
+      "bullets": [
+        "Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions, resulting in faster alignment and fewer execution gaps.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals, leading to a 128% increase in page viewership and a 68% increase in time spent.",
+        "Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs, reducing manual duplication and improving process clarity.",
+        "Mapped end-to-end workflow handoffs, identified bottlenecks, and redesigned process flow to improve execution visibility, resulting in clearer handoffs and faster operational flow.",
+        "Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items, enhancing decision quality in evaluation workflows.",
+        "Escalated recurring provisioning delays and proposed revised SLA agreements with IT to reduce productivity blockers, leading to faster operational turnaround.",
+        "Implemented tracking dashboards to monitor turnaround times and provide operational visibility for stakeholders, improving progress tracking and issue response."
+      ],
+      "avgSimilarityToBase": 0.06,
+      "meaningfulChanges": 7,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "day1_workflow",
+          "career_page_metrics"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "heatmap_conversion",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "stakeholders",
+          "risk"
+        ]
+      },
+      "questions": [
+        "What specific HR software or tools have you used?",
+        "Can you provide examples of metrics you tracked for HR operations?",
+        "What challenges did you face during the careers page project?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What specific methodologies did you use for process design?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: leadership, execution"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, discovery interviews, analytics interpretation, scenario modeling, SLA/risk mitigation.",
+        "Depth diagnostics: meaningfulChanges=7, avgSimilarity=0.06, capabilityCoverage=54%, mechanismCoverage=70%, variantMechanismCoverage=70%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "leadership",
+        "execution"
+      ]
+    }
+  ]
+}

@@ -2,6 +2,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// Load server environment when the script is run directly from a shell.
+try {
+  // eslint-disable-next-line global-require
+  require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+} catch (_) {
+  // Optional dependency in some environments; keep script usable regardless.
+}
+
 const { curateResumeWithAI, lexicalSimilarity } = require('../dist/src/ai/tailorResume.js');
 
 const MASTER_NOTES = `When I first joined Rapsodo, the People team was still quite lean and a lot of processes were pretty manual. I was initially brought in to support HR ops, but over time I ended up owning quite a few cross-functional initiatives because there wasn’t always a clear project owner.
@@ -321,6 +329,11 @@ async function runScenario(scenario, runIndex) {
 }
 
 async function main() {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Missing OPENAI_API_KEY. Add it to server/.env or export it in your shell before running the stress test.');
+    process.exit(1);
+  }
+
   const all = [];
   for (const scenario of SCENARIOS) {
     for (let run = 1; run <= scenario.runs; run += 1) {

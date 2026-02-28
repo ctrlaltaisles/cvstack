@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-02-27T20:38:24.958Z",
+  "scenarios": [
+    {
+      "scenarioId": "S1_base_curate_no_jd",
+      "run": 1,
+      "status": "error",
+      "elapsedMs": 1,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S2_base_curate_with_master_notes_no_jd",
+      "run": 1,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S3_hitachi_pm_with_master_notes",
+      "run": 1,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "run": 1,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "run": 2,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "run": 1,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "run": 2,
+      "status": "error",
+      "elapsedMs": 0,
+      "error": "OPENAI_API_KEY is not configured"
+    }
+  ]
+}
