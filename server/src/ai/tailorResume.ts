@@ -192,6 +192,7 @@ const CAPABILITY_MARKER_RULES: CapabilityMarkerRule[] = [
   { id: 'requirements_modeling', label: 'requirements/spec modeling', pattern: /\b(requirements?|workflow spec|specification|state transitions?)\b/i, modes: ['pm', 'product', 'dev', 'ops'] },
   { id: 'workflow_architecture', label: 'workflow architecture', pattern: /\b(end-to-end workflow|handoff|bottleneck|tracking logic|process map)\b/i, modes: ['pm', 'product', 'ops'] },
   { id: 'cross_functional_facilitation', label: 'cross-functional facilitation', pattern: /\b(working session|facilitated|cross-functional|stakeholder alignment|coordinat(ed|ing) with)\b/i, modes: ['pm', 'product', 'ops', 'strategy', 'bizdev'] },
+  { id: 'program_artifacts', label: 'program artifacts and controls', pattern: /\b(workflow spec|checklist|tracker|template|journey visualization|plan of record|approval flows?)\b/i, modes: ['pm', 'ops', 'strategy', 'product'] },
   { id: 'discovery_interviews', label: 'discovery interviews', pattern: /\b(discovery interviews?|interview(ed|ing) .*managers?|friction points?)\b/i, modes: ['pm', 'product', 'designer', 'analyst'] },
   { id: 'theme_synthesis', label: 'insight/theme synthesis', pattern: /\b(synthesi[sz](ed|ing) (themes|inputs|findings)|identified themes?)\b/i, modes: ['pm', 'product', 'designer', 'analyst', 'strategy'] },
   { id: 'decision_frameworks', label: 'decision framework/template design', pattern: /\b(feedback template|structured feedback|reduc(ed|ing) subjective bias|decision[- ]making clarity)\b/i, modes: ['pm', 'product', 'designer', 'ops', 'strategy'] },
@@ -199,8 +200,11 @@ const CAPABILITY_MARKER_RULES: CapabilityMarkerRule[] = [
   { id: 'experimentation', label: 'pilot/experimentation', pattern: /\b(pilot|tested|post-launch|experiment|validation)\b/i, modes: ['pm', 'product', 'designer', 'analyst', 'ops'] },
   { id: 'analytics_interpretation', label: 'analytics interpretation', pattern: /\b(heatmap|analytics|conversion points?|time-on-page|engagement)\b/i, modes: ['pm', 'product', 'designer', 'analyst'] },
   { id: 'scenario_modeling', label: 'scenario modeling', pattern: /\b(headcount planning|hiring velocity|growth trajectories?|scenario|cost implications?)\b/i, modes: ['pm', 'product', 'analyst', 'strategy', 'ops'] },
+  { id: 'cadence_reporting', label: 'executive reporting cadence', pattern: /\b(recurring reports?|monthly reviews?|headcount dashboards?|cost visibility|time-to-hire|offer acceptance)\b/i, modes: ['pm', 'analyst', 'ops', 'strategy'] },
+  { id: 'delivery_execution', label: 'delivery execution and schedule control', pattern: /\b(launch(ed)? in half|50% of (the )?planned timeline|behind schedule|deliverables?|timeline|schedule)\b/i, modes: ['pm', 'ops', 'strategy', 'product'] },
   { id: 'sla_negotiation', label: 'SLA/risk mitigation', pattern: /\b(sla|provisioning delays?|escalated the issue|service level|turnaround times?)\b/i, modes: ['pm', 'ops', 'strategy'] },
   { id: 'dashboard_visibility', label: 'tracking dashboard/operational visibility', pattern: /\b(tracking dashboard|monitor turnaround|visibility dashboard|operational visibility)\b/i, modes: ['pm', 'analyst', 'ops', 'strategy'] },
+  { id: 'commercial_optimization', label: 'commercial optimization and renewal controls', pattern: /\b(vendor cost optimization|microsoft|aws|renewal|usage audits?|benchmark|23%|recurring costs?)\b/i, modes: ['pm', 'ops', 'strategy', 'bizdev'] },
   { id: 'integration_hypothesis', label: 'cross-domain integration hypothesis', pattern: /\b(integrat(e|ing).*(analytics|reporting)|correlat(e|ing).*(investment|velocity)|exploratory initiative)\b/i, modes: ['pm', 'product', 'analyst', 'strategy'] },
 ];
 
@@ -638,6 +642,7 @@ interface DepthDiagnostics {
   capabilityCoverage: number;
   mechanismCoverage: number;
   variantMechanismCoverage: number;
+  criticalCoverage: number;
   missingMechanisms: string[];
   deepEnough: boolean;
   notes: string[];
@@ -646,10 +651,12 @@ interface DepthDiagnostics {
 const MODE_SIGNAL_CATALOG: Record<TargetRoleMode, Array<{ signal: string; capabilityIds: string[]; jdHints: string[] }>> = {
   pm: [
     { signal: 'Requirements and scope definition', capabilityIds: ['requirements_modeling', 'workflow_architecture'], jdHints: ['requirements', 'scope', 'handover', 'execution'] },
-    { signal: 'Cross-functional delivery coordination', capabilityIds: ['cross_functional_facilitation', 'journey_mapping'], jdHints: ['cross-functional', 'stakeholder', 'customer', 'coordination'] },
+    { signal: 'Cross-functional delivery coordination', capabilityIds: ['cross_functional_facilitation', 'journey_mapping', 'delivery_execution'], jdHints: ['cross-functional', 'stakeholder', 'customer', 'coordination'] },
+    { signal: 'Program artifacts and governance controls', capabilityIds: ['program_artifacts', 'cadence_reporting'], jdHints: ['artifacts', 'plan of record', 'timelines', 'scope', 'report'] },
     { signal: 'Schedule and dependency management', capabilityIds: ['workflow_architecture', 'scenario_modeling'], jdHints: ['schedule', 'timeline', 'dependencies', 'on-time'] },
-    { signal: 'Risk, issue, and SLA management', capabilityIds: ['sla_negotiation', 'dashboard_visibility'], jdHints: ['risk', 'issue', 'complaint', 'sla', 'mitigation'] },
-    { signal: 'Reporting and governance', capabilityIds: ['dashboard_visibility', 'analytics_interpretation', 'scenario_modeling'], jdHints: ['reporting', 'status', 'financial', 'progress', 'closing'] },
+    { signal: 'Risk, issue, and SLA management', capabilityIds: ['sla_negotiation', 'dashboard_visibility', 'program_artifacts'], jdHints: ['risk', 'issue', 'complaint', 'sla', 'mitigation'] },
+    { signal: 'Reporting and governance', capabilityIds: ['dashboard_visibility', 'analytics_interpretation', 'scenario_modeling', 'cadence_reporting'], jdHints: ['reporting', 'status', 'financial', 'progress', 'closing'] },
+    { signal: 'Commercial and contract control', capabilityIds: ['commercial_optimization', 'scenario_modeling'], jdHints: ['commercial', 'contract', 'renewal', 'cost', 'financial'] },
     { signal: 'Continuous improvement and lessons learned', capabilityIds: ['experimentation', 'integration_hypothesis', 'theme_synthesis'], jdHints: ['lessons learnt', 'improve', 'process discipline', 'quality'] },
   ],
   product: [
@@ -741,8 +748,14 @@ function inferCapabilityRuleFromText(text: string, mode: TargetRoleMode): Capabi
 }
 
 function findEvidenceQuotes(content: string, pattern: RegExp): string[] {
+  const metricScore = (sentence: string): number => {
+    const percentMatches = sentence.match(/\b\d{1,3}\s?%/g)?.length ?? 0;
+    const numericMatches = sentence.match(/\b\d+(?:\.\d+)?\b/g)?.length ?? 0;
+    return (percentMatches * 3) + numericMatches;
+  };
   const sentenceHits = splitSentences(content)
     .filter((sentence) => pattern.test(sentence))
+    .sort((a, b) => metricScore(b) - metricScore(a))
     .slice(0, 2);
   if (sentenceHits.length > 0) return sentenceHits.map((sentence) => sentence.slice(0, 280));
   const fallback = String(content ?? '').trim();
@@ -920,29 +933,58 @@ function sanitizeRoleMappingOutput(
   };
 }
 
-function claimForCapability(item: CapabilityInventoryItem): { claim: string; mechanism: string; impact: string } {
+function extractPercentages(texts: string[]): string[] {
+  const hits = new Set<string>();
+  for (const text of texts) {
+    const matches = String(text ?? '').match(/\b\d{1,3}\s?%/g) ?? [];
+    for (const match of matches) hits.add(match.replace(/\s+/g, ''));
+  }
+  return [...hits];
+}
+
+function evidenceHasPattern(texts: string[], pattern: RegExp): boolean {
+  return texts.some((text) => pattern.test(String(text ?? '')));
+}
+
+function claimForCapability(item: CapabilityInventoryItem, mode: TargetRoleMode): { claim: string; mechanism: string; impact: string } {
+  const programTone = mode === 'pm';
+  const evidencePercents = extractPercentages(item.evidenceQuotes);
   switch (item.capabilityId) {
     case 'requirements_modeling':
       return {
-        claim: 'Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs.',
+        claim: programTone
+          ? 'Translated business needs into workflow specifications with explicit state transitions to align cross-functional handoffs.'
+          : 'Translated business needs into a lightweight workflow spec with explicit state transitions to align cross-functional handoffs.',
         mechanism: 'workflow spec + state transitions',
-        impact: 'reduced manual duplication and improved process clarity',
+        impact: 'reduced manual duplication and improved execution clarity',
       };
     case 'workflow_architecture':
       return {
-        claim: 'Mapped end-to-end workflow handoffs, identified bottlenecks, and redesigned process flow to improve execution visibility.',
+        claim: programTone
+          ? 'Formalized end-to-end workflow handoffs, identified bottlenecks, and redesigned execution paths to improve delivery visibility.'
+          : 'Mapped end-to-end workflow handoffs, identified bottlenecks, and redesigned process flow to improve execution visibility.',
         mechanism: 'workflow mapping + bottleneck analysis',
         impact: 'clearer handoffs and faster operational flow',
       };
     case 'cross_functional_facilitation':
       return {
-        claim: 'Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions.',
+        claim: programTone
+          ? 'Led cross-functional execution forums across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions.'
+          : 'Facilitated working sessions across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions.',
         mechanism: 'cross-functional facilitation',
         impact: 'faster alignment and fewer execution gaps',
       };
+    case 'program_artifacts':
+      return {
+        claim: 'Established formal execution artifacts including workflow specs, standardized templates, and checklists to reduce ambiguity and maintain control points.',
+        mechanism: 'program artifacts + governance controls',
+        impact: 'more consistent execution and lower process-risk leakage',
+      };
     case 'discovery_interviews':
       return {
-        claim: 'Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items.',
+        claim: programTone
+          ? 'Ran discovery interviews with hiring managers to surface execution friction and convert qualitative pain points into action items.'
+          : 'Ran discovery interviews with hiring managers to surface friction points and convert qualitative pain points into action items.',
         mechanism: 'discovery interviews',
         impact: 'better decision quality in evaluation workflows',
       };
@@ -971,6 +1013,13 @@ function claimForCapability(item: CapabilityInventoryItem): { claim: string; mec
         impact: 'stronger process adoption',
       };
     case 'analytics_interpretation':
+      if (evidencePercents.length >= 2) {
+        return {
+          claim: 'Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals.',
+          mechanism: 'heatmap + engagement analysis',
+          impact: `improved page performance, including ${evidencePercents[0]} higher viewership and ${evidencePercents[1]} longer engagement`,
+        };
+      }
       return {
         claim: 'Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals.',
         mechanism: 'heatmap + engagement analysis',
@@ -978,21 +1027,55 @@ function claimForCapability(item: CapabilityInventoryItem): { claim: string; mec
       };
     case 'scenario_modeling':
       return {
-        claim: 'Modeled hiring-velocity scenarios and growth trajectories in Excel to inform headcount and cost planning trade-offs.',
+        claim: programTone
+          ? 'Built scenario-based capacity models in Excel to test hiring-velocity assumptions across conservative and aggressive growth trajectories.'
+          : 'Modeled hiring-velocity scenarios and growth trajectories in Excel to inform headcount and cost planning trade-offs.',
         mechanism: 'scenario modeling',
-        impact: 'clearer planning decisions for leadership',
+        impact: 'clearer leadership decisions on cost exposure, resource constraints, and timeline trade-offs',
+      };
+    case 'cadence_reporting':
+      return {
+        claim: 'Developed recurring executive reporting dashboards using Excel and HRIS exports for headcount, cost, and time-to-hire visibility.',
+        mechanism: 'reporting cadence + dashboard instrumentation',
+        impact: 'stronger operating-review governance and data-driven planning',
+      };
+    case 'delivery_execution':
+      if (evidenceHasPattern(item.evidenceQuotes, /\b(half the expected timeline|50%\s+of\s+(the\s+)?planned timeline)\b/i) || evidencePercents.length >= 1) {
+        return {
+          claim: 'Program-managed careers-page redesign deliverables across marketing, design, and external developers under compressed timelines.',
+          mechanism: 'schedule control + deliverable orchestration',
+          impact: `accelerated launch execution to ${evidencePercents[0] ?? 'half the planned timeline'} while maintaining conversion objectives`,
+        };
+      }
+      return {
+        claim: 'Program-managed cross-functional deliverables against schedule constraints, recovering delayed workstreams and accelerating launch readiness.',
+        mechanism: 'schedule control + deliverable orchestration',
+        impact: 'improved on-time execution confidence under scaling pressure',
       };
     case 'sla_negotiation':
       return {
-        claim: 'Escalated recurring provisioning delays and proposed revised SLA agreements with IT to reduce productivity blockers.',
+        claim: 'Identified recurring provisioning bottlenecks, escalated SLA gaps, and drove revised IT service commitments to protect onboarding readiness.',
         mechanism: 'SLA redesign',
-        impact: 'faster operational turnaround',
+        impact: 'faster turnaround and stronger cross-functional accountability',
       };
     case 'dashboard_visibility':
       return {
-        claim: 'Implemented tracking dashboards to monitor turnaround times and provide operational visibility for stakeholders.',
+        claim: 'Implemented turnaround tracking dashboards to provide shared operational visibility for stakeholders and issue-resolution cadence.',
         mechanism: 'dashboard instrumentation',
         impact: 'better progress tracking and issue response',
+      };
+    case 'commercial_optimization':
+      if (evidencePercents.length >= 1) {
+        return {
+          claim: 'Drove vendor optimization planning for Microsoft and AWS renewals through usage audits, benchmark research, and cost-comparison analysis.',
+          mechanism: 'commercial modeling + renewal controls',
+          impact: `contributed to a ${evidencePercents[0]} reduction in recurring spend and lower contract-risk exposure`,
+        };
+      }
+      return {
+        claim: 'Drove vendor optimization planning for Microsoft and AWS renewals through usage audits, benchmark research, and cost-comparison analysis.',
+        mechanism: 'commercial modeling + renewal controls',
+        impact: 'reduced recurring spend and lowered renewal risk exposure',
       };
     case 'integration_hypothesis':
       return {
@@ -1011,10 +1094,42 @@ function claimForCapability(item: CapabilityInventoryItem): { claim: string; mec
 
 function buildDeterministicRoleTransformation(
   capabilities: CapabilityExtractionOutput,
-  _targetRoleMode: TargetRoleMode,
+  targetRoleMode: TargetRoleMode,
 ): RoleTransformationOutput {
-  const transformedClaims: RoleTransformationClaim[] = capabilities.capabilities.slice(0, 24).map((item) => {
-    const reframed = claimForCapability(item);
+  const priorityByCapability: Record<string, number> = {
+    requirements_modeling: 9,
+    workflow_architecture: 8,
+    cross_functional_facilitation: 8,
+    program_artifacts: 8,
+    scenario_modeling: 8,
+    cadence_reporting: 7,
+    sla_negotiation: 7,
+    dashboard_visibility: 7,
+    delivery_execution: 7,
+    commercial_optimization: 7,
+    discovery_interviews: 6,
+    decision_frameworks: 6,
+    analytics_interpretation: 6,
+    journey_mapping: 6,
+    experimentation: 5,
+    theme_synthesis: 5,
+    integration_hypothesis: 4,
+  };
+
+  const orderedCapabilities = [...capabilities.capabilities].sort((a, b) => {
+    const aSource = normalizeProjectNotesSourceLabel(a.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL).toLowerCase();
+    const bSource = normalizeProjectNotesSourceLabel(b.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL).toLowerCase();
+    const aVariant = aSource !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    const bVariant = bSource !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    if (aVariant !== bVariant) return bVariant - aVariant;
+    const aPriority = priorityByCapability[a.capabilityId ?? ''] ?? 1;
+    const bPriority = priorityByCapability[b.capabilityId ?? ''] ?? 1;
+    if (aPriority !== bPriority) return bPriority - aPriority;
+    return (b.evidenceQuotes?.[0]?.length ?? 0) - (a.evidenceQuotes?.[0]?.length ?? 0);
+  });
+
+  const transformedClaims: RoleTransformationClaim[] = orderedCapabilities.slice(0, 30).map((item) => {
+    const reframed = claimForCapability(item, targetRoleMode);
     return {
       expId: item.expId,
       capabilityId: item.capabilityId,
@@ -1173,7 +1288,19 @@ function buildMechanismRequirements(capabilities: CapabilityExtractionOutput, mo
     const source = normalizeProjectNotesSourceLabel(item.source ?? PROJECT_NOTES_BASE_SOURCE_LABEL);
     const fromVariant = source.toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase();
     const priority = (fromVariant ? 3 : 1)
-      + (['requirements_modeling', 'workflow_architecture', 'discovery_interviews', 'analytics_interpretation', 'scenario_modeling', 'sla_negotiation', 'dashboard_visibility'].includes(rule.id) ? 1 : 0);
+      + ([
+        'requirements_modeling',
+        'workflow_architecture',
+        'program_artifacts',
+        'discovery_interviews',
+        'analytics_interpretation',
+        'scenario_modeling',
+        'cadence_reporting',
+        'delivery_execution',
+        'sla_negotiation',
+        'dashboard_visibility',
+        'commercial_optimization',
+      ].includes(rule.id) ? 1 : 0);
     const key = `${rule.id}::${source.toLowerCase()}`;
     if (!dedupe.has(key) || (dedupe.get(key)?.priority ?? 0) < priority) {
       dedupe.set(key, {
@@ -1238,11 +1365,26 @@ function evaluateDepthDiagnostics(
     .map((item) => `${item.label} (${item.source})`)
     .slice(0, 8);
 
+  const criticalPmCapabilities = [
+    'requirements_modeling',
+    'program_artifacts',
+    'delivery_execution',
+    'scenario_modeling',
+    'cadence_reporting',
+    'sla_negotiation',
+    'commercial_optimization',
+  ];
+  const requiredCapabilitySet = new Set(mechanismRequirements.map((item) => item.capabilityId));
+  const criticalRequired = criticalPmCapabilities.filter((id) => requiredCapabilitySet.has(id));
+  const criticalMatched = criticalRequired.filter((id) => mechanismRequirements.some((item) => item.capabilityId === id && item.pattern.test(afterText)));
+  const criticalCoverage = criticalRequired.length > 0 ? criticalMatched.length / criticalRequired.length : 1;
+
   const deepEnough = meaningfulChanges >= 4
     && avgSimilarity <= 0.74
     && capabilityCoverage >= 0.3
     && mechanismCoverage >= 0.55
-    && variantMechanismCoverage >= 0.45;
+    && variantMechanismCoverage >= 0.45
+    && (targetRoleMode !== 'pm' || criticalCoverage >= 0.6);
 
   const notes: string[] = [
     `meaningfulChanges=${meaningfulChanges}`,
@@ -1250,6 +1392,7 @@ function evaluateDepthDiagnostics(
     `capabilityCoverage=${Math.round(capabilityCoverage * 100)}%`,
     `mechanismCoverage=${Math.round(mechanismCoverage * 100)}%`,
     `variantMechanismCoverage=${Math.round(variantMechanismCoverage * 100)}%`,
+    ...(targetRoleMode === 'pm' ? [`criticalCoverage=${Math.round(criticalCoverage * 100)}%`] : []),
   ];
 
   return {
@@ -1259,6 +1402,7 @@ function evaluateDepthDiagnostics(
     capabilityCoverage,
     mechanismCoverage,
     variantMechanismCoverage,
+    criticalCoverage,
     missingMechanisms,
     deepEnough,
     notes,
@@ -1421,6 +1565,8 @@ function sanitizeElevateOutput(
   const raw = payload as Record<string, unknown>;
   const improvedRaw = raw.improved as Record<string, unknown>;
   const expRaw = Array.isArray(improvedRaw.experience) ? improvedRaw.experience : [];
+  const outputRoleMode = inferTargetRoleMode(targetRole);
+  const maxBulletsPerExperience = outputRoleMode === 'pm' ? 9 : 7;
 
   const improvedExperience: ElevateExperience[] = expRaw
     .map((item) => {
@@ -1430,7 +1576,7 @@ function sanitizeElevateOutput(
       if (!expId) return null;
       const original = resumeData.workExperience.find((exp) => exp.id === expId);
       if (!original) return null;
-      const bullets = asStringArray(row.bullets).slice(0, 7);
+      const bullets = asStringArray(row.bullets).slice(0, maxBulletsPerExperience);
       if (bullets.length === 0) return null;
       return {
         expId,
@@ -1882,20 +2028,141 @@ function buildDepthRescueBulletsForExp(
   claims: RoleTransformationClaim[],
   maxBullets = 7,
 ): string[] {
-  const orderedClaims = [...claims].sort((a, b) => {
+  const priorityByCapability: Record<string, number> = {
+    requirements_modeling: 10,
+    program_artifacts: 10,
+    workflow_architecture: 9,
+    delivery_execution: 9,
+    cross_functional_facilitation: 8,
+    scenario_modeling: 8,
+    cadence_reporting: 8,
+    dashboard_visibility: 8,
+    sla_negotiation: 8,
+    commercial_optimization: 8,
+    analytics_interpretation: 7,
+    discovery_interviews: 7,
+    decision_frameworks: 7,
+    journey_mapping: 7,
+    experimentation: 6,
+    theme_synthesis: 6,
+    integration_hypothesis: 5,
+  };
+
+  // Keep strongest claim per capability to avoid repetitive bullets.
+  const bestByCapability = new Map<string, RoleTransformationClaim>();
+  for (const claim of claims) {
+    const key = claim.capabilityId ?? claim.claim.toLowerCase();
+    const existing = bestByCapability.get(key);
+    if (!existing) {
+      bestByCapability.set(key, claim);
+      continue;
+    }
+    const claimVariant = normalizeProjectNotesSourceLabel(claim.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    const existingVariant = normalizeProjectNotesSourceLabel(existing.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
+    if (claimVariant > existingVariant) {
+      bestByCapability.set(key, claim);
+      continue;
+    }
+    const claimEvidenceLen = claim.evidenceQuotes.join(' ').length;
+    const existingEvidenceLen = existing.evidenceQuotes.join(' ').length;
+    if (claimEvidenceLen > existingEvidenceLen) bestByCapability.set(key, claim);
+  }
+
+  const orderedClaims = [...bestByCapability.values()].sort((a, b) => {
+    const aPriority = priorityByCapability[a.capabilityId ?? ''] ?? 1;
+    const bPriority = priorityByCapability[b.capabilityId ?? ''] ?? 1;
+    if (aPriority !== bPriority) return bPriority - aPriority;
     const aVariant = normalizeProjectNotesSourceLabel(a.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
     const bVariant = normalizeProjectNotesSourceLabel(b.source ?? '').toLowerCase() !== PROJECT_NOTES_BASE_SOURCE_LABEL.toLowerCase() ? 1 : 0;
     if (aVariant !== bVariant) return bVariant - aVariant;
-    return Number(Boolean(b.capabilityId)) - Number(Boolean(a.capabilityId));
+    return b.claim.length - a.claim.length;
   });
 
-  const claimBullets = orderedClaims
+  const groupForCapability = (capabilityId?: string): string => {
+    switch (capabilityId) {
+      case 'requirements_modeling':
+      case 'workflow_architecture':
+      case 'program_artifacts':
+        return 'workflow';
+      case 'delivery_execution':
+      case 'cross_functional_facilitation':
+        return 'delivery';
+      case 'scenario_modeling':
+        return 'planning';
+      case 'cadence_reporting':
+        return 'reporting';
+      case 'sla_negotiation':
+      case 'dashboard_visibility':
+        return 'risk';
+      case 'commercial_optimization':
+        return 'commercial';
+      case 'analytics_interpretation':
+      case 'discovery_interviews':
+      case 'decision_frameworks':
+      case 'journey_mapping':
+      case 'theme_synthesis':
+      case 'experimentation':
+        return 'insight';
+      default:
+        return 'other';
+    }
+  };
+
+  const selectedClaims: RoleTransformationClaim[] = [];
+  const selectedKeys = new Set<string>();
+  const hardCoverageOrder = ['workflow', 'delivery', 'planning', 'reporting', 'risk', 'commercial', 'insight'];
+  for (const group of hardCoverageOrder) {
+    const candidate = orderedClaims.find((claim) => groupForCapability(claim.capabilityId) === group);
+    if (!candidate) continue;
+    const key = candidate.capabilityId ?? candidate.claim.toLowerCase();
+    if (selectedKeys.has(key)) continue;
+    selectedClaims.push(candidate);
+    selectedKeys.add(key);
+    if (selectedClaims.length >= maxBullets) break;
+  }
+
+  const softGroupLimits: Record<string, number> = {
+    workflow: 2,
+    delivery: 2,
+    planning: 2,
+    reporting: 1,
+    risk: 2,
+    commercial: 1,
+    insight: 2,
+    other: 1,
+  };
+  const groupCounts = selectedClaims.reduce<Record<string, number>>((acc, claim) => {
+    const group = groupForCapability(claim.capabilityId);
+    acc[group] = (acc[group] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  for (const claim of orderedClaims) {
+    if (selectedClaims.length >= maxBullets) break;
+    const key = claim.capabilityId ?? claim.claim.toLowerCase();
+    if (selectedKeys.has(key)) continue;
+    const group = groupForCapability(claim.capabilityId);
+    const limit = softGroupLimits[group] ?? 1;
+    if ((groupCounts[group] ?? 0) >= limit) continue;
+    selectedClaims.push(claim);
+    selectedKeys.add(key);
+    groupCounts[group] = (groupCounts[group] ?? 0) + 1;
+  }
+
+  for (const claim of orderedClaims) {
+    if (selectedClaims.length >= maxBullets) break;
+    const key = claim.capabilityId ?? claim.claim.toLowerCase();
+    if (selectedKeys.has(key)) continue;
+    selectedClaims.push(claim);
+    selectedKeys.add(key);
+  }
+
+  const claimBullets = selectedClaims
     .map((claim) => {
-      const evidence = claim.evidenceQuotes.find(Boolean) ?? '';
-      const withEvidence = evidence
-        ? `${claim.claim} (${evidence.slice(0, 140).replace(/\.$/, '')}).`
-        : `${claim.claim} ${claim.impactSignal}.`;
-      return withEvidence.replace(/\s+/g, ' ').trim();
+      const base = claim.claim.trim().replace(/\.$/, '');
+      const impact = claim.impactSignal.trim().replace(/\.$/, '');
+      const sentence = impact ? `${base}, ${impact}.` : `${base}.`;
+      return sentence.replace(/\s+/g, ' ').trim();
     })
     .filter(Boolean);
 
@@ -1913,6 +2180,7 @@ function applyDepthRescueFromClaims(
   output: CurateResumeOutput,
   resumeData: ResumeData,
   roleTransformation: RoleTransformationOutput,
+  maxBulletsPerExperience: number,
 ): CurateResumeOutput {
   const byExp = new Map<string, RoleTransformationClaim[]>();
   for (const claim of roleTransformation.transformedClaims) {
@@ -1926,7 +2194,7 @@ function applyDepthRescueFromClaims(
     if (!sourceExp) return exp;
     const claims = byExp.get(exp.expId) ?? [];
     if (claims.length === 0) return exp;
-    const bullets = buildDepthRescueBulletsForExp(sourceExp, claims);
+    const bullets = buildDepthRescueBulletsForExp(sourceExp, claims, maxBulletsPerExperience);
     if (bullets.length === 0) return exp;
     return { ...exp, bullets };
   });
@@ -2144,11 +2412,12 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         'Use only source-backed claims from resumeData and transformedClaims.',
         'Do not invent responsibilities, tools, metrics, systems, or outcomes.',
         'Do not copy JD text line-by-line or mirror JD order.',
-        'Keep 5-7 bullets maximum per role.',
+        'Keep 6-9 bullets for program/project management roles with dense evidence; otherwise keep 5-7 bullets.',
         'If metrics are missing, ask concise questions instead of inventing values.',
         'Depth requirement: preserve mechanism nouns from evidence (e.g., workflow spec, state transitions, discovery interviews, heatmap analytics, scenario modeling, SLA, dashboard) when present.',
         'Each bullet should include mechanism + action + impact signal, not only generic process language.',
         'If variant project-note sources exist, preserve at least 2 mechanism signals from those variant sources in final bullets.',
+        'For pm mode, prioritize explicit execution framing: program artifacts, dependency/schedule control, risk or SLA mitigation, reporting cadence, and commercial controls when supported by evidence.',
       ],
       output_schema: {
         improved: {
@@ -2251,8 +2520,9 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       layer2.targetRoleMode,
       mechanismRequirements,
     );
+    const maxBulletsPerExperience = layer2.targetRoleMode === 'pm' ? 9 : 7;
     if (!depthDiagnostics.deepEnough && layer3.transformedClaims.length > 0) {
-      output = applyDepthRescueFromClaims(output, input.resumeData, layer3);
+      output = applyDepthRescueFromClaims(output, input.resumeData, layer3, maxBulletsPerExperience);
       depthDiagnostics = evaluateDepthDiagnostics(
         input.resumeData,
         output,

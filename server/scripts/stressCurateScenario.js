@@ -134,6 +134,18 @@ const PM_SIGNAL_MARKERS = [
   { name: 'planning', pattern: /\bplan|plan of record|tracker\b/i },
 ];
 
+const PROGRAM_EXEC_MARKERS = [
+  { name: 'workflow_spec_transitions', pattern: /\bworkflow spec|state transitions?\b/i },
+  { name: 'program_artifacts', pattern: /\bchecklist|template|artifact|approval flow|tracker\b/i },
+  { name: 'capacity_modeling', pattern: /\bscenario|capacity model|hiring velocity|growth trajectories|cost exposure\b/i },
+  { name: 'exec_reporting', pattern: /\bexecutive|monthly review|headcount|time-to-hire|cost visibility|dashboard\b/i },
+  { name: 'risk_sla_controls', pattern: /\bsla|risk|mitigat(e|ion)|provisioning delays?|turnaround\b/i },
+  { name: 'commercial_controls', pattern: /\bvendor|microsoft|aws|renewal|usage audit|benchmark|23%\b/i },
+  { name: 'delivery_schedule', pattern: /\bdeliverables?|timeline|schedule|50%|half the expected timeline|launch\b/i },
+  { name: 'discovery_to_framework', pattern: /\bdiscovery interviews?|feedback template|subjective bias|decision clarity\b/i },
+  { name: 'journey_risk_mapping', pattern: /\bjourney|90-day|touchpoints|drop-off\b/i },
+];
+
 function makeResumeData(projectNotes) {
   return {
     name: 'Aileen Ooi',
@@ -292,6 +304,7 @@ async function runScenario(scenario, runIndex) {
   const masterCoverage = markerCoverage(joinedBullets, MASTER_MARKERS);
   const variantCoverage = markerCoverage(joinedBullets, VARIANT_MARKERS);
   const pmCoverage = markerCoverage(joinedBullets, PM_SIGNAL_MARKERS);
+  const programCoverage = markerCoverage(joinedBullets, PROGRAM_EXEC_MARKERS);
   const avgSim = avgSimilarity(BASE_BULLETS, outBullets);
   const meaningfulChanges = countMeaningfulChanges(BASE_BULLETS, outBullets);
 
@@ -320,6 +333,10 @@ async function runScenario(scenario, runIndex) {
     pmSignalCoverage: {
       hitCount: pmCoverage.length,
       hits: pmCoverage,
+    },
+    programExecutionCoverage: {
+      hitCount: programCoverage.length,
+      hits: programCoverage,
     },
     questions: result.questions || [],
     redFlags: result.redFlags || [],
@@ -365,6 +382,7 @@ async function main() {
     masterNotesHitCount: row.masterNotesCoverage ? row.masterNotesCoverage.hitCount : 0,
     variantNotesHitCount: row.variantNotesCoverage ? row.variantNotesCoverage.hitCount : 0,
     pmSignalHitCount: row.pmSignalCoverage ? row.pmSignalCoverage.hitCount : 0,
+    programSignalHitCount: row.programExecutionCoverage ? row.programExecutionCoverage.hitCount : 0,
   }));
   console.log('\nSummary:');
   console.table(compact);

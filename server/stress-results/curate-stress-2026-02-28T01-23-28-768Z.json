@@ -1,0 +1,601 @@
+{
+  "generatedAt": "2026-02-28T01:23:28.770Z",
+  "scenarios": [
+    {
+      "scenarioId": "S1_base_curate_no_jd",
+      "title": "First Upload + Curate (no project notes, no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 35548,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.15,
+        "impactScore": 0.71,
+        "atsScore": 1,
+        "passed": true,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 50%, 128%, 68% Generic filler reduced or unchanged. No project-notes signals detected. No strategic themes detected in project notes. Capability-elevation coverage=100% for mode=product. Category-mirror risk=low (ratio=17%, compared=6). No >=100-word project notes roles requiring forced new-bullet lift. No JD-leakage grounding violations detected. Depth gate passed with score 1.755."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Project-managed the redesign and launch of the company careers webpage, delivering the project in 50% of the planned timeline while aligning with employer branding goals, resulting in a 128% increase in viewership and a 68% increase in engagement time.",
+        "Supported people operations and hiring-related projects, enhancing cross-functional execution quality through effective stakeholder collaboration.",
+        "Assisted with coordination of early-career hiring activities and onboarding workflows, supporting dozens of hires and movements, thereby improving the employee lifecycle experience.",
+        "Contributed to operational projects focused on improving documentation and learning resources, which enhanced access to HR information and operational efficiency.",
+        "Negotiated and closed IT vendor contracts, achieving a 23% reduction in annual recurring costs across Microsoft and AWS, improving budget management.",
+        "Reviewed engagement and heatmap analytics to reposition careers-page content, strengthening conversion signals and improving page performance."
+      ],
+      "avgSimilarityToBase": 0.18,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 1,
+        "hits": [
+          "heatmap_conversion"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "planning"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "commercial_controls",
+          "delivery_schedule"
+        ]
+      },
+      "questions": [
+        "What specific HR systems and tools have you worked with?",
+        "Can you provide examples of the types of documentation and learning resources you improved?",
+        "What metrics did you use to measure the success of your HR projects?",
+        "Have you received any feedback from stakeholders regarding your contributions?",
+        "What challenges did you face during the project management of the careers webpage?"
+      ],
+      "redFlags": [],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing.",
+        "Mechanisms targeted: analytics interpretation, delivery execution and schedule control.",
+        "Depth diagnostics: meaningfulChanges=5, avgSimilarity=0.18, capabilityCoverage=100%, mechanismCoverage=100%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S2_base_curate_with_master_notes_no_jd",
+      "title": "Add Master Project Notes + Curate (no JD)",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 36852,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.43,
+        "atsScore": 0.67,
+        "passed": true,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 128%, 68% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=75%. Capability-elevation coverage=100% for mode=product. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 1.998."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Established program artifacts and controls by creating a central onboarding guide and checklist, reducing repetitive queries and enhancing new hire experience.",
+        "Applied analytics interpretation by reviewing engagement and heatmap analytics for the careers page, resulting in a 128% increase in page viewership and a 68% increase in time spent post-launch.",
+        "Executed delivery execution and schedule control by program-managing cross-functional deliverables, recovering delayed workstreams and launching projects in half the expected timeline.",
+        "Facilitated cross-functional collaboration by coordinating working sessions across HR, Engineering, IT, and business stakeholders, leading to faster alignment and fewer execution gaps.",
+        "Implemented process improvement by documenting employee lifecycle changes and formalizing approval flows, ensuring smoother transitions and reducing reliance on informal communication.",
+        "Applied vendor management and cost optimization strategies, achieving a 23% reduction in recurring costs through effective contract renegotiations and usage audits."
+      ],
+      "avgSimilarityToBase": 0.01,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "day1_workflow",
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 1,
+        "hits": [
+          "heatmap_conversion"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 2,
+        "hits": [
+          "timeline",
+          "stakeholders"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "program_artifacts",
+          "commercial_controls",
+          "delivery_schedule"
+        ]
+      },
+      "questions": [
+        "What specific HR software or tools have you used?",
+        "Can you provide examples of specific metrics you tracked?",
+        "What challenges did you face during the vendor renegotiation process?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What specific cross-functional initiatives did you own?"
+      ],
+      "redFlags": [],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> product transformation -> final writing.",
+        "Mechanisms targeted: program artifacts and controls, analytics interpretation, delivery execution and schedule control, cross-functional facilitation.",
+        "Depth diagnostics: meaningfulChanges=6, avgSimilarity=0.01, capabilityCoverage=100%, mechanismCoverage=100%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "people",
+        "projects",
+        "intern"
+      ]
+    },
+    {
+      "scenarioId": "S3_hitachi_pm_with_master_notes",
+      "title": "Add Hitachi PM JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 89518,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.57,
+        "atsScore": 0.67,
+        "passed": true,
+        "notes": "Meaningful content gain detected. Potential fabricated metric(s): 23% Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=75%. Capability-elevation coverage=83% for mode=pm. Category-mirror risk=low (ratio=0%, compared=6). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 1.923."
+      },
+      "bulletCount": 6,
+      "bullets": [
+        "Established program artifacts including a central onboarding guide and checklist, improving delivery consistency and reducing back-and-forth emails.",
+        "Developed recurring executive reporting dashboards using Excel and HRIS exports, enhancing headcount and cost visibility for leadership.",
+        "Applied vendor cost optimization strategies during Microsoft and AWS contract renewals, resulting in a 23% reduction in recurring costs.",
+        "Program-managed cross-functional deliverables, coordinating between marketing, design, and external developers to launch a careers page in half the expected timeline.",
+        "Led cross-functional execution forums across HR, Engineering, IT, and business stakeholders, facilitating faster alignment and reducing execution gaps.",
+        "Implemented process improvements for employee lifecycle changes, formalizing approval flows to prevent changes from falling through the cracks."
+      ],
+      "avgSimilarityToBase": 0.01,
+      "meaningfulChanges": 6,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting",
+          "career_page_metrics",
+          "vendor_optimization"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 0,
+        "hits": []
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "timeline",
+          "stakeholders",
+          "reporting"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "program_artifacts",
+          "exec_reporting",
+          "commercial_controls",
+          "delivery_schedule"
+        ]
+      },
+      "questions": [
+        "What specific metrics can you provide for project success or improvements?",
+        "Can you quantify the impact of the onboarding guide on new hire satisfaction?",
+        "What was the timeline for the vendor cost optimization project?",
+        "How did you measure the effectiveness of the executive reporting dashboards?",
+        "What specific processes were improved in the employee lifecycle changes?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: communication"
+      ],
+      "changeSummary": [
+        "Added detailed project management experience to align with the target role.",
+        "Emphasized skills relevant to project execution and stakeholder coordination.",
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: program artifacts and controls, analytics interpretation, executive reporting cadence, delivery execution and schedule control, commercial optimization and renewal controls, cross-functional facilitation.",
+        "Depth diagnostics: meaningfulChanges=6, avgSimilarity=0.01, capabilityCoverage=83%, mechanismCoverage=83%, variantMechanismCoverage=100%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 79438,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.29,
+        "atsScore": 1,
+        "passed": true,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler reduced or unchanged. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=80%. Capability-elevation coverage=47% for mode=pm. Category-mirror risk=low (ratio=0%, compared=0). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 2.164."
+      },
+      "bulletCount": 8,
+      "bullets": [
+        "Translated business needs into structured workflow specifications, outlining state transitions to improve cross-functional handoffs and reduce manual duplication.",
+        "Established formal execution artifacts including workflow specs and standardized templates, enhancing clarity and control points for project execution.",
+        "Developed scenario-based capacity models in Excel to assess hiring velocity assumptions, enabling clearer leadership decisions on resource allocation and cost exposure.",
+        "Led cross-functional execution forums with HR, Engineering, and IT to align project ownership and delivery decisions, resulting in faster alignment and fewer execution gaps.",
+        "Implemented tracking dashboards to provide operational visibility for stakeholders, improving progress tracking and issue response during project execution.",
+        "Conducted discovery interviews with hiring managers to identify friction points in candidate evaluation, synthesizing insights into structured feedback templates that improved decision-making clarity.",
+        "Developed recurring executive reporting dashboards using Excel and HRIS exports for headcount, cost, and time-to-hire visibility, strengthening operating-review governance.",
+        "Identified recurring provisioning bottlenecks, escalated SLA gaps, and drove revised IT service commitments to protect onboarding readiness, resulting in faster turnaround and stronger cross-functional accountability."
+      ],
+      "avgSimilarityToBase": 0.01,
+      "meaningfulChanges": 8,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "time_to_hire",
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "feedback_template_bias",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 3,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "reporting"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 6,
+        "hits": [
+          "workflow_spec_transitions",
+          "program_artifacts",
+          "capacity_modeling",
+          "exec_reporting",
+          "risk_sla_controls",
+          "discovery_to_framework"
+        ]
+      },
+      "questions": [
+        "What specific tools or software did you use for HR operations?",
+        "Can you provide more details on the metrics used for evaluating the success of your projects?",
+        "What challenges did you face in stakeholder management and how did you overcome them?",
+        "Were there any specific methodologies you applied in process improvement?",
+        "How did you ensure compliance with HR policies during your projects?"
+      ],
+      "redFlags": [
+        "Excluded unsupported JD signals: communication"
+      ],
+      "changeSummary": [
+        "Enhanced experience section with specific project management actions and mechanisms.",
+        "Added relevant skills to align with project management role.",
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, program artifacts and controls, discovery interviews, analytics interpretation, scenario modeling.",
+        "Depth diagnostics: meaningfulChanges=8, avgSimilarity=0.01, capabilityCoverage=47%, mechanismCoverage=70%, variantMechanismCoverage=70%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S4_hitachi_pm_with_master_and_variant_notes",
+      "title": "Add PM Variant Notes + Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 101742,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.57,
+        "atsScore": 0.67,
+        "passed": true,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler increased. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=80%. Capability-elevation coverage=65% for mode=pm. Category-mirror risk=low (ratio=0%, compared=0). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 2.439."
+      },
+      "bulletCount": 9,
+      "bullets": [
+        "Translated business needs into workflow specifications with explicit state transitions to align cross-functional handoffs. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Established formal execution artifacts including workflow specs, standardized templates, and checklists to reduce ambiguity and maintain control points. (I initiated a working session with HR, engineering, and IT to map the end-to-end hiring workflow, identified bottlenecks in handoffs, and dr).",
+        "Built scenario-based capacity models in Excel to test hiring-velocity assumptions across conservative and aggressive growth trajectories. (I also supported leadership offsites by preparing headcount planning scenarios based on hiring velocity assumptions, modeling different grow).",
+        "Led cross-functional execution forums across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Formalized end-to-end workflow handoffs, identified bottlenecks, and redesigned execution paths to improve delivery visibility. (While I didn’t build the system myself, I collaborated with IT to migrate parts of the tracking logic into the HRIS to reduce manual duplica).",
+        "Developed recurring executive reporting dashboards using Excel and HRIS exports for headcount, cost, and time-to-hire visibility. (In parallel, I facilitated a small internal pilot where we tested a standardized onboarding “experience journey,” mapping employee touchpoin).",
+        "Identified recurring provisioning bottlenecks, escalated SLA gaps, and drove revised IT service commitments to protect onboarding readiness. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Implemented turnaround tracking dashboards to provide shared operational visibility for stakeholders and issue-resolution cadence. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Ran discovery interviews with hiring managers to surface execution friction and convert qualitative pain points into action items. (I also ran informal discovery interviews with hiring managers to understand friction points in candidate evaluation, synthesized themes, and)."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 9,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "time_to_hire",
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "journey_90_day",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "reporting",
+          "planning"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 7,
+        "hits": [
+          "workflow_spec_transitions",
+          "program_artifacts",
+          "capacity_modeling",
+          "exec_reporting",
+          "risk_sla_controls",
+          "discovery_to_framework",
+          "journey_risk_mapping"
+        ]
+      },
+      "questions": [
+        "What specific tools or software did you use for HR operations?",
+        "Can you provide examples of metrics you tracked for HR performance?",
+        "What challenges did you face in stakeholder management?",
+        "What methodologies did you apply in project management?",
+        "How did you measure the success of the onboarding guide you created?"
+      ],
+      "redFlags": [
+        "Depth rescue applied from transformed capability claims.",
+        "Excluded unsupported JD signals: communication"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, program artifacts and controls, discovery interviews, analytics interpretation, scenario modeling.",
+        "Depth diagnostics: meaningfulChanges=9, avgSimilarity=0.02, capabilityCoverage=65%, mechanismCoverage=80%, variantMechanismCoverage=80%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "communication",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 1,
+      "status": "ok",
+      "elapsedMs": 94851,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.57,
+        "atsScore": 1,
+        "passed": true,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler increased. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=80%. Capability-elevation coverage=65% for mode=pm. Category-mirror risk=low (ratio=0%, compared=0). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 2.439."
+      },
+      "bulletCount": 9,
+      "bullets": [
+        "Translated business needs into workflow specifications with explicit state transitions to align cross-functional handoffs. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Established formal execution artifacts including workflow specs, standardized templates, and checklists to reduce ambiguity and maintain control points. (I initiated a working session with HR, engineering, and IT to map the end-to-end hiring workflow, identified bottlenecks in handoffs, and dr).",
+        "Built scenario-based capacity models in Excel to test hiring-velocity assumptions across conservative and aggressive growth trajectories. (I also supported leadership offsites by preparing headcount planning scenarios based on hiring velocity assumptions, modeling different grow).",
+        "Led cross-functional execution forums across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Formalized end-to-end workflow handoffs, identified bottlenecks, and redesigned execution paths to improve delivery visibility. (While I didn’t build the system myself, I collaborated with IT to migrate parts of the tracking logic into the HRIS to reduce manual duplica).",
+        "Developed recurring executive reporting dashboards using Excel and HRIS exports for headcount, cost, and time-to-hire visibility. (In parallel, I facilitated a small internal pilot where we tested a standardized onboarding “experience journey,” mapping employee touchpoin).",
+        "Identified recurring provisioning bottlenecks, escalated SLA gaps, and drove revised IT service commitments to protect onboarding readiness. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Implemented turnaround tracking dashboards to provide shared operational visibility for stakeholders and issue-resolution cadence. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Ran discovery interviews with hiring managers to surface execution friction and convert qualitative pain points into action items. (I also ran informal discovery interviews with hiring managers to understand friction points in candidate evaluation, synthesized themes, and)."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 9,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "time_to_hire",
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "journey_90_day",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "reporting",
+          "planning"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 7,
+        "hits": [
+          "workflow_spec_transitions",
+          "program_artifacts",
+          "capacity_modeling",
+          "exec_reporting",
+          "risk_sla_controls",
+          "discovery_to_framework",
+          "journey_risk_mapping"
+        ]
+      },
+      "questions": [
+        "What specific metrics or KPIs did you use to measure the success of the onboarding guide?",
+        "Can you provide any quantitative results from the cross-functional initiatives you led?",
+        "What was the scale of the projects you managed in terms of team size or budget?",
+        "How did you track and report on the progress of the vendor cost optimization project?",
+        "What tools or systems did you use for scenario modeling and capacity planning?"
+      ],
+      "redFlags": [
+        "Depth rescue applied from transformed capability claims.",
+        "Excluded unsupported JD signals: leadership"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, program artifacts and controls, discovery interviews, analytics interpretation, scenario modeling.",
+        "Depth diagnostics: meaningfulChanges=9, avgSimilarity=0.02, capabilityCoverage=65%, mechanismCoverage=80%, variantMechanismCoverage=80%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "leadership",
+        "execution"
+      ]
+    },
+    {
+      "scenarioId": "S5_amd_program_manager_with_merged_notes",
+      "title": "Add AMD Program Manager JD + Auto Curate",
+      "run": 2,
+      "status": "ok",
+      "elapsedMs": 83496,
+      "providerStatus": "ok",
+      "fallbackReason": "",
+      "quality": {
+        "similarityScore": 0.01,
+        "impactScore": 0.57,
+        "atsScore": 1,
+        "passed": true,
+        "notes": "Meaningful content gain detected. No fabricated metric pattern detected. Generic filler increased. Project-notes coverage=0%, new-signal lift=0%. Strategic-theme coverage=80%. Capability-elevation coverage=65% for mode=pm. Category-mirror risk=low (ratio=0%, compared=0). Notes-driven new-bullet lift=1/1 eligible roles met >=2 new bullets. No JD-leakage grounding violations detected. Depth gate passed with score 2.439."
+      },
+      "bulletCount": 9,
+      "bullets": [
+        "Translated business needs into workflow specifications with explicit state transitions to align cross-functional handoffs. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Established formal execution artifacts including workflow specs, standardized templates, and checklists to reduce ambiguity and maintain control points. (I initiated a working session with HR, engineering, and IT to map the end-to-end hiring workflow, identified bottlenecks in handoffs, and dr).",
+        "Built scenario-based capacity models in Excel to test hiring-velocity assumptions across conservative and aggressive growth trajectories. (I also supported leadership offsites by preparing headcount planning scenarios based on hiring velocity assumptions, modeling different grow).",
+        "Led cross-functional execution forums across HR, Engineering, IT, and business stakeholders to align ownership and delivery decisions. (Outside of core HR ops work, I became increasingly involved in cross-functional initiatives that required translating business needs into st).",
+        "Formalized end-to-end workflow handoffs, identified bottlenecks, and redesigned execution paths to improve delivery visibility. (While I didn’t build the system myself, I collaborated with IT to migrate parts of the tracking logic into the HRIS to reduce manual duplica).",
+        "Developed recurring executive reporting dashboards using Excel and HRIS exports for headcount, cost, and time-to-hire visibility. (In parallel, I facilitated a small internal pilot where we tested a standardized onboarding “experience journey,” mapping employee touchpoin).",
+        "Identified recurring provisioning bottlenecks, escalated SLA gaps, and drove revised IT service commitments to protect onboarding readiness. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Implemented turnaround tracking dashboards to provide shared operational visibility for stakeholders and issue-resolution cadence. (I escalated the issue, proposed a revised SLA agreement with IT, and helped implement a tracking dashboard to monitor turnaround times).",
+        "Ran discovery interviews with hiring managers to surface execution friction and convert qualitative pain points into action items. (I also ran informal discovery interviews with hiring managers to understand friction points in candidate evaluation, synthesized themes, and)."
+      ],
+      "avgSimilarityToBase": 0.02,
+      "meaningfulChanges": 9,
+      "rewordingRisk": false,
+      "masterNotesCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "time_to_hire",
+          "hris_migration",
+          "day1_workflow",
+          "headcount_reporting"
+        ]
+      },
+      "variantNotesCoverage": {
+        "hitCount": 5,
+        "hits": [
+          "workflow_spec",
+          "discovery_interviews",
+          "journey_90_day",
+          "scenario_modeling",
+          "sla_dashboard"
+        ]
+      },
+      "pmSignalCoverage": {
+        "hitCount": 4,
+        "hits": [
+          "stakeholders",
+          "risk",
+          "reporting",
+          "planning"
+        ]
+      },
+      "programExecutionCoverage": {
+        "hitCount": 7,
+        "hits": [
+          "workflow_spec_transitions",
+          "program_artifacts",
+          "capacity_modeling",
+          "exec_reporting",
+          "risk_sla_controls",
+          "discovery_to_framework",
+          "journey_risk_mapping"
+        ]
+      },
+      "questions": [
+        "What specific HR software or tools have you used?",
+        "Can you provide examples of metrics you tracked for HR operations?",
+        "What challenges did you face in stakeholder coordination?",
+        "How did you measure the success of the onboarding guide you created?",
+        "What specific methodologies did you use for process improvement?"
+      ],
+      "redFlags": [
+        "Depth rescue applied from transformed capability claims.",
+        "Excluded unsupported JD signals: leadership"
+      ],
+      "changeSummary": [
+        "Used staged reasoning: capability extraction -> role mapping -> pm transformation -> final writing.",
+        "Mechanisms targeted: requirements/spec modeling, workflow architecture, program artifacts and controls, discovery interviews, analytics interpretation, scenario modeling.",
+        "Depth diagnostics: meaningfulChanges=9, avgSimilarity=0.02, capabilityCoverage=65%, mechanismCoverage=80%, variantMechanismCoverage=80%."
+      ],
+      "jdFocusAreas": [
+        "cross-functional",
+        "leadership",
+        "execution"
+      ]
+    }
+  ]
+}
