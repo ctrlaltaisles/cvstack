@@ -50,7 +50,7 @@ export default function LandingPage() {
                 with AI-powered suggestions.
               </span>
               <span className="hidden sm:inline">
-                Stop rewriting. Start stacking. Tailor your resume intentionally with AI-powered suggestions.
+                Stop rewriting. Start stacking.<br /> Tailor your resume intentionally with AI-powered suggestions.
               </span>
             </p>
             <button
