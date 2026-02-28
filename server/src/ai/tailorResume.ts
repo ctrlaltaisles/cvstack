@@ -100,6 +100,13 @@ interface CurateResumeInput {
   jobLink?: string;
 }
 
+export interface AIProgressUpdate {
+  stage: string;
+  progress: number;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
 export class TailorResumeError extends Error {
   statusCode: number;
 
