@@ -36,9 +36,9 @@ export default function LandingPage() {
           <div className="text-center max-w-xl">
             <p className="text-xs uppercase tracking-[0.28em] text-[#b0b6c4] mb-6 leading-relaxed">
               <span className="sm:hidden">
-                BUILD.<br />STACK.<br />STORE.
+                BUILD, STACK, STORE.
               </span>
-              <span className="hidden sm:inline">BUILD. STACK. STORE.</span>
+              <span className="hidden sm:inline">BUILD, STACK, STORE.</span>
             </p>
             <h1 className="text-[42px] md:text-[56px] tracking-tight text-[#101420] mb-4 leading-[1.05]">
               Your Resume.<br />Leveled Up.
