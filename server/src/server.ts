@@ -27,6 +27,7 @@ const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS
 // Temporarily hard-disable cleanup scheduler to prevent Prisma transaction conflicts in production.
 const ENABLE_UPLOAD_CLEANUP = false;
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 1024 * 1024);
 const SUPABASE_URL = String(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').trim();
 const SUPABASE_AUTH_KEY = String(
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -281,6 +282,11 @@ function sanitizeUploadFileName(rawValue: unknown) {
 function getPdfBufferOrRespond(req: express.Request, res: express.Response): Buffer | null {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
     res.status(400).json({ error: 'Expected PDF binary body with content-type application/pdf' });
+    return null;
+  }
+  if (req.body.length > MAX_UPLOAD_BYTES) {
+    const maxMb = Number((MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(2)).toString().replace(/\.00$/, '');
+    res.status(413).json({ error: `File size must be ${maxMb}MB or less.` });
     return null;
   }
   return req.body;

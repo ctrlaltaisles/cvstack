@@ -2863,65 +2863,67 @@ export default function Workspace() {
     });
   };
 
-  const handleCurate = async () => {
-    const versionId = selectedVersionId;
-    const snapshot = activeVersion;
-    if (!snapshot) return;
-    if (!snapshot.isBase && !hasMeaningfulJobDescription(snapshot.jobDescription)) {
-      setShowJDPanel(true);
-      showToast('Add the full JD before curating so AI can make targeted changes.', 'info');
-      return;
-    }
-    setIsCurating(true);
-    try {
-      const includePreviouslyAccepted = hasNewCurationContext(snapshot);
-      if (!includePreviouslyAccepted && !hasCuratableBullets(snapshot)) {
-        showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
+  const handleCurate = () => {
+    requireAuth(async () => {
+      const versionId = selectedVersionId;
+      const snapshot = activeVersion;
+      if (!snapshot) return;
+      if (!snapshot.isBase && !hasMeaningfulJobDescription(snapshot.jobDescription)) {
+        setShowJDPanel(true);
+        showToast('Add the full JD before curating so AI can make targeted changes.', 'info');
         return;
       }
-      const result = await curateResume({
-        resumeData: buildResumeDataForCuration(snapshot, baseVersion),
-        targetRole: snapshot.jobTitle || snapshot.data.title,
-        jdText: snapshot.jobDescription,
-        jobCompany: snapshot.jobCompany,
-        jobLink: snapshot.jobLink,
-      });
-      const fallbackReason = getCurationFallbackReason(result);
-      if (fallbackReason) {
-        showToast(fallbackReason, 'info');
-        if (!hasMeaningfulJobDescription(snapshot.jobDescription)) {
-          setShowJDPanel(true);
+      setIsCurating(true);
+      try {
+        const includePreviouslyAccepted = hasNewCurationContext(snapshot);
+        if (!includePreviouslyAccepted && !hasCuratableBullets(snapshot)) {
+          showToast('All accepted AI bullets are unchanged, so curation was skipped.', 'info');
+          return;
         }
-        return;
-      }
-      const curatedSnapshot = markVersionCurated(snapshot);
-      const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now(), { includePreviouslyAccepted });
-      if (nextChanges.length === 0) {
+        const result = await curateResume({
+          resumeData: buildResumeDataForCuration(snapshot, baseVersion),
+          targetRole: snapshot.jobTitle || snapshot.data.title,
+          jdText: snapshot.jobDescription,
+          jobCompany: snapshot.jobCompany,
+          jobLink: snapshot.jobLink,
+        });
+        const fallbackReason = getCurationFallbackReason(result);
+        if (fallbackReason) {
+          showToast(fallbackReason, 'info');
+          if (!hasMeaningfulJobDescription(snapshot.jobDescription)) {
+            setShowJDPanel(true);
+          }
+          return;
+        }
+        const curatedSnapshot = markVersionCurated(snapshot);
+        const nextChanges = buildPendingAIChangesFromCuration(snapshot, result, Date.now(), { includePreviouslyAccepted });
+        if (nextChanges.length === 0) {
+          setVersions((prev) => prev.map((v) => (
+            v.id === versionId
+              ? { ...v, lastCurationInputHash: curatedSnapshot.lastCurationInputHash }
+              : v
+          )));
+        }
+        if (nextChanges.length === 0) {
+          showToast(getCurationNoChangeMessage(result), 'info');
+          return;
+        }
         setVersions((prev) => prev.map((v) => (
           v.id === versionId
-            ? { ...v, lastCurationInputHash: curatedSnapshot.lastCurationInputHash }
+            ? {
+              ...v,
+              aiChanges: mergeAIChangesWithoutRepeats(v.aiChanges ?? [], nextChanges),
+              lastCurationInputHash: curatedSnapshot.lastCurationInputHash,
+            }
             : v
         )));
+        showToast(`${nextChanges.length} curation suggestion${nextChanges.length === 1 ? '' : 's'} ready to review.`);
+      } catch (_error) {
+        showToast('AI curation failed. Please try again.', 'error');
+      } finally {
+        setIsCurating(false);
       }
-      if (nextChanges.length === 0) {
-        showToast(getCurationNoChangeMessage(result), 'info');
-        return;
-      }
-      setVersions((prev) => prev.map((v) => (
-        v.id === versionId
-          ? {
-            ...v,
-            aiChanges: mergeAIChangesWithoutRepeats(v.aiChanges ?? [], nextChanges),
-            lastCurationInputHash: curatedSnapshot.lastCurationInputHash,
-          }
-          : v
-      )));
-      showToast(`${nextChanges.length} curation suggestion${nextChanges.length === 1 ? '' : 's'} ready to review.`);
-    } catch (_error) {
-      showToast('AI curation failed. Please try again.', 'error');
-    } finally {
-      setIsCurating(false);
-    }
+    });
   };
 
   const handleDeleteVariant = (versionId: string) => {

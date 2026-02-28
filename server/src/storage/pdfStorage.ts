@@ -72,15 +72,17 @@ export async function storeResumePdf(fileBuffer: Buffer, originalName: string): 
     const { error } = await supabase.storage
       .from(SUPABASE_BUCKET)
       .upload(key, fileBuffer, { contentType: 'application/pdf', upsert: false });
-    if (error) {
-      throw new Error(`Supabase upload failed: ${error.message}`);
+    if (!error) {
+      return {
+        storagePath: buildSupabaseUri(SUPABASE_BUCKET, key),
+        provider: 'supabase',
+        bucket: SUPABASE_BUCKET,
+        key,
+      };
     }
-    return {
-      storagePath: buildSupabaseUri(SUPABASE_BUCKET, key),
-      provider: 'supabase',
-      bucket: SUPABASE_BUCKET,
-      key,
-    };
+    // Keep resume import resilient when remote storage rejects a file.
+    // Fallback to local storage rather than failing the upload flow.
+    console.warn(`[uploads] Supabase upload failed (${error.message}); falling back to local storage.`);
   }
 
   fs.mkdirSync(uploadsDir, { recursive: true });

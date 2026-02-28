@@ -9,7 +9,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#FAFAFA]">
       <AuthModal
         open
-        onClose={() => navigate('/')}
+        onClose={() => {
+          if (window.history.length > 1) {
+            navigate(-1);
+            return;
+          }
+          navigate('/start', { replace: true });
+        }}
         onSuccess={() => {
           void resolvePostLoginPath().then((destination) => navigate(destination));
         }}
