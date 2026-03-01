@@ -94,17 +94,17 @@ const MONTH_INDEX: Record<string, number> = {
 
 const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
   { type: 'experience', patterns: [/^(work\s+)?experience$/i, /professional\s+experience/i, /employment\s+history/i] },
-  { type: 'education', patterns: [/^education$/i, /^academic\s+background$/i] },
-  { type: 'skills', patterns: [/^skills?$/i, /^technical\s+skills?$/i, /^core\s+skills?$/i, /^software$/i, /^tools$/i] },
+  { type: 'education', patterns: [/^education$/i, /^academic\s+background$/i, /^qualifications?$/i] },
+  { type: 'skills', patterns: [/^skills?$/i, /^skillset$/i, /^technical\s+skills?$/i, /^core\s+skills?$/i, /^software$/i, /^tools$/i, /^proficiency$/i, /^expertise$/i] },
   { type: 'other', patterns: [/^certifications?$/i, /^licenses?$/i, /^awards?$/i, /^recognition$/i, /^achievements?$/i] },
   { type: 'projects', patterns: [/^projects?$/i, /^selected\s+projects?$/i] },
-  { type: 'summary', patterns: [/^summary$/i, /^profile$/i, /^about$/i, /^objective$/i] },
+  { type: 'summary', patterns: [/^summary$/i, /^profile$/i, /^about$/i, /^objective$/i, /^introduction$/i] },
   { type: 'contact', patterns: [/^contact$/i] },
 ];
 
 const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|specialist|consultant|architect|developer|coach|instructor|trainer|assistant|marketing)\b/i;
 const COMPANY_HINT = /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|university|college|institute|labs?)/i;
-const DEGREE_HINT = /\b(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?sc\.?|bsc|bs|bba|m\.?a\.?|m\.?sc\.?|msc|m\.?s\.?|mba|hons)\b/i;
+const DEGREE_HINT = /\b(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?sc\.?|bsc|bs|bba|m\.?a\.?|m\.?sc\.?|msc|m\.?s\.?|mba|hons|gce|gcse|o[\s-]?level|a[\s-]?level|n[\s-]?level)\b/i;
 const SCHOOL_HINT = /(university|college|polytechnic|school|institute|academy)/i;
 const AWARD_HINT = /(award|awards|recognition|achievement|certification|certificate|medal|honou?r|finalist|winner)/i;
 const COUNTRY_TOKEN_REGEX = /\b(singapore|malaysia|indonesia|thailand|vietnam|philippines|united kingdom|uk|united states|usa|australia|india|china|japan|canada)\b/i;
@@ -271,6 +271,8 @@ function parseDateRange(text: string): { start: MonthYear; end: MonthYear; isCur
   const normalized = text
     .replace(/[–—]/g, '-')
     .replace(/\s+to\s+/gi, '-')
+    // Strip leading day-of-month numbers so "22 February 2016" parses the same as "February 2016".
+    .replace(/\b([012]?\d)\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/gi, '$2')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -401,13 +403,28 @@ function looksExperienceEntryHeader(text: string): boolean {
   return words >= 2 && words <= 8 && t.length <= 90;
 }
 
+/** Returns true when a short text is PURELY a location (city, country, or work-mode). */
+function looksLikeLocation(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 60) return false;
+  if (COMPANY_HINT.test(t)) return false;
+  if (TITLE_HINT.test(t)) return false;
+  const LOCATION_ONLY = /^(?:singapore|hong\s+kong|malaysia|indonesia|thailand|philippines|vietnam|india|china|japan|united\s+kingdom|uk|united\s+states|usa|australia|canada|germany|france|new\s+zealand|remote|hybrid|onsite)(?:\s*,\s*(?:singapore|hong\s+kong|malaysia|indonesia|thailand|philippines|vietnam|india|china|japan|united\s+kingdom|uk|united\s+states|usa|australia|canada|germany|france|new\s+zealand|remote|hybrid|onsite))*$/i;
+  return LOCATION_ONLY.test(t);
+}
+
 function looksExperienceOrgLine(text: string): boolean {
+  if (looksLikeLocation(text)) return false;
+  if (text.length > 60) return false; // company names are short; reject long sentences
   if (COMPANY_HINT.test(text)) return true;
-  return /\b(singapore|united kingdom|uk|school|club|centre|university|college|academy|technologies)\b/i.test(text);
+  return /\b(group|studio|agency|labs?|school|club|centre|university|college|academy|technologies|hong\s+kong)\b/i.test(text);
 }
 
 function looksEducationSchoolLine(text: string): boolean {
-  return SCHOOL_HINT.test(text) || /\b(singapore|united kingdom|uk)\b/i.test(text);
+  if (SCHOOL_HINT.test(text)) return true;
+  // Location token can hint at a school name only when it's not a pure location string
+  // (e.g. "Singapore Polytechnic" ✓ but "Singapore" alone ✗).
+  return /\b(singapore|hong\s+kong|united\s+kingdom|uk)\b/i.test(text) && !looksLikeLocation(text);
 }
 
 function dateWeight(value: MonthYear, isCurrent: boolean): number {
@@ -644,14 +661,11 @@ function classifyHeading(line: ExtractedLine, medianFont: number): SectionType |
   const text = line.text.toLowerCase().replace(/[:\-]+$/, '').trim();
   const key = headingKey(text);
   const looksHeading = text.length <= 40 && text.split(/\s+/).length <= 4;
-  if (!looksHeading) return null;
 
-  for (const rule of SECTION_KEYWORDS) {
-    if (rule.patterns.some((p) => p.test(text))) {
-      return rule.type;
-    }
-    if (rule.patterns.some((p) => p.test(key))) {
-      return rule.type;
+  if (looksHeading) {
+    for (const rule of SECTION_KEYWORDS) {
+      if (rule.patterns.some((p) => p.test(text))) return rule.type;
+      if (rule.patterns.some((p) => p.test(key))) return rule.type;
     }
   }
 
@@ -663,6 +677,22 @@ function classifyHeading(line: ExtractedLine, medianFont: number): SectionType |
     if (/summary|profile|about|objective/.test(text) || /summary|profile|about|objective/.test(key)) return 'summary';
     if (/award|recognition|achievement|certification/.test(text) || /award|recognition|achievement|certification/.test(key)) return 'other';
   }
+
+  // Handle section headers merged with first entry content (e.g. "Education Diploma in ...").
+  // Only match when the first word is a known section keyword AND the remainder looks like
+  // entry content (degree/school/date/company), not a skill or role description.
+  const firstWord = text.split(/\s+/)[0] ?? '';
+  const remainder = text.slice(firstWord.length).trim();
+  if (/^education$/i.test(firstWord) && remainder.length > 0) return 'education';
+  if (/^experience$/i.test(firstWord) && remainder.length > 0) {
+    // Only classify as merged experience section header if the remainder contains an actual
+    // entry signal (date, company indicator, or role title) — not a skill description.
+    if (hasDateText(remainder) || COMPANY_HINT.test(remainder) || TITLE_HINT.test(remainder)) {
+      return 'experience';
+    }
+  }
+  if (/^skills?$/i.test(firstWord) && remainder.length > 0) return 'skills';
+  if (/^skillset$/i.test(firstWord) && remainder.length > 0) return 'skills';
 
   return null;
 }
@@ -709,6 +739,37 @@ export function detectSections(lines: ExtractedLine[]): DetectedSection[] {
     sections.push({ type: 'other', startIdx: 0, endIdx: lines.length - 1 });
   }
 
+  // Post-process: when the contact section spans many lines and no experience section was
+  // detected before the first skills/education section, scan for "Role / Date" pattern lines
+  // (e.g. "UX Manager / 03 October 2016-Present") and inject an implied experience section.
+  const contactIdx = sections.findIndex((s) => s.type === 'contact');
+  const hasExpSection = sections.some((s) => s.type === 'experience');
+  if (contactIdx >= 0 && !hasExpSection) {
+    const contact = sections[contactIdx];
+    const contactLineCount = contact.endIdx - contact.startIdx + 1;
+    if (contactLineCount > 12) {
+      let firstExpLine = -1;
+      for (let i = contact.startIdx + 1; i <= contact.endIdx; i += 1) {
+        const text = lines[i]?.text ?? '';
+        const slashIdx = text.indexOf(' / ');
+        if (slashIdx > 0) {
+          const leftPart = text.slice(0, slashIdx).trim();
+          const rightPart = text.slice(slashIdx + 3).trim();
+          if (TITLE_HINT.test(leftPart) && hasDateText(rightPart)) {
+            // The company line is typically one line above the role/date line.
+            firstExpLine = Math.max(contact.startIdx + 3, i - 1);
+            break;
+          }
+        }
+      }
+      if (firstExpLine > contact.startIdx + 2) {
+        const expEndIdx = contact.endIdx;
+        sections[contactIdx] = { ...contact, endIdx: firstExpLine - 1 };
+        sections.splice(contactIdx + 1, 0, { type: 'experience', startIdx: firstExpLine, endIdx: expEndIdx });
+      }
+    }
+  }
+
   return sections;
 }
 
@@ -749,8 +810,18 @@ function groupSectionBlocks(section: DetectedSection, lines: ExtractedLine[]): B
       && !hasDateText(line.text);
     const hasEntryContent = current.some((l) => isBulletText(l.text) || ACTION_VERB_HINT.test(l.text));
     const boundaryByHeader = current.length > 0 && (roleLikeHeader || schoolLikeHeader) && hasEntryContent && (yGap > 10 || current.some((l) => isBulletText(l.text)));
+    // For education sections that use "School / dates" slash format: when a degree-like line
+    // appears after a slash-format date line, it's the start of a new entry (not a continuation).
+    const prevHasSlashDate = section.type === 'education' && current.some((l) => {
+      const si = l.text.indexOf(' / ');
+      return si > 0 && hasDateText(l.text.slice(si + 3));
+    });
+    const boundaryByNewEdEntry = prevHasSlashDate
+      && DEGREE_HINT.test(line.text)
+      && !hasDateText(line.text)
+      && !isBulletText(line.text);
 
-    if ((boundaryByDate || boundaryByGap || boundaryByHeader) && current.length > 0) {
+    if ((boundaryByDate || boundaryByGap || boundaryByHeader || boundaryByNewEdEntry) && current.length > 0) {
       blocks.push({ section: section.type, lines: current });
       current = [];
     }
@@ -783,6 +854,19 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
         next.lines.splice(0, 1);
         continue;
       }
+
+      // Orphaned header merge: when current block has NO date (no bullets either) and the
+      // next block starts with a date, the current block is a "Company / Location / Role"
+      // header that got split off. Move all its non-action lines to the front of next.
+      const nextStartsWithDate = next.lines.length > 0 && looksDateAnchor(next.lines[0]);
+      if (!currentHasDate && !currentHasBullets && nextStartsWithDate && current.lines.length <= 6) {
+        const headerLines = current.lines.filter((l) => !ACTION_VERB_HINT.test(l.text) && !isBulletText(l.text));
+        if (headerLines.length > 0) {
+          next.lines.unshift(...headerLines);
+          current.lines = current.lines.filter((l) => !headerLines.includes(l));
+          continue;
+        }
+      }
     }
 
     const nextHead = next.lines[0].text;
@@ -792,14 +876,19 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
       (next.section === 'education' && (DEGREE_HINT.test(nextHead) || hasDateText(nextHead)));
     if (!needAttachPrevHeader) continue;
     if (next.section === 'experience') {
-      const nextHasHeader = next.lines.some((l, idx) =>
-        idx < 3
-        && !hasDateText(l.text)
-        && !isBulletText(l.text)
-        && (looksExperienceEntryHeader(l.text) || looksExperienceOrgLine(l.text)),
+      // Only skip if the next block already has BOTH a role AND a company/org line.
+      // If it has a role but no company, we still need to look for a company in current's tail.
+      const nextHasRoleLine = next.lines.some((l, idx) =>
+        idx < 3 && !hasDateText(l.text) && !isBulletText(l.text) && looksExperienceEntryHeader(l.text),
       );
-      if (nextHasHeader) continue;
+      const nextHasOrgLine = next.lines.some((l, idx) =>
+        idx < 5 && !hasDateText(l.text) && !isBulletText(l.text) && looksExperienceOrgLine(l.text),
+      );
+      if (nextHasRoleLine && nextHasOrgLine) continue;
     }
+
+    const nextHeadHasDate = hasDateText(next.lines[0]?.text ?? '');
+    const nextHeadIsRole = TITLE_HINT.test(nextHead) && !hasDateText(nextHead);
 
     let moveIdx = -1;
     for (let j = current.lines.length - 1; j >= Math.max(0, current.lines.length - 5); j -= 1) {
@@ -807,17 +896,36 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
       const text = cand.text;
       if (hasDateText(text)) continue;
       if (isBulletText(text)) continue;
-      const acceptable = next.section === 'experience'
+      const strictAcceptable = next.section === 'experience'
         ? (looksExperienceOrgLine(text) && !TITLE_HINT.test(text))
         : looksEducationSchoolLine(text);
-      if (acceptable) {
+      // Looser fallback: trailing short non-title/non-location/non-action line is likely a company name.
+      const looseAcceptable = next.section === 'experience'
+        && (nextHeadHasDate || nextHeadIsRole)
+        && !TITLE_HINT.test(text)
+        && !ACTION_VERB_HINT.test(text)
+        && !looksLikeLocation(text)
+        && text.length >= 2
+        && text.length <= 80
+        && !/[.!?]$/.test(text);
+      if (strictAcceptable || looseAcceptable) {
         moveIdx = j;
         break;
       }
     }
     if (moveIdx >= 0) {
-      next.lines.unshift(current.lines[moveIdx]);
-      current.lines.splice(moveIdx, 1);
+      // Also grab any immediately-following header lines (location, role) that belong
+      // to the same entry as the company — stop at first bullet, action verb, or long prose.
+      let moveEnd = moveIdx + 1;
+      while (moveEnd < current.lines.length) {
+        const t = current.lines[moveEnd].text;
+        if (isBulletText(t) || ACTION_VERB_HINT.test(t) || hasDateText(t)) break;
+        if (t.length > 80 || /[.!?]$/.test(t)) break;
+        moveEnd += 1;
+      }
+      const toMove = current.lines.slice(moveIdx, moveEnd);
+      next.lines.unshift(...toMove);
+      current.lines.splice(moveIdx, moveEnd - moveIdx);
     }
   }
 
@@ -851,11 +959,32 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     .filter((l) => l.text.length <= 120)
     .slice(0, 12);
 
+  // For multi-column resumes, the first line may be a merged navigation bar like
+  // "Introduction Experience DEBBIE NG SI MIN". Extract the all-caps suffix as the name.
+  function extractNameFromMergedLine(text: string): string | null {
+    const caps = text.match(/\b([A-Z]{2,}(?:\s+[A-Z]{2,}){1,3})\s*$/);
+    if (!caps?.[1]) return null;
+    const candidate = caps[1].trim();
+    if (/^(EXPERIENCE|EDUCATION|SKILLS|PROJECTS|ABOUT|CONTACT|SUMMARY|INTRODUCTION)$/i.test(candidate)) return null;
+    if (candidate.split(/\s+/).length < 2) return null;
+    return candidate.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\b([A-Z]{2,})\b/g, (t) =>
+      t.slice(0, 1) + t.slice(1).toLowerCase(),
+    );
+  }
+
   const nameCandidate = [...top]
     .filter((line) => !/@/.test(line.text) && !/\d{3,}/.test(line.text) && !/https?:\/\//i.test(line.text) && !/linkedin/i.test(line.text))
     .filter((line) => !TITLE_HINT.test(line.text))
     .filter((line) => line.text.split(/\s+/).length >= 2 && line.text.split(/\s+/).length <= 5)
     .sort((a, b) => (b.fontSize ?? 12) - (a.fontSize ?? 12))[0];
+
+  // Always try to extract a name from a merged navigation bar line (e.g. "Intro Experience DEBBIE NG").
+  // This has higher confidence than a plain short line for resumes with nav bars.
+  const mergedNameCandidate = top.reduce((found: string | null, line) => {
+    if (found) return found;
+    if (line.text.split(/\s+/).length <= 5) return null; // short lines already handled by nameCandidate
+    return extractNameFromMergedLine(line.text);
+  }, null);
 
   const email = findRegex(allLines, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   const phone = findRegex(allLines, /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)\d{3,4}[\s.-]?\d{3,4}/);
@@ -877,7 +1006,8 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     return line.text.split(',').length >= 2 || COUNTRY_TOKEN_REGEX.test(line.text);
   });
 
-  let name = nameCandidate?.text ?? null;
+  // Prefer merged nav-bar name over plain candidate (nav bar is more reliable for styled resumes).
+  let name = mergedNameCandidate ?? nameCandidate?.text ?? null;
   if (!name && email) {
     const local = email.split('@')[0] ?? '';
     const tokens = local
@@ -888,7 +1018,18 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     if (tokens.length >= 1) name = tokens.join(' ');
   }
   let currentTitle: string | null = null;
-  if (nameCandidate) {
+  if (mergedNameCandidate) {
+    // When name comes from a merged nav bar, the title is typically the first short non-nav,
+    // non-contact-info line immediately after the nav bar.
+    const navBarLine = top.find((l) => extractNameFromMergedLine(l.text) === mergedNameCandidate);
+    const afterNav = navBarLine ? top.filter((l) => l !== navBarLine) : top;
+    currentTitle = afterNav.find((l) =>
+      !/@|\+?\d{4,}|https?:\/\//i.test(l.text)
+      && !/^References/i.test(l.text)
+      && l.text.split(/\s+/).length <= 6
+      && l.text.length <= 60,
+    )?.text ?? null;
+  } else if (nameCandidate) {
     const idx = lines.findIndex((l) => l === nameCandidate);
     const nearby = lines.slice(Math.max(0, idx + 1), idx + 5);
     currentTitle = nearby.find((l) =>
@@ -985,8 +1126,27 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   if (lines.length === 0) return null;
 
   const dateLine = lines.find((l) => looksDateAnchor(l));
-  const dateInfo = parseDateRange(dateLine?.text ?? '');
-  const roleFromDateLine = (() => {
+
+  // Handle "Role / Date Range" combined lines (e.g. "UX Manager / 03 October 2016-Present").
+  let roleFromSlashFormat: string | null = null;
+  let slashDateText: string | null = null;
+  if (dateLine) {
+    const slashIdx = dateLine.text.indexOf(' / ');
+    if (slashIdx > 0) {
+      const leftPart = dateLine.text.slice(0, slashIdx).trim();
+      const rightPart = dateLine.text.slice(slashIdx + 3).trim();
+      if (TITLE_HINT.test(leftPart) && hasDateText(rightPart)) {
+        roleFromSlashFormat = removeDateFragments(leftPart);
+        // Parse dates from the right-hand side only to avoid false-positive "-" matches
+        // in the role text (e.g. "UX Lead (Singapore)-User Experience Group Asia").
+        slashDateText = rightPart;
+      }
+    }
+  }
+
+  const dateInfo = parseDateRange(slashDateText ?? dateLine?.text ?? '');
+
+  const roleFromDateLine = roleFromSlashFormat ?? (() => {
     if (!dateLine) return null;
     const cleaned = removeDateFragments(dateLine.text);
     return TITLE_HINT.test(cleaned) ? cleaned : null;
@@ -1002,9 +1162,15 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
 
   let role: string | null = null;
   let company: string | null = null;
-  const mixed = dateLine ? parseRoleCompanyFromMixedLine(dateLine.text) : { role: null, company: null };
-  role = mixed.role;
-  company = mixed.company;
+
+  if (roleFromSlashFormat) {
+    role = roleFromSlashFormat;
+  } else {
+    const mixed = dateLine ? parseRoleCompanyFromMixedLine(dateLine.text) : { role: null, company: null };
+    role = mixed.role;
+    company = mixed.company;
+  }
+
   const headerLine = contentLines.find((t) => looksExperienceEntryHeader(t) && !ACTION_VERB_HINT.test(t)) ?? null;
   if ((!role || !company) && headerLine) {
     const fromHeader = parseRoleCompanyFromMixedLine(headerLine);
@@ -1025,7 +1191,7 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   }
 
   if (!role || !company) {
-    const candidates = contentLines.filter((t) => !ACTION_VERB_HINT.test(t)).slice(0, 3);
+    const candidates = contentLines.filter((t) => !ACTION_VERB_HINT.test(t)).slice(0, 4);
     role = role ?? candidates.find((t) => TITLE_HINT.test(t)) ?? null;
     company = company ?? candidates.find((t) =>
       looksExperienceOrgLine(t)
@@ -1033,7 +1199,36 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
       && t.length <= 80,
     ) ?? null;
     if (!role && candidates.length > 0) role = candidates[0] ?? null;
-    if (!company && candidates.length > 1) company = candidates[1] ?? null;
+    // Only use candidates[1] as fallback company if it's short enough to be a name (not prose).
+    if (!company && candidates.length > 1 && (candidates[1] ?? '').length <= 60) {
+      company = candidates[1] ?? null;
+    }
+  }
+
+  // If company was set to a location string, clear it and find the real company name.
+  if (company && looksLikeLocation(company)) {
+    company = contentLines.find((t) =>
+      !looksLikeLocation(t)
+      && !hasDateText(t)
+      && !isBulletText(t)
+      && !ACTION_VERB_HINT.test(t)
+      && t !== role
+      && t.length <= 80
+      && !/[.!?]$/.test(t),
+    ) ?? null;
+  }
+
+  // Fallback: if role found but no company, pick first short non-role, non-location line.
+  if (role && !company) {
+    company = contentLines.find((t) =>
+      t !== role
+      && !looksLikeLocation(t)
+      && !hasDateText(t)
+      && !isBulletText(t)
+      && !ACTION_VERB_HINT.test(t)
+      && t.length <= 80
+      && !/[.!?]$/.test(t),
+    ) ?? null;
   }
 
   const firstNonDate = contentLines.find((t) => !hasDateText(t)) ?? null;
@@ -1053,7 +1248,9 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   if (role && AWARD_HINT.test(role) && !TITLE_HINT.test(role)) role = null;
   if (company && AWARD_HINT.test(company) && !looksExperienceOrgLine(company)) company = null;
   if (company && !looksExperienceOrgLine(company) && /[.]/.test(company)) company = null;
-  if (role && looksExperienceOrgLine(role) && roleFromDateLine) {
+  // Only promote role→company when roleFromDateLine is a DIFFERENT string; if they're the same
+  // (e.g. both come from the slash-format line), swapping achieves nothing and causes bad data.
+  if (role && looksExperienceOrgLine(role) && roleFromDateLine && role !== roleFromDateLine) {
     if (!company || !looksExperienceOrgLine(company)) company = role;
     role = roleFromDateLine;
   }
@@ -1103,7 +1300,23 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   const lines = block.lines;
   if (lines.length === 0) return null;
 
-  const texts = lines.map((l) => l.text);
+  // Merge single-char uppercase degree prefixes with the next line
+  // e.g. ["B", "(Hons) Industrial Design"] → ["B(Hons) Industrial Design"].
+  const texts = (() => {
+    const raw = lines.map((l) => l.text);
+    const merged: string[] = [];
+    for (let i = 0; i < raw.length; i += 1) {
+      const cur = raw[i] ?? '';
+      const next = raw[i + 1] ?? '';
+      if (/^[A-Z]{1,2}$/.test(cur) && next && DEGREE_HINT.test(next)) {
+        merged.push(cur + next);
+        i += 1;
+      } else {
+        merged.push(cur);
+      }
+    }
+    return merged;
+  })();
   const dateLine = lines.find((l) => looksDateAnchor(l));
   const dateInfo = parseDateRange(dateLine?.text ?? '');
 
@@ -1126,8 +1339,8 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
     if (degreeLike) degree = degreeLike;
   }
 
-  school = school ? removeDateFragments(school) : null;
-  degree = degree ? removeDateFragments(degree) : null;
+  school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
+  degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').trim() : null;
   if (school && DEGREE_HINT.test(school) && (!degree || !DEGREE_HINT.test(degree))) {
     const tmp = degree;
     degree = school;
@@ -1162,7 +1375,11 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
 function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSection[]): string[] {
   const skillsSections = sections.filter((s) => s.type === 'skills');
   const allText = skillsSections
-    .flatMap((s) => lines.slice(s.startIdx, s.endIdx + 1).map((l) => l.text))
+    .flatMap((s) => lines.slice(s.startIdx, s.endIdx + 1)
+      .map((l) => l.text)
+      // Skip section sub-headers: lines ending with ":" or bare category labels.
+      .filter((t) => !t.endsWith(':'))
+      .filter((t) => !/^(proficiency|practice|knowledge|expertise|competency|category|type|level|additional)$/i.test(t)))
     .join(' | ');
 
   if (!allText) return [];
@@ -1267,16 +1484,81 @@ function detectCountryToken(text: string): string | null {
   return token.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Merge consecutive lines where a very short all-uppercase fragment (1–4 chars) followed
+ * by the next line together form a recognised section-keyword (e.g. "E" + "DUCATION" →
+ * "EDUCATION"). Also merges single-char degree prefixes like "B" + "(Hons) …" so the
+ * education-block parser can match the full degree string.
+ */
+/**
+ * Some PDFs render a section keyword merged with the first content item on the same line,
+ * e.g. "Education Diploma in Digital Media Design (Interactive Media)".
+ * Split such lines so detectSections sees a clean heading and the content is preserved.
+ */
+function splitMergedSectionHeadings(lines: ExtractedLine[]): ExtractedLine[] {
+  const result: ExtractedLine[] = [];
+  for (const line of lines) {
+    const t = line.text.trim();
+    // Match "Education <content>" where content looks like a degree or school name.
+    const edMatch = t.match(/^education\s+(.+)$/i);
+    if (edMatch) {
+      const content = edMatch[1].trim();
+      if (DEGREE_HINT.test(content) || SCHOOL_HINT.test(content)) {
+        result.push({ ...line, text: 'Education' });
+        result.push({ ...line, text: content });
+        continue;
+      }
+    }
+    result.push(line);
+  }
+  return result;
+}
+
+function mergeFragmentedLines(lines: ExtractedLine[]): ExtractedLine[] {
+  if (lines.length === 0) return lines;
+  const result: ExtractedLine[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.text.trim();
+    // Only consider very-short all-uppercase fragments as merge candidates.
+    if (i + 1 < lines.length && /^[A-Z]{1,4}$/.test(trimmed)) {
+      const next = lines[i + 1];
+      const combined = trimmed + next.text.trim();
+      // Case 1: combined text matches a section keyword → merge (fixes "E"+"DUCATION").
+      const combinedLower = combined.toLowerCase();
+      const isSection = SECTION_KEYWORDS.some((rule) =>
+        rule.patterns.some((p) => p.test(combinedLower)),
+      );
+      if (isSection) {
+        result.push({
+          ...line,
+          text: combined,
+          x1: Math.max(line.x1, next.x1),
+          y1: Math.max(line.y1, next.y1),
+        });
+        i += 2;
+        continue;
+      }
+    }
+    result.push(line);
+    i += 1;
+  }
+  return result;
+}
+
 export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOptions = {}): ParseResumePdfResult {
   const warnings: string[] = [];
-  const lines = linesInput
-    .map((l) => ({ ...l, text: cleanLineText(l.text) }))
-    .filter((l) => l.text.length > 0)
-    .sort((a, b) => {
-      if (a.page !== b.page) return a.page - b.page;
-      if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
-      return a.x0 - b.x0;
-    });
+  const lines = splitMergedSectionHeadings(mergeFragmentedLines(
+    linesInput
+      .map((l) => ({ ...l, text: cleanLineText(l.text) }))
+      .filter((l) => l.text.length > 0)
+      .sort((a, b) => {
+        if (a.page !== b.page) return a.page - b.page;
+        if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+        return a.x0 - b.x0;
+      }),
+  ));
 
   if (lines.length === 0) warnings.push('No text lines extracted from PDF.');
 

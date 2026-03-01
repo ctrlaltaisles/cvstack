@@ -44,7 +44,7 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string> {
     throw new Error('pdf-parse export not found');
   }
   const result = await parsePdf(buffer);
-  return String(result?.text ?? '').trim();
+  return String(result?.text ?? '').replace(/\u0000/g, '').trim();
 }
 
 async function extractWithPdfJs(buffer: Buffer): Promise<string> {
@@ -69,7 +69,7 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string> {
     if (pageText) chunks.push(pageText);
   }
 
-  return chunks.join('\n').trim();
+  return chunks.join('\n').replace(/\u0000/g, '').trim();
 }
 
 async function extractWithPdfKit(buffer: Buffer): Promise<string> {
@@ -106,7 +106,7 @@ print(output)
       timeout: 20000,
       maxBuffer: 6 * 1024 * 1024,
     });
-    return String(stdout ?? '').trim();
+    return String(stdout ?? '').replace(/\u0000/g, '').trim();
   } finally {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });

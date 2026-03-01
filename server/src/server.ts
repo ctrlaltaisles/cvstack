@@ -20,6 +20,20 @@ import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, store
 dotenv.config();
 const execFileAsync = promisify(execFile);
 
+/** Recursively strip PostgreSQL-incompatible null bytes from any parsed JSON value. */
+function deepStripNullBytes<T>(value: T): T {
+  if (typeof value === 'string') return value.replace(/\u0000/g, '') as unknown as T;
+  if (Array.isArray(value)) return value.map(deepStripNullBytes) as unknown as T;
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepStripNullBytes(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
 const UPLOAD_RETENTION_DAYS = Number(process.env.UPLOAD_RETENTION_DAYS ?? 7);
@@ -434,7 +448,8 @@ function startUploadCleanupScheduler() {
 async function parseUploadOrRespond(buffer: Buffer, res: express.Response, fileName: string) {
   console.log(`[parser] starting parse file="${fileName}" bytes=${buffer.length}`);
   try {
-    const parsed = await parseUploadedResumeBuffer(buffer);
+    const rawParsed = await parseUploadedResumeBuffer(buffer);
+    const parsed = deepStripNullBytes(rawParsed);
     const expCount = Array.isArray((parsed.parsedData as any)?.experiences) ? (parsed.parsedData as any).experiences.length : 0;
     const eduCount = Array.isArray((parsed.parsedData as any)?.education) ? (parsed.parsedData as any).education.length : 0;
     const skillCount = Array.isArray((parsed.parsedData as any)?.skills) ? (parsed.parsedData as any).skills.length : 0;
