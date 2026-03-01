@@ -142,6 +142,10 @@ function cleanLineText(text: string): string {
   }
   out = repaired.join(' ');
 
+  // Separate year-dash-month so the month chars can be merged: "2019-F" → "2019 - F"
+  // This allows "2019-F ebr uary" to reconstruct "February" via the char-stitching below.
+  out = out.replace(/\b((?:19|20)\d{2})-([A-Za-z])/g, '$1 - $2');
+
   // Merge lower-confidence OCR split words like "R ec ogni tion" and "E du c ation".
   const tokens = out.split(/\s+/).filter(Boolean);
   const stitched: string[] = [];
@@ -183,8 +187,43 @@ function cleanLineText(text: string): string {
     if (/^(as|to|in|on|at|an)$/i.test(a)) return m;
     return `${a}${b}`;
   });
+  // Merge fragment suffixes when the second part is a recognizable English suffix (not a standalone word).
+  // e.g. "Experie nces" -> "Experiences", "Desig ner" -> "Designer", "Design er" -> "Designer"
+  // Using a whitelist of known suffix fragments avoids merging "creative side" -> "creativeside"
+  out = out.replace(/\b([A-Za-z]{3,})\s+([a-z]{2,5})\b/g, (m, a: string, b: string) => {
+    if (!/^(?:nces?|nce|ner|ners?|ing|ings|ance|ences?|tion|tions|ment|ments|ess|ist|ists|ism|ity|ure|age|ful|less|ness|ble|ives?|ous|ers?|est|ary|ory|ery|ate|ent|ents|ant|ants|al|ary|ize|ise|ify|ical|ial|ual|ous|ium|ary|ular|ward|ling|uary)$/i.test(b)) return m;
+    return `${a}${b}`;
+  });
   out = out.replace(/\s*-\s*/g, '-');
   out = out.replace(/([a-z])-([A-Z])/g, '$1 - $2');
+  // Fix year digits split by char-by-char PDF encoding: "202 4" → "2024", "20 24" → "2024", "201 9" → "2019"
+  out = out.replace(/\b((?:19|20)\d{0,2})\s+(\d{1,2})\b/g, (m, a: string, b: string) => {
+    const combined = a + b;
+    return /^(?:19|20)\d{2}$/.test(combined) ? combined : m;
+  });
+  // Fix month name splits common in char-by-char PDFs (full names)
+  out = out
+    .replace(/\bJan\s+uary\b/gi, 'January')
+    .replace(/\bFebr\s+uary\b/gi, 'February')
+    .replace(/\bMar\s+ch\b/gi, 'March')
+    .replace(/\bApr\s+il\b/gi, 'April')
+    .replace(/\bAugus\s+t\b/gi, 'August')
+    .replace(/\bSep\s+tember\b/gi, 'September')
+    .replace(/\bSept\s+ember\b/gi, 'September')
+    .replace(/\bOct\s+ober\b/gi, 'October')
+    .replace(/\bNov\s+ember\b/gi, 'November')
+    .replace(/\bDec\s+ember\b/gi, 'December');
+  // Fix 3-char month abbreviation splits: "M ay" → "May" (3-char merged result fails {4,20} test)
+  out = out
+    .replace(/\bM\s+ay\b/g, 'May')
+    .replace(/\bJ\s+an\b/gi, 'Jan')
+    .replace(/\bM\s+ar\b/gi, 'Mar')
+    .replace(/\bJ\s+ul\b/gi, 'Jul')
+    .replace(/\bA\s+ug\b/gi, 'Aug')
+    .replace(/\bS\s+ep\b/gi, 'Sep')
+    .replace(/\bO\s+ct\b/gi, 'Oct')
+    .replace(/\bN\s+ov\b/gi, 'Nov')
+    .replace(/\bD\s+ec\b/gi, 'Dec');
   out = out.replace(/\s+/g, ' ').trim();
   return out;
 }
@@ -476,7 +515,21 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
     }
 
     const gap = span.x0 - last.x1;
-    const needsSpace = gap > Math.max(2, (span.fontSize ?? 10) * 0.25);
+    // If the horizontal gap is very large (> 100 pts) the two spans are almost certainly in
+    // different layout columns.  Keep them as separate lines so the column-reorder logic in
+    // parseResumeFromLines can place them in the correct section order.
+    // Similarly, if the span starts far to the LEFT of the current line's end (gap < -20 pts),
+    // the span belongs to a different visual column that was sorted before/after the current
+    // one — treat it as a new line to prevent concatenation like "Service DesignUser Research".
+    if (gap > 100 || gap < -20) {
+      lines.push({ ...span });
+      continue;
+    }
+    // Use a generous threshold: add a space whenever spans aren't significantly overlapping.
+    // This prevents concatenation like "Service DesignUser Research" / "GeneralAssembly" when
+    // PDF.js reports adjacent spans with a zero or near-zero gap.  Genuine intra-word overlaps
+    // (ligatures, kerning) have gaps more negative than -3 pt.
+    const needsSpace = gap > -3;
     last.text = cleanLineText(`${last.text}${needsSpace ? ' ' : ''}${span.text}`);
     last.x1 = Math.max(last.x1, span.x1);
     last.y1 = Math.max(last.y1, span.y1);
@@ -1199,9 +1252,12 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
       && t.length <= 80,
     ) ?? null;
     if (!role && candidates.length > 0) role = candidates[0] ?? null;
-    // Only use candidates[1] as fallback company if it's short enough to be a name (not prose).
-    if (!company && candidates.length > 1 && (candidates[1] ?? '').length <= 60) {
-      company = candidates[1] ?? null;
+    // Only use candidates[1] as fallback company if it's short enough to be a name (not prose)
+    // AND it is a different string from role (to avoid setting company = role when the same
+    // text (e.g. "Product Designer II") was already assigned to both slots).
+    if (!company && candidates.length > 1) {
+      const c1 = candidates[1] ?? null;
+      if (c1 && c1 !== role && c1.length <= 60) company = c1;
     }
   }
 
@@ -1341,6 +1397,19 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
 
   school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
   degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').trim() : null;
+
+  // Strip leading "Location, Location" prefix from school names that occur when a location
+  // annotation placed in a middle column merges with the school name (e.g. in multi-column
+  // PDF layouts): "Singapore, Remote National University of Singapore" → "National University
+  // of Singapore".  The comma-separated form distinguishes this from school names that
+  // legitimately start with a country (e.g. "Singapore Polytechnic").
+  if (school) {
+    const LOC_LIST = '(?:singapore|remote|malaysia|hong\\s+kong|uk|usa|australia|hybrid|onsite|united\\s+kingdom|united\\s+states)';
+    const locPrefixRe = new RegExp(`^${LOC_LIST}\\s*,\\s*${LOC_LIST}\\s*,?\\s*`, 'i');
+    const stripped = school.replace(locPrefixRe, '').trim();
+    if (stripped && SCHOOL_HINT.test(stripped)) school = stripped;
+  }
+
   if (school && DEGREE_HINT.test(school) && (!degree || !DEGREE_HINT.test(degree))) {
     const tmp = degree;
     degree = school;
@@ -1397,7 +1466,9 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     .filter((s) => !/\b(recognition|award|achievement|medal)\b/i.test(s))
     .filter((s) => !/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(s))
     .filter((s) => !/(19|20)\d{2}/.test(s))
-    .filter((s) => !/^[+\-]/.test(s));
+    .filter((s) => !/^[+\-]/.test(s))
+    // Remove pure location strings that leak in from multi-column PDFs (e.g. "Singapore", "Remote").
+    .filter((s) => !looksLikeLocation(s));
 
   return unique(tokens).slice(0, 8);
 }
@@ -1509,6 +1580,18 @@ function splitMergedSectionHeadings(lines: ExtractedLine[]): ExtractedLine[] {
         continue;
       }
     }
+    // Match "Experience <company>" where content looks like an organisation name (e.g.
+    // "Experience Nurun Hong Kong (Publicis Groupe)").  Only split when the remainder
+    // passes looksExperienceOrgLine so we don't accidentally split "Experience Planning/Strategy".
+    const expMatch = t.match(/^experience\s+(.+)$/i);
+    if (expMatch) {
+      const content = expMatch[1].trim();
+      if (looksExperienceOrgLine(content) || COMPANY_HINT.test(content)) {
+        result.push({ ...line, text: 'Experience' });
+        result.push({ ...line, text: content });
+        continue;
+      }
+    }
     result.push(line);
   }
   return result;
@@ -1547,17 +1630,86 @@ function mergeFragmentedLines(lines: ExtractedLine[]): ExtractedLine[] {
   return result;
 }
 
+/**
+ * Detects if the extracted lines come from a 2-column resume layout (e.g. design-tool exports
+ * with left-column = Experience/Projects and right-column = Skills/Education).
+ *
+ * When a large horizontal gap (> 150 pts) is detected on page 1, the function re-orders lines so
+ * that:
+ *   1. Header lines from both columns (above the first section heading in each column) are
+ *      merged and sorted by y-coordinate (natural reading order).
+ *   2. Left-column section content (Experience, Projects, etc.) follows.
+ *   3. Right-column section content (Skills, Education, etc.) follows.
+ *
+ * This prevents the section detector from seeing "SKILLS" (right col, y=707) immediately after
+ * "WORK EXPERIENCE" (left col, y=716), which would produce an empty experience section.
+ */
+function reorderColumnsIfNeeded(lines: ExtractedLine[]): ExtractedLine[] {
+  const page1Lines = lines.filter((l) => l.page === 1);
+  if (page1Lines.length < 8) return lines;
+
+  // Collect unique x0 positions bucketed to nearest 5 pts to reduce per-character noise.
+  const xs = Array.from(new Set(page1Lines.map((l) => Math.round(l.x0 / 5) * 5))).sort(
+    (a, b) => a - b,
+  );
+
+  // Find the largest consecutive gap between x buckets.
+  let maxGap = 0;
+  let splitX = -1;
+  for (let i = 1; i < xs.length; i += 1) {
+    const gap = xs[i] - xs[i - 1];
+    if (gap > maxGap) {
+      maxGap = gap;
+      splitX = (xs[i] + xs[i - 1]) / 2;
+    }
+  }
+
+  // Only reorder when there is a clear wide column gap.
+  if (maxGap <= 150 || splitX < 0) return lines;
+
+  const isSectionHeading = (text: string): boolean => {
+    const t = text.trim().toLowerCase().replace(/[:\-]+$/, '');
+    const k = headingKey(t);
+    return SECTION_KEYWORDS.some((rule) => rule.patterns.some((p) => p.test(t) || p.test(k)));
+  };
+
+  const laterPages = lines.filter((l) => l.page > 1);
+  // page1Lines are already in y-desc order (inherited from the sort in parseResumeFromLines).
+  const leftLines = page1Lines.filter((l) => l.x0 < splitX);
+  const rightLines = page1Lines.filter((l) => l.x0 >= splitX);
+
+  // Find the index of the first section heading in each column.
+  const leftHeadingIdx = leftLines.findIndex((l) => isSectionHeading(l.text));
+  const rightHeadingIdx = rightLines.findIndex((l) => isSectionHeading(l.text));
+
+  // If neither column has a recognised section heading, skip reordering.
+  if (leftHeadingIdx < 0 && rightHeadingIdx < 0) return lines;
+
+  // Split each column into a "header zone" (above first heading) and "content zone".
+  const leftHeader = leftHeadingIdx >= 0 ? leftLines.slice(0, leftHeadingIdx) : leftLines;
+  const leftContent = leftHeadingIdx >= 0 ? leftLines.slice(leftHeadingIdx) : [];
+  const rightHeader = rightHeadingIdx >= 0 ? rightLines.slice(0, rightHeadingIdx) : rightLines;
+  const rightContent = rightHeadingIdx >= 0 ? rightLines.slice(rightHeadingIdx) : [];
+
+  // Merge both header zones and restore y-desc visual order.
+  const combinedHeader = [...leftHeader, ...rightHeader].sort((a, b) => b.y0 - a.y0);
+
+  // Final order: shared header → left sections (Experience/Projects) → right sections (Skills/Education).
+  return [...combinedHeader, ...leftContent, ...rightContent, ...laterPages];
+}
+
 export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOptions = {}): ParseResumePdfResult {
   const warnings: string[] = [];
+  const sortedRaw = linesInput
+    .map((l) => ({ ...l, text: cleanLineText(l.text) }))
+    .filter((l) => l.text.length > 0)
+    .sort((a, b) => {
+      if (a.page !== b.page) return a.page - b.page;
+      if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+      return a.x0 - b.x0;
+    });
   const lines = splitMergedSectionHeadings(mergeFragmentedLines(
-    linesInput
-      .map((l) => ({ ...l, text: cleanLineText(l.text) }))
-      .filter((l) => l.text.length > 0)
-      .sort((a, b) => {
-        if (a.page !== b.page) return a.page - b.page;
-        if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
-        return a.x0 - b.x0;
-      }),
+    reorderColumnsIfNeeded(sortedRaw),
   ));
 
   if (lines.length === 0) warnings.push('No text lines extracted from PDF.');
@@ -1602,7 +1754,8 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     linkedin: contact.linkedin,
     website: contact.website,
     country: inferredCountry,
-    currentTitle: contact.currentTitle ?? experiences.find((e) => e.isCurrent)?.role ?? experiences[0]?.role ?? null,
+    // Use experience role as title fallback only if it looks like a real job title (not a school/bootcamp name)
+    currentTitle: (contact.currentTitle ?? experiences.find((e) => e.isCurrent)?.role ?? experiences.find((e) => TITLE_HINT.test(e.role ?? ''))?.role ?? null)?.replace(/\s*[|/]\s*$/, '').trim() || null,
     experiences,
     education,
     skills,
@@ -1626,7 +1779,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     currentTitle: data.currentTitle ? normalizeOutputText(data.currentTitle) : null,
     experiences: data.experiences.map((exp) => ({
       ...exp,
-      role: exp.role ? normalizeOutputText(exp.role) : null,
+      role: exp.role ? normalizeOutputText(exp.role).replace(/\s*[|/]\s*$/, '').trim() || null : null,
       company: exp.company ? normalizeOutputText(exp.company) : null,
       description: exp.description.map((d) => normalizeOutputText(d)).filter(Boolean),
     })),
@@ -1673,8 +1826,8 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
   data.skills = parsed.skills.slice(0, 8);
   data.workExperience = parsed.experiences.map((exp, idx) => ({
     id: `exp-${idx + 1}`,
-    company: exp.company ?? 'Unknown Company',
-    role: exp.role ?? 'Unknown Role',
+    company: exp.company ?? '',
+    role: exp.role ?? '',
     startDate: (exp.start.month == null || exp.start.year == null)
       ? unknownStart
       : { month: exp.start.month, year: exp.start.year, present: false },
@@ -1687,8 +1840,8 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
 
   data.education = parsed.education.map((edu, idx) => ({
     id: `edu-${idx + 1}`,
-    degree: edu.degree ?? 'Degree',
-    school: edu.school ?? 'School',
+    degree: edu.degree ?? '',
+    school: edu.school ?? '',
     location: edu.location ?? '',
     startDate: (edu.start.month == null || edu.start.year == null)
       ? unknownStart
