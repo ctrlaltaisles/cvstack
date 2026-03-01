@@ -1755,7 +1755,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     website: contact.website,
     country: inferredCountry,
     // Use experience role as title fallback only if it looks like a real job title (not a school/bootcamp name)
-    currentTitle: contact.currentTitle ?? experiences.find((e) => e.isCurrent)?.role ?? experiences.find((e) => TITLE_HINT.test(e.role ?? ''))?.role ?? null,
+    currentTitle: (contact.currentTitle ?? experiences.find((e) => e.isCurrent)?.role ?? experiences.find((e) => TITLE_HINT.test(e.role ?? ''))?.role ?? null)?.replace(/\s*[|/]\s*$/, '').trim() || null,
     experiences,
     education,
     skills,
