@@ -261,6 +261,13 @@ export function normalizeOutputText(text: string): string {
     .replace(/\s+,/g, ',')
     .replace(/\(\s+/g, '(')
     .replace(/\s+\)/g, ')')
+    // Truncate at § — anything after it is column-bleed from an adjacent PDF layout column.
+    // (§ markers are inserted by extractLinesFromPdfJsContent for sub-column gaps; skills parsing
+    // splits on § before calling normalizeOutputText, so skills tokens never contain § here.)
+    .replace(/\s*§.*$/, '')
+    // Repair common OCR fragment where "Experience" is split with an interior uppercase join:
+    // "UserEx perience" → "User Experience", "DesignerEx perience" → "Designer Experience"
+    .replace(/([A-Za-z]+)Ex\s+perience\b/g, (_, pre) => `${pre} Experience`)
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -422,7 +429,9 @@ function removeDateFragments(text: string): string {
 }
 
 function isBulletText(text: string): boolean {
-  return /^[•\-*\u2022]|^\d+\./.test(text.trim());
+  // Also recognise Ñ (U+00D1) which appears as the bullet-open marker in some PDFs
+  // (the font encoding maps the bullet glyph to the Ñ code point).
+  return /^[•\-*\u2022\u00d1]|^\d+\./.test(text.trim());
 }
 
 function hasDateText(text: string): boolean {
@@ -456,7 +465,7 @@ function looksExperienceOrgLine(text: string): boolean {
   if (looksLikeLocation(text)) return false;
   if (text.length > 60) return false; // company names are short; reject long sentences
   if (COMPANY_HINT.test(text)) return true;
-  return /\b(group|studio|agency|labs?|school|club|centre|university|college|academy|technologies|hong\s+kong)\b/i.test(text);
+  return /\b(group|studio|agency|labs?|school|club|centre|university|college|academy|technologies|hong\s+kong|design)\b/i.test(text);
 }
 
 function looksEducationSchoolLine(text: string): boolean {
@@ -525,12 +534,17 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
       lines.push({ ...span });
       continue;
     }
-    // Use a generous threshold: add a space whenever spans aren't significantly overlapping.
-    // This prevents concatenation like "Service DesignUser Research" / "GeneralAssembly" when
-    // PDF.js reports adjacent spans with a zero or near-zero gap.  Genuine intra-word overlaps
-    // (ligatures, kerning) have gaps more negative than -3 pt.
+    // When the gap is in the "sub-column" range (larger than a single word-space but still
+    // within 100 pts), insert a § separator so parseSkillsFromSections can split the
+    // concatenated skills from a 2-column skill grid.
+    // Empirical data: Yuan Jie's 8.4pt skill items have ~8pt inter-item gaps; normal word
+    // spaces at that size are ~2.5pt.  Using 6 pt as the fixed threshold safely covers
+    // 8-pt gaps without triggering on typical 2-5 pt word spaces.
+    // normalizeOutputText() strips any stray § from non-skills output fields.
+    const isSubColumnGap = gap > 6;
     const needsSpace = gap > -3;
-    last.text = cleanLineText(`${last.text}${needsSpace ? ' ' : ''}${span.text}`);
+    const spacer = isSubColumnGap ? ' § ' : (needsSpace ? ' ' : '');
+    last.text = cleanLineText(`${last.text}${spacer}${span.text}`);
     last.x1 = Math.max(last.x1, span.x1);
     last.y1 = Math.max(last.y1, span.y1);
     last.fontSize = Math.max(last.fontSize ?? 10, span.fontSize ?? 10);
@@ -1121,18 +1135,31 @@ function looksContinuationLine(text: string): boolean {
 function stitchBullets(lines: ExtractedLine[]): { bullets: string[]; prose: string[] } {
   const bullets: string[] = [];
   const prose: string[] = [];
-  const bulletBaseX = lines
+
+  // Pre-clean: strip Ç (U+00C7) which acts as a bullet-close marker in some PDFs.
+  // Everything from Ç onwards is either the marker itself or bleed from an adjacent PDF column.
+  // Also strip ASCII control characters that sometimes leak in from PDF encoding.
+  const cleanedLines = lines.map((l) => ({
+    ...l,
+    text: l.text
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+      .replace(/\s*\u00c7.*$/, '')
+      .trim() || l.text.trim(),
+  }));
+
+  const bulletBaseX = cleanedLines
     .filter((l) => isBulletText(l.text))
     .map((l) => l.x0)
     .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY;
 
-  for (const line of lines) {
+  for (const line of cleanedLines) {
     const text = line.text.trim();
     if (!text) continue;
     if (/^\+?\s*add\s+/i.test(text)) continue;
 
     if (isBulletText(text)) {
-      bullets.push(text.replace(/^[•\-*\u2022\d.\s]+/, '').trim());
+      // Strip all leading bullet markers including Ñ (U+00D1 — PDF bullet-open encoding)
+      bullets.push(text.replace(/^[•\-*\u2022\u00d1\d.\s]+/, '').trim());
       continue;
     }
 
@@ -1239,8 +1266,20 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     company = parts[1]?.trim() || null;
   } else if ((!role || !company) && /\s-\s/.test(firstHeader)) {
     const parts = firstHeader.split(/\s-\s/);
-    role = parts[0]?.trim() || null;
-    company = parts[1]?.trim() || null;
+    const left = parts[0]?.trim() || null;
+    const right = parts.slice(1).join(' - ').trim() || null;
+    // If the left side does not look like a job title but the right side has significantly
+    // more words, the left is likely the organisation name (e.g. "General Assembly - User
+    // Experience Immersive Graduate Tools") — swap so company = left, role = right.
+    const leftWords = left?.split(/\s+/).length ?? 0;
+    const rightWords = right?.split(/\s+/).length ?? 0;
+    if (left && right && !TITLE_HINT.test(left) && rightWords > leftWords + 1) {
+      role = right;
+      company = left;
+    } else {
+      role = left;
+      company = right;
+    }
   }
 
   if (!role || !company) {
@@ -1395,6 +1434,23 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
     if (degreeLike) degree = degreeLike;
   }
 
+  // If the degree line ends with a conjunction ("and", ",") append the immediately-following
+  // line when it is not a date, school, or another degree (handles multi-line degree names
+  // like "Diploma in Visual Communication and" + "Media Design").
+  if (degree) {
+    const degreeIdx = texts.indexOf(degree);
+    const nextText = degreeIdx >= 0 ? (texts[degreeIdx + 1] ?? '') : '';
+    if (
+      nextText
+      && /\band\s*$|,\s*$/.test(degree)
+      && !hasDateText(nextText)
+      && !SCHOOL_HINT.test(nextText)
+      && !DEGREE_HINT.test(nextText)
+    ) {
+      degree = `${degree} ${nextText}`;
+    }
+  }
+
   school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
   degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').trim() : null;
 
@@ -1441,6 +1497,74 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   return item;
 }
 
+/**
+ * Attempt to split a token that is several concatenated Title Case skill names without a
+ * separator.  PDF grid layouts often produce lines like "Interaction Design Visual Design"
+ * when two adjacent skill-cell text items are merged.  We split 4+ all-Title-Case word
+ * sequences into 2-word groups (most skills are 1–2 words).
+ */
+// Words that commonly PRECEDE a second word to form a single compound skill name
+// (e.g. "User Research", "Visual Design", "Adobe Illustrator").
+// 2-word tokens starting with one of these are kept together rather than being split.
+const COMPOUND_SKILL_PREFIXES = new Set([
+  // UX/Design method descriptors
+  'user', 'interaction', 'visual', 'motion', 'service', 'brand', 'digital',
+  'ui', 'ux', 'graphic', 'creative', 'art', 'print', 'concept', 'experience',
+  'persona', 'information', 'journey', 'usability', 'accessibility', 'inclusive',
+  'content', 'editorial', 'typography', 'color', 'layout', 'composition',
+  // Engineering/tech descriptors
+  'data', 'machine', 'deep', 'natural', 'cloud', 'cyber', 'info', 'artificial',
+  'front', 'back', 'full', 'cross', 'open', 'end', 'micro', 'server', 'object',
+  'test', 'unit', 'version', 'source', 'continuous', 'automated',
+  // Management/business descriptors
+  'project', 'product', 'business', 'social', 'email',
+  'search', 'agile', 'lean', 'scrum', 'team', 'account', 'customer', 'client',
+  'stakeholder', 'change', 'risk', 'quality', 'process', 'program', 'portfolio',
+  // Analysis/research descriptors
+  'competitive', 'market', 'needs', 'root', 'cost', 'impact',
+  'quantitative', 'qualitative', 'primary', 'secondary', 'behavioral', 'strategic',
+  // Common compound-skill head words
+  'design', 'web', 'app', 'mobile', 'responsive', 'planning', 'strategy',
+  'mapping', 'testing', 'research', 'analysis', 'architecture', 'engineering',
+  'systems', 'thinking', 'problem', 'critical', 'storytelling',
+  // Known product-family brand prefixes (always compound)
+  'adobe', 'microsoft', 'google', 'apple', 'amazon', 'aws', 'meta',
+  'github', 'gitlab', 'jetbrains', 'atlassian',
+]);
+
+function splitConcatenatedSkills(token: string): string[] {
+  const trimmed = token.trim();
+  const words = trimmed.split(/\s+/);
+  // Require all words to start with an uppercase letter or digit (e.g. HTML, CSS, 3D).
+  // Any lowercase word (connector or prose) means this is probably a sentence, not skills.
+  const allCaps = words.every((w) => /^[A-Z\/\d]/.test(w));
+  const hasLowerConnector = words.some((w) =>
+    /^(and|or|in|at|the|a|an|of|to|for|with|by|as|on|is|are|was|were|from|into)$/i.test(w),
+  );
+  if (!allCaps || hasLowerConnector) return [trimmed];
+
+  // For exactly 2 words: split unless the first word is a known compound-skill prefix.
+  // This catches adjacent single-tool names merged by the PDF encoder (e.g. "Webflow Shopify").
+  if (words.length === 2) {
+    const firstWordLower = (words[0] ?? '').toLowerCase();
+    if (COMPOUND_SKILL_PREFIXES.has(firstWordLower)) return [trimmed];
+    return words as string[];
+  }
+
+  if (words.length < 4) return [trimmed];
+
+  // 4+ words: split into 2-word groups.
+  const result: string[] = [];
+  for (let i = 0; i < words.length; i += 2) {
+    if (i + 1 < words.length) {
+      result.push(`${words[i]} ${words[i + 1]}`);
+    } else {
+      result.push(words[i] as string);
+    }
+  }
+  return result;
+}
+
 function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSection[]): string[] {
   const skillsSections = sections.filter((s) => s.type === 'skills');
   const allText = skillsSections
@@ -1454,8 +1578,8 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
   if (!allText) return [];
 
   const tokens = allText
-    .split(/[|,•\u2022;\n]/)
-    .map((s) => s.trim())
+    .split(/[|,•\u2022;\n§]/)
+    .flatMap((s) => splitConcatenatedSkills(s.trim()))
     .filter(Boolean)
     .map((s) => s.replace(/^[-*]\s*/, ''))
     .map((s) => s.replace(/^(languages?|technical)\s*[:\-–—]?\s*/i, ''))
