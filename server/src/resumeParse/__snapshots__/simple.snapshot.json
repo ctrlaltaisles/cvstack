@@ -18,17 +18,33 @@
           "year": null
         },
         "isCurrent": true,
-        "role": "Product Designer",
-        "company": "Beta Labs",
+        "role": "Senior Product Designer",
+        "company": "Acme Inc",
         "description": [
           "Led redesign of onboarding flow",
           "Increased conversion by 22%"
+        ]
+      },
+      {
+        "start": {
+          "month": 3,
+          "year": 2019
+        },
+        "end": {
+          "month": 12,
+          "year": 2021
+        },
+        "isCurrent": false,
+        "role": "Product Designer",
+        "company": "Beta Labs",
+        "description": [
+          "Built component library"
         ]
       }
     ],
     "education": [
       {
-        "degree": "National University of Singapore",
+        "degree": null,
         "school": "National University of Singapore",
         "location": null,
         "start": {
@@ -40,20 +56,6 @@
           "year": 2018
         },
         "isCurrent": false
-      },
-      {
-        "degree": "B.Des in Industrial Design",
-        "school": "B.Des in Industrial Design",
-        "location": null,
-        "start": {
-          "month": null,
-          "year": null
-        },
-        "end": {
-          "month": null,
-          "year": null
-        },
-        "isCurrent": false
       }
     ],
     "skills": [
@@ -63,8 +65,5 @@
       "Design Systems"
     ]
   },
-  "warnings": [
-    "Dropped low-confidence experience block #1.",
-    "Dropped low-confidence experience block #3."
-  ]
+  "warnings": []
 }

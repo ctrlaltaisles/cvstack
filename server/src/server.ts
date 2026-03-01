@@ -619,9 +619,13 @@ async function parseUploadedResumeBuffer(buffer: Buffer) {
   const extractedText = (structuredExtractedText || debugExtractedText).slice(0, 5000);
 
   const data = toResumeDataFromParsedResume(parsedData);
-  const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
-  if (inferredSummary) {
-    data.bio = inferredSummary.slice(0, 1200);
+  // Only fall back to heuristic summary inference if the LLM didn't already
+  // provide one (parsedData.summary → data.bio set by toResumeDataFromParsedResume).
+  if (!data.bio) {
+    const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
+    if (inferredSummary) {
+      data.bio = inferredSummary.slice(0, 1200);
+    }
   }
 
   // Don't hard-fail upload when structured parsing confidence is low.

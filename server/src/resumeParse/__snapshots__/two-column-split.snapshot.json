@@ -1,0 +1,88 @@
+{
+  "data": {
+    "name": "Choo Yuan Jie",
+    "phone": "65 9123 4567",
+    "email": "yuanjie@design.io",
+    "linkedin": "https://linkedin.com/in/yuanjie",
+    "website": "https://design.io",
+    "country": "Singapore",
+    "currentTitle": "Product Designer",
+    "experiences": [
+      {
+        "start": {
+          "month": 9,
+          "year": 2022
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": true,
+        "role": "Senior Product Designer",
+        "company": "CoinGecko",
+        "description": [
+          "Redesigned token discovery flow reducing bounce rate by 18%",
+          "Led design system v2 used across 6 product teams"
+        ]
+      },
+      {
+        "start": {
+          "month": 1,
+          "year": 2021
+        },
+        "end": {
+          "month": 8,
+          "year": 2022
+        },
+        "isCurrent": false,
+        "role": "Product Designer",
+        "company": "Binance",
+        "description": [
+          "Owned P2P trading UXendtoend"
+        ]
+      },
+      {
+        "start": {
+          "month": 5,
+          "year": 2019
+        },
+        "end": {
+          "month": 12,
+          "year": 2020
+        },
+        "isCurrent": false,
+        "role": "UX Designer",
+        "company": "Grab",
+        "description": [
+          "Improved driver onboarding flow conversion by 23%"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "B.Des Industrial Design",
+        "school": "National University of Singapore",
+        "location": null,
+        "start": {
+          "month": null,
+          "year": 2015
+        },
+        "end": {
+          "month": null,
+          "year": 2019
+        },
+        "isCurrent": false
+      }
+    ],
+    "skills": [
+      "Figma",
+      "Protopie",
+      "Sketch",
+      "Framer",
+      "HTML & CSS",
+      "Design Systems",
+      "User Research"
+    ]
+  },
+  "warnings": []
+}

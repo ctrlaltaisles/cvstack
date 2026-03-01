@@ -19,7 +19,7 @@
         },
         "isCurrent": true,
         "role": "Senior Product Manager",
-        "company": null,
+        "company": "Grab",
         "description": [
           "Owned marketplace growth roadmap",
           "Improved retention by 12%"
@@ -36,7 +36,7 @@
         },
         "isCurrent": false,
         "role": "Product Manager",
-        "company": null,
+        "company": "Shopee",
         "description": [
           "Led checkout optimization"
         ]
@@ -65,10 +65,5 @@
       "Stakeholder Management"
     ]
   },
-  "warnings": [
-    "Dropped low-confidence experience block #1.",
-    "Could not confidently detect company line for experience #2.",
-    "Dropped low-confidence experience block #3.",
-    "Could not confidently detect company line for experience #4."
-  ]
+  "warnings": []
 }

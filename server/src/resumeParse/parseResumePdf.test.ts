@@ -12,7 +12,7 @@ const baseDir = __dirname;
 const fixturesDir = path.join(baseDir, '__fixtures__');
 const snapshotsDir = path.join(baseDir, '__snapshots__');
 
-const fixtures = ['simple', 'two-column', 'messy'];
+const fixtures = ['simple', 'two-column', 'messy', 'two-column-split'];
 
 for (const name of fixtures) {
   test(`parseResumeFromLines fixture: ${name}`, () => {

@@ -19,7 +19,7 @@
         },
         "isCurrent": true,
         "role": "Lead Product Designer",
-        "company": null,
+        "company": "Acme Technologies",
         "description": [
           "Built design ops playbook"
         ]
@@ -34,7 +34,7 @@
           "year": 2021
         },
         "isCurrent": false,
-        "role": "Beta University",
+        "role": "Designer",
         "company": "Beta University",
         "description": [
           "Led campus innovation projects"
@@ -43,7 +43,7 @@
     ],
     "education": [
       {
-        "degree": "University College London",
+        "degree": "MSc Human Computer Interaction",
         "school": "University College London",
         "location": null,
         "start": {
@@ -55,20 +55,6 @@
           "year": 2022
         },
         "isCurrent": false
-      },
-      {
-        "degree": "MSc Human Computer Interaction",
-        "school": "MSc Human Computer Interaction",
-        "location": null,
-        "start": {
-          "month": null,
-          "year": null
-        },
-        "end": {
-          "month": null,
-          "year": null
-        },
-        "isCurrent": false
       }
     ],
     "skills": [
@@ -78,9 +64,5 @@
       "Storytelling"
     ]
   },
-  "warnings": [
-    "Dropped low-confidence experience block #1.",
-    "Could not confidently detect company line for experience #2.",
-    "Dropped low-confidence experience block #3."
-  ]
+  "warnings": []
 }

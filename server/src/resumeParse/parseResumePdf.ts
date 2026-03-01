@@ -60,6 +60,7 @@ export type ParsedResume = {
   website: string | null;
   country: string | null;
   currentTitle: string | null;
+  summary?: string | null;
   experiences: ExperienceItem[];
   education: EducationItem[];
   skills: string[];
@@ -93,13 +94,63 @@ const MONTH_INDEX: Record<string, number> = {
 };
 
 const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
-  { type: 'experience', patterns: [/^(work\s+)?experience$/i, /professional\s+experience/i, /employment\s+history/i] },
-  { type: 'education', patterns: [/^education$/i, /^academic\s+background$/i] },
-  { type: 'skills', patterns: [/^skills?$/i, /^technical\s+skills?$/i, /^core\s+skills?$/i, /^software$/i, /^tools$/i] },
-  { type: 'other', patterns: [/^certifications?$/i, /^licenses?$/i, /^awards?$/i, /^recognition$/i, /^achievements?$/i] },
-  { type: 'projects', patterns: [/^projects?$/i, /^selected\s+projects?$/i] },
-  { type: 'summary', patterns: [/^summary$/i, /^profile$/i, /^about$/i, /^objective$/i] },
-  { type: 'contact', patterns: [/^contact$/i] },
+  { type: 'experience', patterns: [
+    /^(work\s+)?experience$/i,
+    /professional\s+experience/i,
+    /employment\s+history/i,
+    /^relevant\s+experience$/i,
+    /^career\s+history$/i,
+    /^work\s+history$/i,
+  ]},
+  { type: 'education', patterns: [
+    /^education$/i,
+    /^academic\s+background$/i,
+    /^academic\s+qualifications?$/i,
+    /^qualifications?$/i,
+  ]},
+  { type: 'skills', patterns: [
+    /^skills?$/i,
+    /^technical\s+skills?$/i,
+    /^core\s+skills?$/i,
+    /^software$/i,
+    /^tools?$/i,
+    /^key\s+skills?$/i,
+    /^design\s+skills?$/i,
+    /^languages?\s*[&+]\s*tools?$/i,
+    /^competenc(e|ies)$/i,
+    /^expertise$/i,
+    /^stack$/i,
+  ]},
+  { type: 'other', patterns: [
+    /^certifications?$/i,
+    /^licenses?$/i,
+    /^awards?$/i,
+    /^recognition$/i,
+    /^achievements?$/i,
+    /^honors?$/i,
+    /^honours?$/i,
+    /^publications?$/i,
+    /^languages?$/i,
+  ]},
+  { type: 'projects', patterns: [
+    /^projects?$/i,
+    /^selected\s+projects?$/i,
+    /^portfolio$/i,
+    /^notable\s+projects?$/i,
+  ]},
+  { type: 'summary', patterns: [
+    /^summary$/i,
+    /^profile$/i,
+    /^about$/i,
+    /^about\s+me$/i,
+    /^objective$/i,
+    /^bio$/i,
+    /^overview$/i,
+    /^introduction$/i,
+    /^professional\s+summary$/i,
+    /^career\s+objective$/i,
+  ]},
+  { type: 'contact', patterns: [/^contact$/i, /^contact\s+info(rmation)?$/i] },
 ];
 
 const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|specialist|consultant|architect|developer|coach|instructor|trainer|assistant|marketing)\b/i;
@@ -403,7 +454,27 @@ function looksExperienceEntryHeader(text: string): boolean {
 
 function looksExperienceOrgLine(text: string): boolean {
   if (COMPANY_HINT.test(text)) return true;
-  return /\b(singapore|united kingdom|uk|school|club|centre|university|college|academy|technologies)\b/i.test(text);
+  if (/\b(singapore|united kingdom|uk|school|club|centre|university|college|academy|technologies)\b/i.test(text)) return true;
+  // Short title-cased names that don't look like job titles or bullet points are
+  // often tech-company names without corporate suffixes (e.g. "CoinGecko", "Binance",
+  // "Grab", "Shopee", "Various Brands").
+  const words = text.trim().split(/\s+/);
+  if (
+    words.length >= 1 &&
+    words.length <= 3 &&
+    words[0] != null &&
+    /^[A-Z][a-zA-Z0-9]/.test(words[0]) &&
+    !TITLE_HINT.test(text) &&
+    !hasDateText(text) &&
+    !isBulletText(text) &&
+    !ACTION_VERB_HINT.test(text) &&
+    !/[.!?,]/.test(text) &&
+    text.length >= 2 &&
+    text.length <= 50
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function looksEducationSchoolLine(text: string): boolean {
@@ -417,29 +488,9 @@ function dateWeight(value: MonthYear, isCurrent: boolean): number {
   return y * 100 + m;
 }
 
-function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine[] {
-  const spans = items
-    .map((item: any) => {
-      const text = cleanLineText(String(item?.str ?? ''));
-      if (!text) return null;
-      const transform = Array.isArray(item?.transform) ? item.transform : [1, 0, 0, 1, 0, 0];
-      const x = Number(transform[4] ?? 0);
-      const y = Number(transform[5] ?? 0);
-      const fontSize = Math.max(8, Math.round(Math.abs(Number(transform[0] ?? 0)) || Number(item?.height ?? 10)));
-      const width = Math.max(1, Number(item?.width ?? text.length * (fontSize * 0.45)));
-      return {
-        text,
-        page,
-        x0: x,
-        y0: y,
-        x1: x + width,
-        y1: y + Math.max(10, fontSize),
-        fontSize,
-      } as ExtractedLine;
-    })
-    .filter((v): v is ExtractedLine => Boolean(v));
-
-  const sorted = spans.sort((a, b) => {
+/** Merge a pre-sorted array of positioned spans into logical text lines. */
+function buildLinesFromSpans(spans: ExtractedLine[]): ExtractedLine[] {
+  const sorted = [...spans].sort((a, b) => {
     if (a.page !== b.page) return a.page - b.page;
     if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
     return a.x0 - b.x0;
@@ -467,6 +518,123 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
   }
 
   return lines.filter((line) => line.text.length > 0);
+}
+
+/**
+ * Detect whether the page has a true two-column layout (e.g. left: experience,
+ * right: skills + education) vs. a single-column layout where dates float to
+ * the right margin.
+ *
+ * Returns the X-coordinate boundary between columns, or null if single-column.
+ */
+function detectColumnBoundary(spans: ExtractedLine[]): number | null {
+  if (spans.length < 12) return null;
+
+  const pageWidth = Math.max(...spans.map((s) => s.x1), 595);
+  const searchMin = pageWidth * 0.25;
+  const searchMax = pageWidth * 0.70;
+
+  // Build sorted list of unique rounded x0 start-positions.
+  const xs = [...new Set(spans.map((s) => Math.round(s.x0)))].sort((a, b) => a - b);
+
+  let biggestGap = 0;
+  let gapCenter = -1;
+
+  for (let i = 1; i < xs.length; i += 1) {
+    const prev = xs[i - 1]!;
+    const curr = xs[i]!;
+    // Evaluate mid-point of the gap so near-margin columns aren't missed.
+    const mid = (prev + curr) / 2;
+    if (mid < searchMin || mid > searchMax) continue;
+    const gap = curr - prev;
+    if (gap > biggestGap) {
+      biggestGap = gap;
+      gapCenter = mid;
+    }
+  }
+
+  // Require a meaningful gap (≥ 5% of page width, minimum 20 pts).
+  const threshold = Math.max(pageWidth * 0.05, 20);
+  if (biggestGap < threshold || gapCenter < 0) return null;
+
+  const leftSpans = spans.filter((s) => s.x0 < gapCenter);
+  const rightSpans = spans.filter((s) => s.x0 >= gapCenter);
+
+  // Both sides need meaningful content.
+  if (leftSpans.length < 8 || rightSpans.length < 5) return null;
+
+  // If the right "column" is almost entirely date strings it is just dates
+  // floating to the right margin of a single-column layout — not a real column.
+  const rightTexts = rightSpans.map((s) => s.text);
+  const dateCount = rightTexts.filter((t) => hasDateText(t) || /^\d{4}\b/.test(t)).length;
+  if (dateCount / rightTexts.length > 0.65) return null;
+
+  // A real second column must contain at least one section-like heading on the right.
+  const rightHasSectionHeading = rightSpans.some((s) => {
+    const cleaned = s.text.toLowerCase().replace(/[:\-]+$/, '').trim();
+    return SECTION_KEYWORDS.some((rule) => rule.patterns.some((p) => p.test(cleaned)));
+  });
+  if (!rightHasSectionHeading) return null;
+
+  return gapCenter;
+}
+
+function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine[] {
+  const spans = items
+    .map((item: any) => {
+      const text = cleanLineText(String(item?.str ?? ''));
+      if (!text) return null;
+      const transform = Array.isArray(item?.transform) ? item.transform : [1, 0, 0, 1, 0, 0];
+      const x = Number(transform[4] ?? 0);
+      const y = Number(transform[5] ?? 0);
+      const fontSize = Math.max(8, Math.round(Math.abs(Number(transform[0] ?? 0)) || Number(item?.height ?? 10)));
+      const width = Math.max(1, Number(item?.width ?? text.length * (fontSize * 0.45)));
+      return {
+        text,
+        page,
+        x0: x,
+        y0: y,
+        x1: x + width,
+        y1: y + Math.max(10, fontSize),
+        fontSize,
+      } as ExtractedLine;
+    })
+    .filter((v): v is ExtractedLine => Boolean(v));
+
+  const colBoundary = detectColumnBoundary(spans);
+
+  // Single-column (or date-float) layout — use original behaviour.
+  if (colBoundary === null) {
+    return buildLinesFromSpans(spans);
+  }
+
+  // True two-column layout: build lines within each column separately so that
+  // content from the left and right columns at the same Y position is never
+  // merged into a single garbled line.
+  const leftSpans = spans.filter((s) => s.x0 < colBoundary);
+  const rightSpans = spans.filter((s) => s.x0 >= colBoundary);
+
+  const leftLines = buildLinesFromSpans(leftSpans);
+  const rightLines = buildLinesFromSpans(rightSpans);
+
+  if (leftLines.length === 0) return rightLines;
+  if (rightLines.length === 0) return leftLines;
+
+  // Shift right-column Y values so they sort AFTER the left column.
+  // PDF Y coords: higher = top; sort is descending (top first).
+  // Putting right lines below left column bottom makes them appear later in
+  // the reading-order sequence produced by parseResumeFromLines.
+  const leftMinY = Math.min(...leftLines.map((l) => l.y0));
+  const rightMaxY = Math.max(...rightLines.map((l) => l.y0));
+  const yShift = leftMinY - rightMaxY - 30;
+
+  const shiftedRight = rightLines.map((l) => ({
+    ...l,
+    y0: l.y0 + yShift,
+    y1: l.y1 + yShift,
+  }));
+
+  return [...leftLines, ...shiftedRight];
 }
 
 async function extractLinesWithPdfJs(buffer: Buffer): Promise<ExtractedLine[]> {
@@ -740,14 +908,21 @@ function groupSectionBlocks(section: DetectedSection, lines: ExtractedLine[]): B
     const prev = sectionLines[i - 1];
     const yGap = prev ? Math.abs(prev.y0 - line.y0) : 0;
 
-    const boundaryByDate = looksDateAnchor(line) && (line.x0 > xMid || current.length >= 2);
+    const hasEntryContent = current.some((l) => isBulletText(l.text) || ACTION_VERB_HINT.test(l.text));
+    const currentAlreadyHasDate = current.some((l) => looksDateAnchor(l));
+    // Only split on a date line if the current block already has meaningful content
+    // (bullets, prose, or another date). This prevents the date that floats to
+    // the right of a company/role line from prematurely starting a new block.
+    const boundaryByDate =
+      looksDateAnchor(line) &&
+      (line.x0 > xMid || current.length >= 2) &&
+      (hasEntryContent || currentAlreadyHasDate || current.length >= 3);
     const boundaryByGap = yGap > 22 && current.length > 0;
     const roleLikeHeader = section.type === 'experience' && looksExperienceEntryHeader(line.text);
     const schoolLikeHeader = section.type === 'education'
       && (DEGREE_HINT.test(line.text) || SCHOOL_HINT.test(line.text))
       && !isBulletText(line.text)
       && !hasDateText(line.text);
-    const hasEntryContent = current.some((l) => isBulletText(l.text) || ACTION_VERB_HINT.test(l.text));
     const boundaryByHeader = current.length > 0 && (roleLikeHeader || schoolLikeHeader) && hasEntryContent && (yGap > 10 || current.some((l) => isBulletText(l.text)));
 
     if ((boundaryByDate || boundaryByGap || boundaryByHeader) && current.length > 0) {
@@ -986,10 +1161,18 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
 
   const dateLine = lines.find((l) => looksDateAnchor(l));
   const dateInfo = parseDateRange(dateLine?.text ?? '');
+  // When a date line also contains a company/role prefix (e.g. "CoinGecko Sep 2022 – Present"),
+  // extract the non-date portion for role or company assignment below.
+  const dateLinePrefix = dateLine ? removeDateFragments(dateLine.text).trim() : null;
   const roleFromDateLine = (() => {
-    if (!dateLine) return null;
-    const cleaned = removeDateFragments(dateLine.text);
-    return TITLE_HINT.test(cleaned) ? cleaned : null;
+    if (!dateLinePrefix) return null;
+    return TITLE_HINT.test(dateLinePrefix) ? dateLinePrefix : null;
+  })();
+  const companyFromDateLine = (() => {
+    if (!dateLinePrefix) return null;
+    if (TITLE_HINT.test(dateLinePrefix)) return null; // it's a role, not a company
+    if (looksExperienceOrgLine(dateLinePrefix)) return dateLinePrefix;
+    return null;
   })();
 
   const stitched = stitchBullets(lines);
@@ -1059,6 +1242,9 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   }
   if (!role && roleFromDateLine) role = roleFromDateLine;
   if (company && TITLE_HINT.test(company) && !COMPANY_HINT.test(company)) company = null;
+  // Apply the company extracted from the date-line prefix (e.g. "CoinGecko" from
+  // "CoinGecko Sep 2022 – Present") as a last-resort fallback.
+  if (!company) company = companyFromDateLine;
   if (!company) {
     company = contentLines.find((t) => looksExperienceOrgLine(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && t.length <= 80) ?? null;
     company = company ? removeDateFragments(company) : null;
@@ -1182,7 +1368,7 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     .filter((s) => !/(19|20)\d{2}/.test(s))
     .filter((s) => !/^[+\-]/.test(s));
 
-  return unique(tokens).slice(0, 8);
+  return unique(tokens).slice(0, 20);
 }
 
 function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): string | null {
@@ -1354,7 +1540,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       school: edu.school ? normalizeOutputText(edu.school) : null,
       location: edu.location ? normalizeOutputText(edu.location) : null,
     })),
-    skills: unique(data.skills.map((s) => normalizeOutputText(s)).filter(Boolean)).slice(0, 8),
+    skills: unique(data.skills.map((s) => normalizeOutputText(s)).filter(Boolean)).slice(0, 20),
   };
 
   return {
@@ -1364,12 +1550,163 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
   };
 }
 
+/**
+ * Use GPT-4.1 Mini (or the configured model) to extract structured resume
+ * data from raw text.  Called automatically when rule-based parsing extracts
+ * no experiences and no education, and OPENAI_API_KEY is available.
+ */
+async function parseResumeWithLLM(rawText: string): Promise<ParsedResume | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey || !rawText.trim()) return null;
+
+  try {
+    const { default: OpenAI } = await import('openai') as { default: typeof import('openai').default };
+    const client = new OpenAI({ apiKey });
+    const model = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini';
+
+    const systemPrompt =
+      'You are an expert resume parser. Extract structured data from resume text and return ONLY valid JSON. ' +
+      'Be thorough — extract ALL work experience and education entries you can identify. ' +
+      'The input text may be imperfectly formatted due to PDF column extraction issues.';
+
+    const userPrompt = `Parse the following resume text and return a single JSON object matching this exact schema (use null for unknown fields):
+
+{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "+65 9000 1234",
+  "linkedin": "https://linkedin.com/in/username",
+  "website": "https://portfolio.com",
+  "country": "Singapore",
+  "currentTitle": "Product Designer",
+  "summary": "Brief professional summary if present",
+  "experiences": [
+    {
+      "company": "Company Name",
+      "role": "Job Title",
+      "startYear": 2020,
+      "startMonth": 6,
+      "endYear": 2023,
+      "endMonth": 3,
+      "isCurrent": false,
+      "bullets": ["Achievement 1", "Achievement 2"]
+    }
+  ],
+  "education": [
+    {
+      "school": "University Name",
+      "degree": "Bachelor of Design",
+      "startYear": 2016,
+      "endYear": 2020
+    }
+  ],
+  "skills": ["Figma", "Protopie", "HTML", "CSS"]
+}
+
+Resume text:
+${rawText.slice(0, 6000)}`;
+
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0,
+      max_tokens: 2500,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content ?? '';
+    if (!content) return null;
+
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+
+    const toStrOrNull = (v: unknown): string | null => {
+      const s = String(v ?? '').trim();
+      return s && s !== 'null' ? s : null;
+    };
+    const toIntOrNull = (v: unknown): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+
+    const experiences: ExperienceItem[] = (Array.isArray(parsed.experiences) ? parsed.experiences : []).map((e: Record<string, unknown>) => ({
+      company: toStrOrNull(e.company),
+      role: toStrOrNull(e.role),
+      start: { month: toIntOrNull(e.startMonth), year: toIntOrNull(e.startYear) },
+      end: { month: toIntOrNull(e.endMonth), year: toIntOrNull(e.endYear) },
+      isCurrent: Boolean(e.isCurrent),
+      description: Array.isArray(e.bullets)
+        ? (e.bullets as unknown[]).map((b) => String(b ?? '').trim()).filter(Boolean)
+        : [],
+    }));
+
+    const education: EducationItem[] = (Array.isArray(parsed.education) ? parsed.education : []).map((e: Record<string, unknown>) => ({
+      school: toStrOrNull(e.school),
+      degree: toStrOrNull(e.degree),
+      location: null,
+      start: { month: null, year: toIntOrNull(e.startYear) },
+      end: { month: null, year: toIntOrNull(e.endYear) },
+      isCurrent: false,
+    }));
+
+    const skills: string[] = Array.isArray(parsed.skills)
+      ? (parsed.skills as unknown[]).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 20)
+      : [];
+
+    return {
+      name: toStrOrNull(parsed.name),
+      email: toStrOrNull(parsed.email),
+      phone: toStrOrNull(parsed.phone),
+      linkedin: toStrOrNull(parsed.linkedin),
+      website: toStrOrNull(parsed.website),
+      country: toStrOrNull(parsed.country),
+      currentTitle: toStrOrNull(parsed.currentTitle),
+      experiences,
+      education,
+      skills,
+      summary: toStrOrNull(parsed.summary),
+    };
+  } catch (err) {
+    console.warn('[parseResumePdf] LLM extraction failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export async function parseResumePdf(buffer: Buffer, opts: ParseOptions = {}): Promise<ParseResumePdfResult> {
   const lines = await extractLayoutAwareLines(buffer);
   const result = parseResumeFromLines(lines, opts);
-  if (opts.useLlm) {
-    result.warnings.push('LLM block labeling is not configured in this environment; used deterministic rule-based labeling.');
+
+  // Auto-trigger LLM when rule-based parsing clearly failed (no experiences
+  // AND no education), or when explicitly requested via opts.useLlm.
+  const ruleBasedFailed =
+    result.data.experiences.length === 0 && result.data.education.length === 0;
+
+  if ((opts.useLlm || ruleBasedFailed) && process.env.OPENAI_API_KEY) {
+    const rawText = lines.map((l) => l.text).join('\n');
+    const llmResult = await parseResumeWithLLM(rawText);
+    if (llmResult) {
+      if (llmResult.experiences.length > result.data.experiences.length) {
+        result.data.experiences = llmResult.experiences;
+      }
+      if (llmResult.education.length > result.data.education.length) {
+        result.data.education = llmResult.education;
+      }
+      if (llmResult.skills.length > result.data.skills.length) {
+        result.data.skills = llmResult.skills;
+      }
+      if (!result.data.name && llmResult.name) result.data.name = llmResult.name;
+      if (!result.data.email && llmResult.email) result.data.email = llmResult.email;
+      if (!result.data.phone && llmResult.phone) result.data.phone = llmResult.phone;
+      if (!result.data.linkedin && llmResult.linkedin) result.data.linkedin = llmResult.linkedin;
+      if (!result.data.website && llmResult.website) result.data.website = llmResult.website;
+      if (!result.data.country && llmResult.country) result.data.country = llmResult.country;
+      if (!result.data.currentTitle && llmResult.currentTitle) result.data.currentTitle = llmResult.currentTitle;
+      result.warnings.push('Used AI-assisted extraction for improved accuracy.');
+    }
   }
+
   return result;
 }
 
@@ -1381,14 +1718,14 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
   const unknownStart = { month: 1, year: 2020, present: false as const };
   const unknownEnd = { month: currentMonth, year: currentYear };
 
-  data.bio = '';
+  data.bio = parsed.summary?.slice(0, 1200) ?? '';
   data.name = parsed.name ?? data.name;
   data.title = parsed.currentTitle ?? data.title;
   data.contact.phone = parsed.phone ?? '';
   data.contact.location = parsed.country ?? '';
   data.contact.linkedin = parsed.linkedin ?? '';
   data.contact.website = parsed.website ?? '';
-  data.skills = parsed.skills.slice(0, 8);
+  data.skills = parsed.skills.slice(0, 20);
   data.workExperience = parsed.experiences.map((exp, idx) => ({
     id: `exp-${idx + 1}`,
     company: exp.company ?? 'Unknown Company',
