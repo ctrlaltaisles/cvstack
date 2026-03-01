@@ -93,7 +93,17 @@ const MONTH_INDEX: Record<string, number> = {
 };
 
 const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
-  { type: 'experience', patterns: [/^(work\s+)?experience$/i, /professional\s+experience/i, /employment\s+history/i] },
+  { type: 'experience', patterns: [
+      /^experience$/i,
+      /^work\s+experience$/i,
+      /^professional\s+experience$/i,
+      /^employment$/i,
+      /^employment\s+history$/i,
+      /^work\s+history$/i,
+      /^career\s+history$/i,
+      /^relevant\s+experience$/i,
+    ],
+  },
   { type: 'education', patterns: [/^education$/i, /^academic\s+background$/i, /^qualifications?$/i] },
   { type: 'skills', patterns: [/^skills?$/i, /^skillset$/i, /^technical\s+skills?$/i, /^core\s+skills?$/i, /^software$/i, /^tools$/i, /^proficiency$/i, /^expertise$/i] },
   { type: 'other', patterns: [/^certifications?$/i, /^licenses?$/i, /^awards?$/i, /^recognition$/i, /^achievements?$/i] },
