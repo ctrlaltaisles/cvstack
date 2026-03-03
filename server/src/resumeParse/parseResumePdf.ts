@@ -93,10 +93,31 @@ const MONTH_INDEX: Record<string, number> = {
 };
 
 const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
-  { type: 'experience', patterns: [/^(work\s+)?experience$/i, /professional\s+experience/i, /employment\s+history/i] },
+  {
+    type: 'experience',
+    patterns: [
+      /^(work\s+)?experience[s]?$/i,
+      /^work$/i,                          // "Work" used as lone section heading
+      /^workexperiences?$/i,              // camelCase merged "WorkExperience(s)"
+      /^work\s*experiences?$/i,
+      /professional\s+experience/i,
+      /employment\s+history/i,
+    ],
+  },
   { type: 'education', patterns: [/^education$/i, /^academic\s+background$/i, /^qualifications?$/i] },
   { type: 'skills', patterns: [/^skills?$/i, /^skillset$/i, /^technical\s+skills?$/i, /^core\s+skills?$/i, /^software$/i, /^tools$/i, /^proficiency$/i, /^expertise$/i] },
-  { type: 'other', patterns: [/^certifications?$/i, /^licenses?$/i, /^awards?$/i, /^recognition$/i, /^achievements?$/i] },
+  {
+    type: 'other',
+    patterns: [
+      /^certifications?$/i, /^licenses?$/i, /^awards?$/i, /^recognition$/i, /^achievements?$/i,
+      /^extra[\s-]?curricular(\s+activities?)?$/i,
+      /^co[\s-]?curricular(\s+activities?)?$/i,
+      /^activities$/i,
+      /^involvement$/i,
+      /^leadership$/i,
+      /^volunteering?$/i,
+    ],
+  },
   { type: 'projects', patterns: [/^projects?$/i, /^selected\s+projects?$/i] },
   { type: 'summary', patterns: [/^summary$/i, /^profile$/i, /^about$/i, /^objective$/i, /^introduction$/i] },
   { type: 'contact', patterns: [/^contact$/i] },
@@ -106,9 +127,14 @@ const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|sp
 const COMPANY_HINT = /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|university|college|institute|labs?)/i;
 const DEGREE_HINT = /\b(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?sc\.?|bsc|bs|bba|m\.?a\.?|m\.?sc\.?|msc|m\.?s\.?|mba|hons|gce|gcse|o[\s-]?level|a[\s-]?level|n[\s-]?level)\b/i;
 const SCHOOL_HINT = /(university|college|polytechnic|school|institute|academy)/i;
-const AWARD_HINT = /(award|awards|recognition|achievement|certification|certificate|medal|honou?r|finalist|winner)/i;
+const AWARD_HINT = /(award|awards|recognition|achievement|certification|certificate|medal|honou?r|finalist|winner|first\s+place|second\s+place|third\s+place|issued\s+by)/i;
 const COUNTRY_TOKEN_REGEX = /\b(singapore|malaysia|indonesia|thailand|vietnam|philippines|united kingdom|uk|united states|usa|australia|india|china|japan|canada)\b/i;
 const ACTION_VERB_HINT = /^(led|conducted|partnered|worked|produced|rapidly|researched|designed|applied|redesigned|validated|created|drove|built|managed|launched|defined|optimized|improved)\b/i;
+// Employment-type qualifiers that belong in the role string, e.g. "(Contract)", "(Freelance)".
+// Matches variations like "Part-time", "Part - Time", "Part Time", "Full-time" etc.
+const EMPLOYMENT_TYPE = /^(contract|freelance|part[-\s]*time|full[-\s]*time|temporary|temp|permanent|perm|secondment|attachment)$/i;
+// Strong indicators that a parenthetical is a job title rather than a company qualifier.
+const STRONG_ROLE_SUFFIX = /\b(intern|trainee|graduate|scholar)\b/i;
 
 function cleanLineText(text: string): string {
   let out = text
@@ -261,10 +287,13 @@ export function normalizeOutputText(text: string): string {
     .replace(/\s+,/g, ',')
     .replace(/\(\s+/g, '(')
     .replace(/\s+\)/g, ')')
-    // Truncate at § — anything after it is column-bleed from an adjacent PDF layout column.
-    // (§ markers are inserted by extractLinesFromPdfJsContent for sub-column gaps; skills parsing
-    // splits on § before calling normalizeOutputText, so skills tokens never contain § here.)
-    .replace(/\s*§.*$/, '')
+    // § marks a sub-column gap inserted by the PDF extractor.  For non-skills output:
+    // • If what follows § starts with a dash, closing paren/bracket, or lowercase letter it is
+    //   a mid-word or mid-parenthetical continuation — keep it (replace § with a space).
+    //   e.g. "Industrial Designer (Part § - Time)" → "Industrial Designer (Part - Time)"
+    // • Otherwise it is column-bleed from an adjacent layout column → truncate.
+    .replace(/\s*§\s*([-);a-z])/g, ' $1')  // continuation: replace § with space
+    .replace(/\s*§.*$/, '')                  // genuine column-bleed: truncate
     // Repair common OCR fragment where "Experience" is split with an interior uppercase join:
     // "UserEx perience" → "User Experience", "DesignerEx perience" → "Designer Experience"
     .replace(/([A-Za-z]+)Ex\s+perience\b/g, (_, pre) => `${pre} Experience`)
@@ -379,7 +408,39 @@ function stripDatePrefix(text: string): string {
 }
 
 function parseRoleCompanyFromMixedLine(line: string): { role: string | null; company: string | null } {
-  const normalized = line.replace(/[–—]/g, '-').trim();
+  // Strip trailing comma before matching (e.g. "Communication Designer (Contract),").
+  const normalized = line.replace(/[–—]/g, '-').replace(/,\s*$/, '').trim();
+
+  // Pattern: "Role (Company)" – company name in parentheses at the end of the line.
+  // e.g. "UX/ UI Design Intern (Changi Airport Group)" → role=Intern, company=Changi...
+  // Also handles camelCase roles: "WebDesigner (NUS)" → role="Web Designer", company="NUS".
+  // Inverted case: "Company (Role)" – role inside parens, e.g. "Marketing Team (Graphic Design Intern)".
+  const parentheticalMatch = normalized.match(/^(.*?)\s+\(([^)]+)\)\s*$/);
+  if (parentheticalMatch?.[1] && parentheticalMatch?.[2]) {
+    const beforeParen = parentheticalMatch[1].trim();
+    const insideParen = parentheticalMatch[2].trim();
+    // Expand camelCase (e.g. "WebDesigner" → "Web Designer") before checking TITLE_HINT.
+    const beforeParenExpanded = beforeParen.replace(/([a-z])([A-Z])/g, '$1 $2');
+    // Employment-type qualifier: "(Contract)", "(Freelance)" etc. → append to role.
+    // e.g. "Communication Designer (Contract)" → role="Communication Designer (Contract)".
+    if (EMPLOYMENT_TYPE.test(insideParen) && TITLE_HINT.test(beforeParenExpanded)) {
+      return { role: `${beforeParenExpanded} (${insideParen})`, company: null };
+    }
+    if (TITLE_HINT.test(beforeParenExpanded) && !TITLE_HINT.test(insideParen)) {
+      return { role: beforeParenExpanded, company: insideParen };
+    }
+    // Strong role suffix in parens: "Marketing Team (Graphic Design Intern)" → role=insideParen.
+    // This handles the inverted case where both sides have TITLE_HINT but insideParen is
+    // definitively a role because it contains "intern"/"trainee"/"graduate".
+    if (STRONG_ROLE_SUFFIX.test(insideParen) && !STRONG_ROLE_SUFFIX.test(beforeParen)) {
+      return { role: insideParen, company: null };
+    }
+    // Inverted: company (role) – role keyword only in insideParen.
+    if (TITLE_HINT.test(insideParen) && !TITLE_HINT.test(beforeParen) && !COMPANY_HINT.test(beforeParen)) {
+      return { role: insideParen, company: null };
+    }
+  }
+
   const trailingDateMatch = normalized.match(/^(.*?)(?:\s+)(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|\d{4})\b/i);
   if (trailingDateMatch && trailingDateMatch[1]) {
     const possibleRole = removeDateFragments(trailingDateMatch[1]);
@@ -396,12 +457,14 @@ function parseRoleCompanyFromMixedLine(line: string): { role: string | null; com
   if (titleIdx > 0) {
     const companyWords = words.slice(0, titleIdx);
     const roleWords = words.slice(titleIdx);
-    const titleOnlyPrefix = companyWords.every((w) => /^(senior|sr|junior|jr|lead|principal|staff|product|ux|ui|industrial|software|growth|brand)$/i.test(w));
-    const hasOrgSignal = companyWords.some((w) => COMPANY_HINT.test(w));
-    if (titleOnlyPrefix && !hasOrgSignal && words.length <= 6) {
+    const titleOnlyPrefix = companyWords.every((w) => /^(senior|sr|junior|jr|lead|principal|staff|product|ux|ui|industrial|software|growth|brand|design|service|creative|digital|data|research|graphic|visual|motion|web|university|college|institute|freelance)$/i.test(w));
+    // hasStrongOrgSignal excludes university/college/institute so that "University Research Assistant"
+    // is treated as a role phrase rather than split into company="University Research", role="Assistant".
+    const hasStrongOrgSignal = companyWords.some((w) => /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|labs?)/.test(w));
+    if (titleOnlyPrefix && !hasStrongOrgSignal && words.length <= 6) {
       return { role: remainder, company: null };
     }
-    if (companyWords.length > 1 && roleWords.length === 1 && /(industrial|product|graphic|ux|ui|software|senior|junior|lead)$/i.test(companyWords[companyWords.length - 1] ?? '')) {
+    if (companyWords.length > 1 && roleWords.length === 1 && /(industrial|product|graphic|ux|ui|software|senior|junior|lead|design|service|creative|digital|visual|motion|web)$/i.test(companyWords[companyWords.length - 1] ?? '')) {
       roleWords.unshift(companyWords.pop() as string);
     }
     const company = companyWords.join(' ').trim();
@@ -429,9 +492,15 @@ function removeDateFragments(text: string): string {
 }
 
 function isBulletText(text: string): boolean {
-  // Also recognise Ñ (U+00D1) which appears as the bullet-open marker in some PDFs
-  // (the font encoding maps the bullet glyph to the Ñ code point).
-  return /^[•\-*\u2022\u00d1]|^\d+\./.test(text.trim());
+  // Recognise various bullet-open markers used across different PDF encodings:
+  // • U+2022 standard bullet  • - / * common text bullets
+  // Ñ U+00D1  – Evelyn's PDF font encoding
+  // È U+00C8  – Cheryl Pang's PDF font encoding
+  // ↳ U+21B3  – Ziling's resume arrow bullets
+  // + at line start – Cherie's resume
+  // ● U+25CF  – Saffren Choo's PDF (BLACK CIRCLE, distinct from U+2022 BULLET)
+  // ▪ U+25AA  – other common square bullet
+  return /^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa]|^\d+\./.test(text.trim());
 }
 
 function hasDateText(text: string): boolean {
@@ -464,8 +533,14 @@ function looksLikeLocation(text: string): boolean {
 function looksExperienceOrgLine(text: string): boolean {
   if (looksLikeLocation(text)) return false;
   if (text.length > 60) return false; // company names are short; reject long sentences
+  if (!/^[A-Z(']/.test(text.trim())) return false; // org names start with uppercase or quote
+  // If the text has a job-title keyword AND no strong incorporated-entity signal (like "Pte Ltd",
+  // "Inc", "Corp"), it is more likely a role description (e.g. "University Research Assistant")
+  // than a company name.
+  const hasStrongCompanySignal = /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|labs?)/.test(text);
+  if (!hasStrongCompanySignal && TITLE_HINT.test(text)) return false;
   if (COMPANY_HINT.test(text)) return true;
-  return /\b(group|studio|agency|labs?|school|club|centre|university|college|academy|technologies|hong\s+kong|design)\b/i.test(text);
+  return /\b(group|studio|agency|labs?|school|club|centre|university|college|academy|technologies|hong\s+kong|design|creatives?)\b/i.test(text);
 }
 
 function looksEducationSchoolLine(text: string): boolean {
@@ -725,7 +800,9 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
 }
 
 function classifyHeading(line: ExtractedLine, medianFont: number): SectionType | null {
-  const text = line.text.toLowerCase().replace(/[:\-]+$/, '').trim();
+  // Strip trailing punctuation that can appear on section headings in styled resumes
+  // (e.g. "work.", "skills.", "education." used in Cherie-style minimalist layouts)
+  const text = line.text.toLowerCase().replace(/[:\-\.!?]+$/, '').trim();
   const key = headingKey(text);
   const looksHeading = text.length <= 40 && text.split(/\s+/).length <= 4;
 
@@ -845,6 +922,14 @@ function looksDateAnchor(line: ExtractedLine): boolean {
   const date = parseDateRange(t);
   if (!date.hasAnyDate && !/\bpresent\b/i.test(t)) return false;
   if (t.length > 70 && !/\d{4}/.test(t)) return false;
+  // Prose-sentence guard: lines that end with a full-stop or start with a lowercase letter AND
+  // contain 4+ non-date words are descriptive bullets/sentences, not date anchors.
+  // e.g. "of an exhibition piece featured at Singapore Design Week 2022." → NOT a date anchor.
+  // e.g. "design for Tan Ean Kiam Arts Awards 2023" (starts lowercase) → NOT a date anchor.
+  const nonDateWords = t.split(/\s+/).filter(
+    (w) => !/^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|(19|20)\d{2}|present|current|now|[-–—])$/i.test(w),
+  );
+  if (nonDateWords.length >= 4 && (/[.]$/.test(t.trim()) || /^[a-z]/.test(t.trim()))) return false;
   return true;
 }
 
@@ -996,6 +1081,30 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
     }
   }
 
+  // Second pass: move a trailing role-like header from the end of one block to the front of
+  // the next block when the next block has no role line yet.  This handles PDFs where the
+  // role label for entry N appears as the last line of entry N-1's block (e.g. Edwind's PDF).
+  for (let i = 0; i < out.length - 1; i += 1) {
+    const current = out[i];
+    const next = out[i + 1];
+    if (current.section !== 'experience' || next.section !== 'experience') continue;
+    if (current.lines.length === 0 || next.lines.length === 0) continue;
+    const nextHasRoleLine = next.lines.some((l, idx) =>
+      idx < 3 && !hasDateText(l.text) && !isBulletText(l.text) && looksExperienceEntryHeader(l.text),
+    );
+    if (nextHasRoleLine) continue;
+    const lastLine = current.lines[current.lines.length - 1];
+    if (
+      lastLine
+      && looksExperienceEntryHeader(lastLine.text)
+      && !hasDateText(lastLine.text)
+      && !isBulletText(lastLine.text)
+    ) {
+      next.lines.unshift(lastLine);
+      current.lines.pop();
+    }
+  }
+
   return out.filter((b) => b.lines.length > 0);
 }
 
@@ -1039,11 +1148,65 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     );
   }
 
-  const nameCandidate = [...top]
+  // Candidate pool: first 12 lines of contact section + first 12 lines of whole document,
+  // so that resumes with tiny contact sections (e.g. only 2 lines) can still find the name.
+  const allTop = allLines.filter((l) => l.page === 1).slice(0, 12);
+  const combinedTop = [...new Set([...top, ...allTop])];  // dedup while preserving order
+
+  const nameCandidate = [...combinedTop]
     .filter((line) => !/@/.test(line.text) && !/\d{3,}/.test(line.text) && !/https?:\/\//i.test(line.text) && !/linkedin/i.test(line.text))
+    .filter((line) => !isBulletText(line.text))
     .filter((line) => !TITLE_HINT.test(line.text))
+    .filter((line) => !DEGREE_HINT.test(line.text))
+    // Exclude greeting lines: use simple word-boundary check so we aren't tripped up by smart-quote apostrophes
+    .filter((line) => !/^(hi\b|hello\b|hey\b|i\s+am\b)/i.test(line.text.trim()))
+    .filter((line) => !/\b(resume|curriculum\s+vitae|\bcv\b)\b/i.test(line.text))
+    // Filter academic discipline field names like "Industrial Design", "Computer Science"
+    .filter((line) => !/\b(design|engineering|sciences?|technology|computing|innovation|management)\s*$/i.test(line.text.trim()))
+    // Names have ALL words starting with uppercase (filters "grounded in User", "aStoryteller and" etc.)
+    .filter((line) => {
+      const asciiWords = line.text.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
+      return asciiWords.length > 0 && asciiWords.every((w) => /^[A-Z]/.test(w));
+    })
     .filter((line) => line.text.split(/\s+/).length >= 2 && line.text.split(/\s+/).length <= 5)
     .sort((a, b) => (b.fontSize ?? 12) - (a.fontSize ?? 12))[0];
+
+  // Fallback: two adjacent single-word TitleCase lines that together form a full name.
+  // E.g. "Edwind" (line 0) + "Tan." (line 1) → "Edwind Tan"
+  const adjacentNameCandidate = (() => {
+    for (let i = 0; i < combinedTop.length - 1; i++) {
+      const a = (combinedTop[i]?.text ?? '').trim().replace(/[.,!?:;]+$/, '');
+      const b = (combinedTop[i + 1]?.text ?? '').trim().replace(/[.,!?:;]+$/, '');
+      if (!a || !b) continue;
+      if (a.split(/\s+/).length !== 1 || b.split(/\s+/).length !== 1) continue;
+      if (!/^[A-Z]/.test(a) || !/^[A-Z]/.test(b)) continue;
+      if (/[@\d\/:]/.test(a) || /[@\d\/:]/.test(b)) continue;
+      if (TITLE_HINT.test(a) || TITLE_HINT.test(b)) continue;
+      if (DEGREE_HINT.test(a) || DEGREE_HINT.test(b)) continue;
+      if (/^(experience|education|skills|work|contact|summary|about|projects|introduction)$/i.test(a)) continue;
+      if (/^(experience|education|skills|work|contact|summary|about|projects|introduction)$/i.test(b)) continue;
+      return `${a} ${b}`;
+    }
+    return null;
+  })();
+
+  // Fallback: detect camelCase single-word names (e.g. "CherylPang" → "Cheryl Pang")
+  // Used when the PDF merges first/last name into one word with interior uppercase.
+  const camelCaseNameCandidate = (() => {
+    for (const line of combinedTop.slice(0, 8)) {
+      const t = line.text.trim();
+      if (!/^[A-Za-z]+$/.test(t)) continue;           // letters only (no digits, punctuation)
+      if (!/^[A-Z]/.test(t)) continue;                 // must start uppercase
+      if (!/[a-z][A-Z]/.test(t)) continue;             // must have an interior uppercase boundary
+      if (TITLE_HINT.test(t) || DEGREE_HINT.test(t)) continue;
+      const split = t.replace(/([a-z])([A-Z])/g, '$1 $2');
+      const parts = split.split(' ');
+      if (parts.length < 2 || parts.length > 3) continue;
+      if (parts.some((p) => (p?.length ?? 0) < 2)) continue;
+      return split;
+    }
+    return null;
+  })();
 
   // Always try to extract a name from a merged navigation bar line (e.g. "Intro Experience DEBBIE NG").
   // This has higher confidence than a plain short line for resumes with nav bars.
@@ -1074,9 +1237,21 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   });
 
   // Prefer merged nav-bar name over plain candidate (nav bar is more reliable for styled resumes).
-  let name = mergedNameCandidate ?? nameCandidate?.text ?? null;
+  let name = mergedNameCandidate ?? nameCandidate?.text ?? camelCaseNameCandidate ?? adjacentNameCandidate ?? null;
+
+  // Post-process: strip Chinese/CJK suffix and "|" separator
+  // e.g. "Loo Zi Ling | 呂紫寧" → "Loo Zi Ling"
+  if (name) {
+    name = name.replace(/\s*[|\/]\s*[\u3000-\u9fff\uf900-\ufaff\u3040-\u30ff].*/u, '').trim();
+    name = name.replace(/\s+[\u3000-\u9fff\uf900-\ufaff\u3040-\u30ff].*/u, '').trim();
+    // Strip trailing punctuation from name (e.g. "Loo Zi Ling.")
+    name = name.replace(/[.,!?:;]+$/, '').trim();
+  }
+
   if (!name && email) {
-    const local = email.split('@')[0] ?? '';
+    const rawLocal = email.split('@')[0] ?? '';
+    // Strip trailing digits that are often appended to email handles (e.g. "edwindtan13" → "edwindtan")
+    const local = rawLocal.replace(/\d+$/, '');
     const tokens = local
       .split(/[._-]+/)
       .map((t) => t.trim())
@@ -1136,14 +1311,14 @@ function stitchBullets(lines: ExtractedLine[]): { bullets: string[]; prose: stri
   const bullets: string[] = [];
   const prose: string[] = [];
 
-  // Pre-clean: strip Ç (U+00C7) which acts as a bullet-close marker in some PDFs.
-  // Everything from Ç onwards is either the marker itself or bleed from an adjacent PDF column.
+  // Pre-clean: strip PDF bullet-close markers and adjacent-column bleed content.
+  // Ç (U+00C7) – Evelyn's PDF encoding  © (U+00A9) – Cheryl Pang's PDF encoding
   // Also strip ASCII control characters that sometimes leak in from PDF encoding.
   const cleanedLines = lines.map((l) => ({
     ...l,
     text: l.text
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-      .replace(/\s*\u00c7.*$/, '')
+      .replace(/\s*[\u00c7\u00a9].*$/, '')
       .trim() || l.text.trim(),
   }));
 
@@ -1158,8 +1333,8 @@ function stitchBullets(lines: ExtractedLine[]): { bullets: string[]; prose: stri
     if (/^\+?\s*add\s+/i.test(text)) continue;
 
     if (isBulletText(text)) {
-      // Strip all leading bullet markers including Ñ (U+00D1 — PDF bullet-open encoding)
-      bullets.push(text.replace(/^[•\-*\u2022\u00d1\d.\s]+/, '').trim());
+      // Strip all leading bullet markers (Ñ/È/↳/+ PDF-encoded and standard)
+      bullets.push(text.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\d.\s]+/, '').trim());
       continue;
     }
 
@@ -1230,6 +1405,22 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     if (!dateLine) return null;
     const cleaned = removeDateFragments(dateLine.text);
     return TITLE_HINT.test(cleaned) ? cleaned : null;
+  })();
+
+  // If the date anchor line has text remaining after removing the date, that text is a
+  // strong candidate for the company name.
+  // e.g. "Shopee Dec 2021-May 2023" → "Shopee"
+  // e.g. "Keppel Land | Part-time | Apr 2022-Apr 2023" → "Keppel Land" (strip pipe-separated tokens)
+  const companyFromDateLine = (() => {
+    if (!dateLine) return null;
+    let remainder = removeDateFragments(dateLine.text).trim();
+    if (!remainder) return null;
+    // Strip pipe-separated job-type/mode suffixes (e.g. "Shopee | Internship |" → "Shopee").
+    remainder = remainder.replace(/\s*\|.*/s, '').trim();
+    if (!remainder || TITLE_HINT.test(remainder) || hasDateText(remainder)) return null;
+    if (/^\(/.test(remainder)) return null;  // duration fragments like "(8 months)"
+    if (!/^[A-Z'"]/.test(remainder)) return null;  // company names start with uppercase
+    return remainder;
   })();
 
   const stitched = stitchBullets(lines);
@@ -1332,6 +1523,12 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     role = split.role ?? role;
     company = split.company ?? company;
   }
+  // If role and company are still identical and the value looks like an org name (not a title),
+  // it was set as a fallback from a company-only block — clear role so only company is kept.
+  // e.g. "STUCK Design" block → role=null, company="STUCK Design".
+  if (role && company && role === company && looksExperienceOrgLine(role) && !TITLE_HINT.test(role)) {
+    role = null;
+  }
 
   const swapped = swapRoleCompanyIfNeeded(role, company);
   role = swapped.role;
@@ -1352,12 +1549,24 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   if (!role && roleFromDateLine) role = roleFromDateLine;
   if (company && TITLE_HINT.test(company) && !COMPANY_HINT.test(company)) company = null;
   if (!company) {
-    company = contentLines.find((t) => looksExperienceOrgLine(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && t.length <= 80) ?? null;
+    company = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && t.length <= 80) ?? null;
     company = company ? removeDateFragments(company) : null;
   }
-  const firstOrgLikeLine = contentLines.find((t) => looksExperienceOrgLine(t) && !hasDateText(t) && !isBulletText(t)) ?? null;
+  // firstOrgLikeLine: only genuine org names (not role-like headers, not prose sentences ending with punctuation).
+  const firstOrgLikeLine = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t)) ?? null;
   if (firstOrgLikeLine && (!company || !looksExperienceOrgLine(company))) {
     company = removeDateFragments(firstOrgLikeLine);
+  }
+
+  // Company fallback: use text remaining from the date anchor line
+  // (e.g. "Shopee" from "Shopee Dec 2021-May 2023", "Keppel Land" from "Keppel Land | Part-time | dates").
+  if (!company && companyFromDateLine && !looksLikeLocation(companyFromDateLine)) {
+    company = companyFromDateLine;
+  }
+  // Override wrongly-parsed company (from role-splitting) with the date-anchor company when available.
+  // e.g. role="Marketing Creative Designer", company="Brand & Growth" → use companyFromDateLine "Shopee" instead.
+  if (companyFromDateLine && company !== companyFromDateLine && !looksExperienceOrgLine(company ?? '') && !looksLikeLocation(companyFromDateLine)) {
+    company = companyFromDateLine;
   }
 
   const item: ExperienceItem = {
@@ -1378,6 +1587,24 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   const valid = Boolean(item.role || item.company) && Boolean(item.start.year || item.description.length > 0);
   if (AWARD_HINT.test(item.role ?? '') && !TITLE_HINT.test(item.role ?? '') && item.description.length === 0) {
     warnings.push(`Dropped award-like experience block #${idx + 1}.`);
+    return null;
+  }
+  // Drop contact-info blocks: when there are no dates AND the role has no job-title keywords.
+  // This catches contact lines that leak into the experience section (e.g. "Saffren Choo Jing Xuan").
+  if (item.start.year === null && item.end.year === null && !item.isCurrent
+    && !TITLE_HINT.test(item.role ?? '') && !TITLE_HINT.test(item.company ?? '')) {
+    warnings.push(`Dropped no-date/no-title block #${idx + 1} (likely contact info).`);
+    return null;
+  }
+  // Drop spurious continuation blocks: role starts with lowercase (prose fragment) or is a
+  // parenthetical duration "(8 months |)", and company also has no title/org signal.
+  const roleBad = !item.role || (!TITLE_HINT.test(item.role) && /^[a-z(]/.test(item.role.trim()));
+  const companyBad = !item.company || (!TITLE_HINT.test(item.company) && !looksExperienceOrgLine(item.company) && /^[a-z(]/.test(item.company.trim()));
+  // Also treat a company that ends with sentence-terminal punctuation as "bad":
+  // e.g. "Singapore Design Week 2022." is not a real company name.
+  const companyEndsPunct = Boolean(item.company && /[.!]$/.test(item.company.trim()));
+  if (roleBad && (companyBad || companyEndsPunct)) {
+    warnings.push(`Dropped spurious continuation block #${idx + 1} (no job-title signal).`);
     return null;
   }
   if (!valid) {
@@ -1424,8 +1651,10 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
     if (afterDate && !school) school = afterDate;
   }
 
-  if (!school && texts.length > 0) school = texts[0] ?? null;
-  if (!degree && texts.length > 1) degree = texts[1] ?? null;
+  // Don't use texts[0] as school fallback if it is a degree phrase (e.g. "Bachelor of Arts,").
+  if (!school && texts.length > 0 && !DEGREE_HINT.test(texts[0] ?? '')) school = texts[0] ?? null;
+  // Exclude bullet-text lines from being used as a fallback degree (e.g. "+ Dean's List").
+  if (!degree && texts.length > 1 && !isBulletText(texts[1] ?? '')) degree = texts[1] ?? null;
   if (!degree) {
     const degreeLike = texts.find((t) =>
       /\b(bsc|b\.?sc\.?|bachelor|hons|marketing|management|engineering|design|science|arts|business)\b/i.test(t)
@@ -1453,6 +1682,10 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
 
   school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
   degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').trim() : null;
+  // Drop any degree that turned out to be a bullet line after date-fragment removal.
+  if (degree && isBulletText(degree)) degree = null;
+  // Clear school names that are bare years — artifacts from date-only blocks (e.g. "2020").
+  if (school && /^\d{4}$/.test(school.trim())) school = null;
 
   // Strip leading "Location, Location" prefix from school names that occur when a location
   // annotation placed in a middle column merges with the school name (e.g. in multi-column
@@ -1530,6 +1763,8 @@ const COMPOUND_SKILL_PREFIXES = new Set([
   // Known product-family brand prefixes (always compound)
   'adobe', 'microsoft', 'google', 'apple', 'amazon', 'aws', 'meta',
   'github', 'gitlab', 'jetbrains', 'atlassian',
+  // Video/creative suite sub-product prefixes ("Premiere Pro", "After Effects")
+  'premiere', 'after',
 ]);
 
 function splitConcatenatedSkills(token: string): string[] {
@@ -1572,7 +1807,9 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
       .map((l) => l.text)
       // Skip section sub-headers: lines ending with ":" or bare category labels.
       .filter((t) => !t.endsWith(':'))
-      .filter((t) => !/^(proficiency|practice|knowledge|expertise|competency|category|type|level|additional)$/i.test(t)))
+      .filter((t) => !/^(proficiency|practice|knowledge|expertise|competency|category|type|level|additional)$/i.test(t))
+      // Skip hobby/interest sentences: "Other interest include ...", "Hobbies: ..."
+      .filter((t) => !/\b(other\s+interest|hobby|hobbies|pastimes?)\b/i.test(t)))
     .join(' | ');
 
   if (!allText) return [];
@@ -1581,7 +1818,7 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     .split(/[|,•\u2022;\n§]/)
     .flatMap((s) => splitConcatenatedSkills(s.trim()))
     .filter(Boolean)
-    .map((s) => s.replace(/^[-*]\s*/, ''))
+    .map((s) => s.replace(/^[+\-*]\s*/, ''))   // strip leading bullet chars incl. "+" (Cherie)
     .map((s) => s.replace(/^(languages?|technical)\s*[:\-–—]?\s*/i, ''))
     .map((s) => removeDateFragments(s))
     .filter((s) => s.length > 1 && s.length <= 60)
@@ -1591,6 +1828,13 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     .filter((s) => !/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(s))
     .filter((s) => !/(19|20)\d{2}/.test(s))
     .filter((s) => !/^[+\-]/.test(s))
+    // Filter out language-proficiency sentences ("Fluent in English and Chinese", "Proficient in Photoshop")
+    .filter((s) => !/^(proficient|fluent|conversant|native|basic|intermediate|advanced)\s+in\s+/i.test(s))
+    // Filter out sentence-like tokens: if 3+ words, all must start with uppercase (no prose connectors)
+    .filter((s) => {
+      const ws = s.trim().split(/\s+/);
+      return ws.length <= 2 || ws.every((w) => /^[A-Z\d]/.test(w));
+    })
     // Remove pure location strings that leak in from multi-column PDFs (e.g. "Singapore", "Remote").
     .filter((s) => !looksLikeLocation(s));
 
