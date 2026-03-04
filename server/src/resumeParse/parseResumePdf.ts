@@ -887,8 +887,7 @@ export function detectSections(lines: ExtractedLine[]): DetectedSection[] {
   // detected before the first skills/education section, scan for "Role / Date" pattern lines
   // (e.g. "UX Manager / 03 October 2016-Present") and inject an implied experience section.
   const contactIdx = sections.findIndex((s) => s.type === 'contact');
-  const hasExpSection = sections.some((s) => s.type === 'experience');
-  if (contactIdx >= 0 && !hasExpSection) {
+  if (contactIdx >= 0) {
     const contact = sections[contactIdx];
     const contactLineCount = contact.endIdx - contact.startIdx + 1;
     if (contactLineCount > 12) {
@@ -1459,17 +1458,21 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     const parts = firstHeader.split(/\s-\s/);
     const left = parts[0]?.trim() || null;
     const right = parts.slice(1).join(' - ').trim() || null;
-    // If the left side does not look like a job title but the right side has significantly
-    // more words, the left is likely the organisation name (e.g. "General Assembly - User
-    // Experience Immersive Graduate Tools") — swap so company = left, role = right.
-    const leftWords = left?.split(/\s+/).length ?? 0;
-    const rightWords = right?.split(/\s+/).length ?? 0;
-    if (left && right && !TITLE_HINT.test(left) && rightWords > leftWords + 1) {
-      role = right;
-      company = left;
-    } else {
-      role = left;
-      company = right;
+    // Guard: don't split if the left part has an unclosed parenthetical.
+    // e.g. "Industrial Designer (Part - Time)" splits to left="Industrial Designer (Part"
+    // which is wrong — the " - " is inside a parenthetical, not a role/company separator.
+    const leftOpenParens = (left?.match(/\(/g) ?? []).length;
+    const leftCloseParens = (left?.match(/\)/g) ?? []).length;
+    if (left && leftOpenParens <= leftCloseParens) {
+      const leftWords = left.split(/\s+/).length;
+      const rightWords = right?.split(/\s+/).length ?? 0;
+      if (right && !TITLE_HINT.test(left) && rightWords > leftWords + 1) {
+        role = right;
+        company = left;
+      } else {
+        role = left;
+        company = right;
+      }
     }
   }
 
@@ -1487,7 +1490,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     // text (e.g. "Product Designer II") was already assigned to both slots).
     if (!company && candidates.length > 1) {
       const c1 = candidates[1] ?? null;
-      if (c1 && c1 !== role && c1.length <= 60) company = c1;
+      // Don't use a bare employment-type word (e.g. "Freelance") as the company fallback.
+      if (c1 && c1 !== role && c1.length <= 60 && !EMPLOYMENT_TYPE.test(c1)) company = c1;
     }
   }
 
@@ -1560,12 +1564,12 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
 
   // Company fallback: use text remaining from the date anchor line
   // (e.g. "Shopee" from "Shopee Dec 2021-May 2023", "Keppel Land" from "Keppel Land | Part-time | dates").
-  if (!company && companyFromDateLine && !looksLikeLocation(companyFromDateLine)) {
+  if (!company && companyFromDateLine && !looksLikeLocation(companyFromDateLine) && !AWARD_HINT.test(companyFromDateLine)) {
     company = companyFromDateLine;
   }
   // Override wrongly-parsed company (from role-splitting) with the date-anchor company when available.
   // e.g. role="Marketing Creative Designer", company="Brand & Growth" → use companyFromDateLine "Shopee" instead.
-  if (companyFromDateLine && company !== companyFromDateLine && !looksExperienceOrgLine(company ?? '') && !looksLikeLocation(companyFromDateLine)) {
+  if (companyFromDateLine && company !== companyFromDateLine && !looksExperienceOrgLine(company ?? '') && !looksLikeLocation(companyFromDateLine) && !AWARD_HINT.test(companyFromDateLine)) {
     company = companyFromDateLine;
   }
 
@@ -1654,7 +1658,7 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   // Don't use texts[0] as school fallback if it is a degree phrase (e.g. "Bachelor of Arts,").
   if (!school && texts.length > 0 && !DEGREE_HINT.test(texts[0] ?? '')) school = texts[0] ?? null;
   // Exclude bullet-text lines from being used as a fallback degree (e.g. "+ Dean's List").
-  if (!degree && texts.length > 1 && !isBulletText(texts[1] ?? '')) degree = texts[1] ?? null;
+  if (!degree && texts.length > 1 && !isBulletText(texts[1] ?? '') && !hasDateText(texts[1] ?? '')) degree = texts[1] ?? null;
   if (!degree) {
     const degreeLike = texts.find((t) =>
       /\b(bsc|b\.?sc\.?|bachelor|hons|marketing|management|engineering|design|science|arts|business)\b/i.test(t)
@@ -2100,12 +2104,32 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       .filter((v): v is ExperienceItem => Boolean(v)),
   ).slice(0, 5);
 
-  const education = sortRecentFirst(
-    blocks
-      .filter((b) => b.section === 'education')
-      .map((b, idx) => parseEducationBlock(b, idx, warnings))
-      .filter((v): v is EducationItem => Boolean(v)),
-  ).slice(0, 2);
+  const rawEducation = blocks
+    .filter((b) => b.section === 'education')
+    .map((b, idx) => parseEducationBlock(b, idx, warnings))
+    .filter((v): v is EducationItem => Boolean(v));
+
+  // Merge consecutive pairs where one block has degree-only (no school, no dates) and
+  // the next has school+dates but no degree. This handles 2-column PDFs where the degree
+  // line and school/date line fall in separate blocks due to y-gap splitting.
+  const mergedEducation = rawEducation.reduce((acc: EducationItem[], item) => {
+    const last = acc[acc.length - 1];
+    if (
+      last
+      && last.degree
+      && !last.school
+      && !last.start.year
+      && !last.isCurrent
+      && !item.degree
+    ) {
+      acc[acc.length - 1] = { ...item, degree: last.degree };
+    } else {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+
+  const education = sortRecentFirst(mergedEducation).slice(0, 2);
 
   const skills = parseSkillsFromSections(lines, sections);
   const summary = inferSummary(lines, sections);
