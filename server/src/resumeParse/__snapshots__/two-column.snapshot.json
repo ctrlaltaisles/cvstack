@@ -10,14 +10,14 @@
     "experiences": [
       {
         "start": {
-          "month": null,
-          "year": null
+          "month": 1,
+          "year": 2021
         },
         "end": {
           "month": null,
           "year": null
         },
-        "isCurrent": false,
+        "isCurrent": true,
         "role": "Senior Product Manager",
         "company": "Grab",
         "description": [
@@ -27,12 +27,12 @@
       },
       {
         "start": {
-          "month": null,
-          "year": null
+          "month": 7,
+          "year": 2018
         },
         "end": {
-          "month": null,
-          "year": null
+          "month": 12,
+          "year": 2020
         },
         "isCurrent": false,
         "role": "Product Manager",
@@ -65,5 +65,6 @@
       "Stakeholder Management"
     ]
   },
-  "warnings": []
+  "warnings": [],
+  "summary": null
 }

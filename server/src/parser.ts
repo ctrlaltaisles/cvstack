@@ -180,11 +180,14 @@ export async function extractTextFromPdfBuffer(buffer: Buffer): Promise<ExtractR
     // fallback below
   }
 
-  try {
-    const text = await extractWithPdfKit(buffer);
-    if (text.trim()) return { text, method: 'pdfkit' };
-  } catch {
-    return { text: '', method: 'none' };
+  const shouldTryPdfKit = process.platform === 'darwin' && process.env.CVSTACK_ENABLE_PDFKIT === '1';
+  if (shouldTryPdfKit) {
+    try {
+      const text = await extractWithPdfKit(buffer);
+      if (text.trim()) return { text, method: 'pdfkit' };
+    } catch {
+      return { text: '', method: 'none' };
+    }
   }
 
   return { text: '', method: 'none' };

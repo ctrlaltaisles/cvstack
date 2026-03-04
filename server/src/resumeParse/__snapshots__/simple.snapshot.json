@@ -10,14 +10,14 @@
     "experiences": [
       {
         "start": {
-          "month": null,
-          "year": null
+          "month": 1,
+          "year": 2022
         },
         "end": {
           "month": null,
           "year": null
         },
-        "isCurrent": false,
+        "isCurrent": true,
         "role": "Senior Product Designer",
         "company": "Acme Inc",
         "description": [
@@ -27,12 +27,12 @@
       },
       {
         "start": {
-          "month": null,
-          "year": null
+          "month": 3,
+          "year": 2019
         },
         "end": {
-          "month": null,
-          "year": null
+          "month": 12,
+          "year": 2021
         },
         "isCurrent": false,
         "role": "Product Designer",
@@ -65,5 +65,6 @@
       "Design Systems"
     ]
   },
-  "warnings": []
+  "warnings": [],
+  "summary": null
 }

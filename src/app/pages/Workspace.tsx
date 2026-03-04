@@ -1135,7 +1135,7 @@ function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onE
   const resize = (el: HTMLTextAreaElement) => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
   const save = () => { setEditing(false); onFocusChange?.(false); if (local !== value) onChange(local); };
   if (editing) return <textarea ref={ref} value={local} rows={1} onChange={e => { setLocal(e.target.value); resize(e.target); }} onBlur={save} onKeyDown={e => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (local !== value) onChange(local);
       setEditing(false);
@@ -3019,6 +3019,7 @@ export default function Workspace() {
       setResumeMeta((prev) => prev ? { ...prev, source: response.resume.source, file_name: response.resume.file_name, updated_at: response.resume.updated_at } : prev);
       setSelectedVersionId(incomingVersion.id);
       setBasePdfRefreshKey((prev) => prev + 1);
+      setShowBaseFileModal(false);
       showToast('Master resume replaced from uploaded PDF');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to replace uploaded PDF');

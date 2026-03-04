@@ -12,7 +12,7 @@ import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, ma
 import { defaultResumeData } from './defaults';
 import { createVersionRecord, initDb, patchVersionRecord, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
 import type { ResumeData, ResumeVersionDTO } from './types';
-import { inferResumeSummaryFromDebug, parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
+import { parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
 import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, storeResumePdf } from './storage/pdfStorage';
@@ -612,7 +612,7 @@ async function createResumeWithBaseVersion(params: {
 }
 
 async function parseUploadedResumeBuffer(buffer: Buffer) {
-  const parsedPayload = await parseResumePdf(buffer, { debug: true });
+  const parsedPayload = await parseResumePdf(buffer);
   const parsedData = parsedPayload.data;
   const warnings = [...parsedPayload.warnings];
 
@@ -626,15 +626,13 @@ async function parseUploadedResumeBuffer(buffer: Buffer) {
     .filter((v): v is string => Boolean(v))
     .join('\n');
 
-  const debugExtractedText = (parsedPayload.debug?.lines ?? [])
-    .map((line) => line.text)
+  const extractedText = [structuredExtractedText, parsedPayload.summary ?? '']
     .filter((v): v is string => Boolean(v))
-    .join('\n');
-
-  const extractedText = (structuredExtractedText || debugExtractedText).slice(0, 5000);
+    .join('\n')
+    .slice(0, 5000);
 
   const data = toResumeDataFromParsedResume(parsedData);
-  const inferredSummary = inferResumeSummaryFromDebug(parsedPayload.debug);
+  const inferredSummary = parsedPayload.summary;
   if (inferredSummary) {
     data.bio = inferredSummary.slice(0, 1200);
   }
