@@ -887,8 +887,7 @@ export function detectSections(lines: ExtractedLine[]): DetectedSection[] {
   // detected before the first skills/education section, scan for "Role / Date" pattern lines
   // (e.g. "UX Manager / 03 October 2016-Present") and inject an implied experience section.
   const contactIdx = sections.findIndex((s) => s.type === 'contact');
-  const hasExpSection = sections.some((s) => s.type === 'experience');
-  if (contactIdx >= 0 && !hasExpSection) {
+  if (contactIdx >= 0) {
     const contact = sections[contactIdx];
     const contactLineCount = contact.endIdx - contact.startIdx + 1;
     if (contactLineCount > 12) {
@@ -1459,17 +1458,21 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     const parts = firstHeader.split(/\s-\s/);
     const left = parts[0]?.trim() || null;
     const right = parts.slice(1).join(' - ').trim() || null;
-    // If the left side does not look like a job title but the right side has significantly
-    // more words, the left is likely the organisation name (e.g. "General Assembly - User
-    // Experience Immersive Graduate Tools") — swap so company = left, role = right.
-    const leftWords = left?.split(/\s+/).length ?? 0;
-    const rightWords = right?.split(/\s+/).length ?? 0;
-    if (left && right && !TITLE_HINT.test(left) && rightWords > leftWords + 1) {
-      role = right;
-      company = left;
-    } else {
-      role = left;
-      company = right;
+    // Guard: don't split if the left part has an unclosed parenthetical.
+    // e.g. "Industrial Designer (Part - Time)" splits to left="Industrial Designer (Part"
+    // which is wrong — the " - " is inside a parenthetical, not a role/company separator.
+    const leftOpenParens = (left?.match(/\(/g) ?? []).length;
+    const leftCloseParens = (left?.match(/\)/g) ?? []).length;
+    if (left && leftOpenParens <= leftCloseParens) {
+      const leftWords = left.split(/\s+/).length;
+      const rightWords = right?.split(/\s+/).length ?? 0;
+      if (right && !TITLE_HINT.test(left) && rightWords > leftWords + 1) {
+        role = right;
+        company = left;
+      } else {
+        role = left;
+        company = right;
+      }
     }
   }
 
@@ -1479,7 +1482,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     company = company ?? candidates.find((t) =>
       looksExperienceOrgLine(t)
       && !/[.:]/.test(t)
-      && t.length <= 80,
+      && t.length <= 80
+      && !EMPLOYMENT_TYPE.test(t),
     ) ?? null;
     if (!role && candidates.length > 0) role = candidates[0] ?? null;
     // Only use candidates[1] as fallback company if it's short enough to be a name (not prose)
@@ -1487,7 +1491,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     // text (e.g. "Product Designer II") was already assigned to both slots).
     if (!company && candidates.length > 1) {
       const c1 = candidates[1] ?? null;
-      if (c1 && c1 !== role && c1.length <= 60) company = c1;
+      // Don't use a bare employment-type word (e.g. "Freelance") as the company fallback.
+      if (c1 && c1 !== role && c1.length <= 60 && !EMPLOYMENT_TYPE.test(c1)) company = c1;
     }
   }
 
@@ -1505,6 +1510,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   }
 
   // Fallback: if role found but no company, pick first short non-role, non-location line.
+  // Use a word-count limit (≤ 6 words) to exclude prose/description sentences.
+  // Exclude bare employment-type words (e.g. "Freelance") from being used as the company.
   if (role && !company) {
     company = contentLines.find((t) =>
       t !== role
@@ -1512,8 +1519,9 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
       && !hasDateText(t)
       && !isBulletText(t)
       && !ACTION_VERB_HINT.test(t)
-      && t.length <= 80
-      && !/[.!?]$/.test(t),
+      && t.split(/\s+/).length <= 6
+      && !/[.!?]$/.test(t)
+      && !EMPLOYMENT_TYPE.test(t),
     ) ?? null;
   }
 
@@ -1549,23 +1557,23 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   if (!role && roleFromDateLine) role = roleFromDateLine;
   if (company && TITLE_HINT.test(company) && !COMPANY_HINT.test(company)) company = null;
   if (!company) {
-    company = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && t.length <= 80) ?? null;
+    company = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && t.length <= 80 && !EMPLOYMENT_TYPE.test(t)) ?? null;
     company = company ? removeDateFragments(company) : null;
   }
   // firstOrgLikeLine: only genuine org names (not role-like headers, not prose sentences ending with punctuation).
-  const firstOrgLikeLine = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t)) ?? null;
+  const firstOrgLikeLine = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/[.:]/.test(t) && !EMPLOYMENT_TYPE.test(t)) ?? null;
   if (firstOrgLikeLine && (!company || !looksExperienceOrgLine(company))) {
     company = removeDateFragments(firstOrgLikeLine);
   }
 
   // Company fallback: use text remaining from the date anchor line
   // (e.g. "Shopee" from "Shopee Dec 2021-May 2023", "Keppel Land" from "Keppel Land | Part-time | dates").
-  if (!company && companyFromDateLine && !looksLikeLocation(companyFromDateLine)) {
+  if (!company && companyFromDateLine && !looksLikeLocation(companyFromDateLine) && !AWARD_HINT.test(companyFromDateLine)) {
     company = companyFromDateLine;
   }
   // Override wrongly-parsed company (from role-splitting) with the date-anchor company when available.
   // e.g. role="Marketing Creative Designer", company="Brand & Growth" → use companyFromDateLine "Shopee" instead.
-  if (companyFromDateLine && company !== companyFromDateLine && !looksExperienceOrgLine(company ?? '') && !looksLikeLocation(companyFromDateLine)) {
+  if (companyFromDateLine && company !== companyFromDateLine && !looksExperienceOrgLine(company ?? '') && !looksLikeLocation(companyFromDateLine) && !AWARD_HINT.test(companyFromDateLine)) {
     company = companyFromDateLine;
   }
 
@@ -1604,7 +1612,17 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   // e.g. "Singapore Design Week 2022." is not a real company name.
   const companyEndsPunct = Boolean(item.company && /[.!]$/.test(item.company.trim()));
   if (roleBad && (companyBad || companyEndsPunct)) {
-    warnings.push(`Dropped spurious continuation block #${idx + 1} (no job-title signal).`);
+    warnings.push(`Dropped spurious continuation block #\${idx + 1} (no job-title signal).`);
+    return null;
+  }
+  // Drop bio/profile blocks where role is a single non-title word (e.g. nationality "Singaporean").
+  if (item.role && item.role.split(/\s+/).length === 1 && !TITLE_HINT.test(item.role)) {
+    warnings.push(`Dropped single-word non-title role block #\${idx + 1} (${item.role}).`);
+    return null;
+  }
+  // Drop garbled or non-experience blocks with no company and no job-title signal in role.
+  if (item.start.year && !item.company && !TITLE_HINT.test(item.role ?? '') && !item.isCurrent) {
+    warnings.push(`Dropped no-company/no-title-hint block #\${idx + 1}.`);
     return null;
   }
   if (!valid) {
@@ -1654,11 +1672,16 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   // Don't use texts[0] as school fallback if it is a degree phrase (e.g. "Bachelor of Arts,").
   if (!school && texts.length > 0 && !DEGREE_HINT.test(texts[0] ?? '')) school = texts[0] ?? null;
   // Exclude bullet-text lines from being used as a fallback degree (e.g. "+ Dean's List").
-  if (!degree && texts.length > 1 && !isBulletText(texts[1] ?? '')) degree = texts[1] ?? null;
+  // Only use texts[1] as degree fallback if it is short (≤ 6 words), not bullet, not date.
+  // Long lines are description/prose text, not degree titles.
+  if (!degree && texts.length > 1 && !isBulletText(texts[1] ?? '') && !hasDateText(texts[1] ?? '') && (texts[1] ?? '').split(/\s+/).length <= 6) degree = texts[1] ?? null;
   if (!degree) {
     const degreeLike = texts.find((t) =>
       /\b(bsc|b\.?sc\.?|bachelor|hons|marketing|management|engineering|design|science|arts|business)\b/i.test(t)
-      && !SCHOOL_HINT.test(t),
+      && !SCHOOL_HINT.test(t)
+      // Exclude sentence fragments: lines ending with a preposition/connector or exceeding 8 words.
+      && !/\b(to|in|and|of|for|the|a|an|at|by|from|with|that|like|or)\s*$/i.test(t)
+      && t.split(/\s+/).length <= 8,
     ) ?? null;
     if (degreeLike) degree = degreeLike;
   }
@@ -1681,7 +1704,7 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   }
 
   school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
-  degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').trim() : null;
+  degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').replace(/[,;.]\s*$/, '').trim() : null;
   // Drop any degree that turned out to be a bullet line after date-fragment removal.
   if (degree && isBulletText(degree)) degree = null;
   // Clear school names that are bare years — artifacts from date-only blocks (e.g. "2020").
@@ -2100,12 +2123,33 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       .filter((v): v is ExperienceItem => Boolean(v)),
   ).slice(0, 5);
 
-  const education = sortRecentFirst(
-    blocks
-      .filter((b) => b.section === 'education')
-      .map((b, idx) => parseEducationBlock(b, idx, warnings))
-      .filter((v): v is EducationItem => Boolean(v)),
-  ).slice(0, 2);
+  const rawEducation = blocks
+    .filter((b) => b.section === 'education')
+    .map((b, idx) => parseEducationBlock(b, idx, warnings))
+    .filter((v): v is EducationItem => Boolean(v));
+
+  // Merge consecutive pairs where one block has degree-only (no school, no dates) and
+  // the next has school+dates but no degree. This handles 2-column PDFs where the degree
+  // line and school/date line fall in separate blocks due to y-gap splitting.
+  const mergedEducation = rawEducation.reduce((acc: EducationItem[], item) => {
+    const last = acc[acc.length - 1];
+    const lastIsDegreeOnly = Boolean(last && last.degree && !last.school && !last.start.year && !last.isCurrent);
+    if (lastIsDegreeOnly && !item.degree) {
+      // Simple merge: degree-only block followed by school+date block with no degree.
+      acc[acc.length - 1] = { ...item, degree: last!.degree };
+    } else if (lastIsDegreeOnly && item.degree) {
+      // Complex merge: degree-only block followed by school+date+degree block.
+      // Use the orphan block's degree for this school, then push a new orphan for the
+      // displaced degree (it will be merged with the next school+date block).
+      acc[acc.length - 1] = { ...item, degree: last!.degree };
+      acc.push({ ...last!, degree: item.degree });
+    } else {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+
+  const education = sortRecentFirst(mergedEducation).slice(0, 2);
 
   const skills = parseSkillsFromSections(lines, sections);
   const summary = inferSummary(lines, sections);
