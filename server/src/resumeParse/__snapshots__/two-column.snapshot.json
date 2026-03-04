@@ -10,16 +10,16 @@
     "experiences": [
       {
         "start": {
-          "month": 1,
-          "year": 2021
+          "month": null,
+          "year": null
         },
         "end": {
           "month": null,
           "year": null
         },
-        "isCurrent": true,
+        "isCurrent": false,
         "role": "Senior Product Manager",
-        "company": null,
+        "company": "Grab",
         "description": [
           "Owned marketplace growth roadmap",
           "Improved retention by 12%"
@@ -27,16 +27,16 @@
       },
       {
         "start": {
-          "month": 7,
-          "year": 2018
+          "month": null,
+          "year": null
         },
         "end": {
-          "month": 12,
-          "year": 2020
+          "month": null,
+          "year": null
         },
         "isCurrent": false,
         "role": "Product Manager",
-        "company": null,
+        "company": "Shopee",
         "description": [
           "Led checkout optimization"
         ]
@@ -46,14 +46,14 @@
       {
         "degree": "BBA",
         "school": "NUS Business School",
-        "location": null,
+        "location": "Singapore",
         "start": {
           "month": null,
-          "year": 2014
+          "year": null
         },
         "end": {
           "month": null,
-          "year": 2018
+          "year": null
         },
         "isCurrent": false
       }
@@ -65,10 +65,5 @@
       "Stakeholder Management"
     ]
   },
-  "warnings": [
-    "Dropped low-confidence experience block #1.",
-    "Could not confidently detect company line for experience #2.",
-    "Dropped low-confidence experience block #3.",
-    "Could not confidently detect company line for experience #4."
-  ]
+  "warnings": []
 }

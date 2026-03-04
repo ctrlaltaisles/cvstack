@@ -10,19 +10,35 @@
     "experiences": [
       {
         "start": {
-          "month": 1,
-          "year": 2022
+          "month": null,
+          "year": null
         },
         "end": {
           "month": null,
           "year": null
         },
-        "isCurrent": true,
-        "role": "Product Designer",
-        "company": "Beta Labs",
+        "isCurrent": false,
+        "role": "Senior Product Designer",
+        "company": "Acme Inc",
         "description": [
           "Led redesign of onboarding flow",
           "Increased conversion by 22%"
+        ]
+      },
+      {
+        "start": {
+          "month": null,
+          "year": null
+        },
+        "end": {
+          "month": null,
+          "year": null
+        },
+        "isCurrent": false,
+        "role": "Product Designer",
+        "company": "Beta Labs",
+        "description": [
+          "Built component library"
         ]
       }
     ],
@@ -30,21 +46,7 @@
       {
         "degree": "National University of Singapore",
         "school": "National University of Singapore",
-        "location": null,
-        "start": {
-          "month": null,
-          "year": 2014
-        },
-        "end": {
-          "month": null,
-          "year": 2018
-        },
-        "isCurrent": false
-      },
-      {
-        "degree": "B.Des in Industrial Design",
-        "school": "B.Des in Industrial Design",
-        "location": null,
+        "location": "Singapore",
         "start": {
           "month": null,
           "year": null
@@ -63,8 +65,5 @@
       "Design Systems"
     ]
   },
-  "warnings": [
-    "Dropped low-confidence experience block #1.",
-    "Dropped low-confidence experience block #3."
-  ]
+  "warnings": []
 }

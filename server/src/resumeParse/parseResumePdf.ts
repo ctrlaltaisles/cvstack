@@ -8,6 +8,7 @@ import type { ResumeData } from '../types';
 import { extractTextFromPdfBuffer, isExtractionFailure } from '../parser';
 
 const execFileAsync = promisify(execFile);
+let pdfjsGetDocumentPromise: Promise<((input: unknown) => { promise: Promise<unknown> }) | null> | null = null;
 
 export type ExtractedLine = {
   text: string;
@@ -545,9 +546,8 @@ function looksExperienceOrgLine(text: string): boolean {
 
 function looksEducationSchoolLine(text: string): boolean {
   if (SCHOOL_HINT.test(text)) return true;
-  // Location token can hint at a school name only when it's not a pure location string
-  // (e.g. "Singapore Polytechnic" ✓ but "Singapore" alone ✗).
-  return /\b(singapore|hong\s+kong|united\s+kingdom|uk)\b/i.test(text) && !looksLikeLocation(text);
+  // Common university acronyms that do not always include SCHOOL_HINT tokens.
+  return /\b(nus|ntu|smu|sutd|suss|sim|nafa|lasalle)\b/i.test(text);
 }
 
 function dateWeight(value: MonthYear, isCurrent: boolean): number {
@@ -599,13 +599,13 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
     }
 
     const gap = span.x0 - last.x1;
-    // If the horizontal gap is very large (> 100 pts) the two spans are almost certainly in
+    // If the horizontal gap is very large (> 45 pts) the two spans are almost certainly in
     // different layout columns.  Keep them as separate lines so the column-reorder logic in
     // parseResumeFromLines can place them in the correct section order.
     // Similarly, if the span starts far to the LEFT of the current line's end (gap < -20 pts),
     // the span belongs to a different visual column that was sorted before/after the current
     // one — treat it as a new line to prevent concatenation like "Service DesignUser Research".
-    if (gap > 100 || gap < -20) {
+    if (gap > 45 || gap < -20) {
       lines.push({ ...span });
       continue;
     }
@@ -629,11 +629,16 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
 }
 
 async function extractLinesWithPdfJs(buffer: Buffer): Promise<ExtractedLine[]> {
-  const pdfjsModule = await new Function('m', 'return import(m)')('pdfjs-dist/legacy/build/pdf.mjs');
-  const getDocument = (pdfjsModule as { getDocument?: (input: unknown) => { promise: Promise<unknown> } }).getDocument;
+  if (!pdfjsGetDocumentPromise) {
+    pdfjsGetDocumentPromise = (async () => {
+      const pdfjsModule = await new Function('m', 'return import(m)')('pdfjs-dist/legacy/build/pdf.mjs');
+      return (pdfjsModule as { getDocument?: (input: unknown) => { promise: Promise<unknown> } }).getDocument ?? null;
+    })();
+  }
+  const getDocument = await pdfjsGetDocumentPromise;
   if (!getDocument) throw new Error('pdfjs-dist getDocument not found');
 
-  const doc = await getDocument({ data: new Uint8Array(buffer) }).promise as {
+  const doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0 }).promise as {
     numPages: number;
     getPage: (pageNum: number) => Promise<{ getTextContent: () => Promise<{ items: any[] }> }>;
   };
@@ -766,17 +771,6 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
     return uniq.size <= 3 || placeholderCount / cleaned.length > 0.4 || cleanWordCount / cleaned.length > 0.3;
   };
 
-  const shouldTryPdfKit = process.platform === 'darwin' && process.env.CVSTACK_DISABLE_PDFKIT !== '1';
-  // Prefer native PDFKit on macOS for layout-heavy resumes exported from design tools.
-  if (shouldTryPdfKit) {
-    try {
-      const fromPdfKit = await extractLinesWithPdfKit(buffer);
-      if (fromPdfKit.length > 0 && !isLowQuality(fromPdfKit)) return fromPdfKit;
-    } catch {
-      // fallback below
-    }
-  }
-
   try {
     const fromPdfJs = await extractLinesWithPdfJs(buffer);
     if (fromPdfJs.length > 0 && !isLowQuality(fromPdfJs)) return fromPdfJs;
@@ -784,8 +778,7 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
     // fallback below
   }
 
-  // Cross-platform text extraction fallback (especially useful in Linux prod
-  // where native PDFKit is unavailable).
+  // Cross-platform text extraction fallback (uses PDFium/PDF.js/pdf-parse chain).
   try {
     const extracted = await extractTextFromPdfBuffer(buffer);
     if (extracted.text && !isExtractionFailure(extracted.text)) {
@@ -793,10 +786,54 @@ export async function extractLayoutAwareLines(buffer: Buffer): Promise<Extracted
       if (fromPlainText.length > 0 && !isLowQuality(fromPlainText)) return fromPlainText;
     }
   } catch {
-    // final fallback below
+    // fallback below
+  }
+
+  const shouldTryPdfKit = process.platform === 'darwin' && process.env.CVSTACK_DISABLE_PDFKIT !== '1';
+  // Last resort on macOS: native PDFKit.
+  if (shouldTryPdfKit) {
+    try {
+      const fromPdfKit = await extractLinesWithPdfKit(buffer);
+      if (fromPdfKit.length > 0 && !isLowQuality(fromPdfKit)) return fromPdfKit;
+    } catch {
+      // final fallback below
+    }
   }
 
   return [];
+}
+
+function splitCompositeHeadingLines(lines: ExtractedLine[]): ExtractedLine[] {
+  const headingTypes = (text: string): SectionType[] => {
+    const cleaned = text.toLowerCase().replace(/[:\-\.!?]+$/, '').trim();
+    const key = headingKey(cleaned);
+    const matched: SectionType[] = [];
+    for (const rule of SECTION_KEYWORDS) {
+      if (rule.patterns.some((p) => p.test(cleaned) || p.test(key))) matched.push(rule.type);
+    }
+    return matched;
+  };
+
+  const out: ExtractedLine[] = [];
+  for (const line of lines) {
+    const parts = line.text
+      .split('§')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length < 2) {
+      out.push(line);
+      continue;
+    }
+    const allHeadingLike = parts.every((part) => headingTypes(part).length > 0);
+    if (!allHeadingLike) {
+      out.push(line);
+      continue;
+    }
+    for (const part of parts) {
+      out.push({ ...line, text: part });
+    }
+  }
+  return out;
 }
 
 function classifyHeading(line: ExtractedLine, medianFont: number): SectionType | null {
@@ -920,6 +957,14 @@ function looksDateAnchor(line: ExtractedLine): boolean {
   const t = line.text;
   const date = parseDateRange(t);
   if (!date.hasAnyDate && !/\bpresent\b/i.test(t)) return false;
+  if (/\b\d{4}\+/.test(t)) return false;
+  const hasMonthToken = /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i.test(t);
+  const monthYear = '(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)?\\s*(?:19|20)\\d{2}';
+  const hasDashDateRange = new RegExp(`\\b${monthYear}\\s*[-–—]\\s*(?:present|current|now|${monthYear})\\b`, 'i').test(t);
+  const hasToDateRange = new RegExp(`\\b${monthYear}\\s+to\\s+(?:present|current|now|${monthYear})\\b`, 'i').test(t);
+  const hasExplicitRangeSignal = hasDashDateRange || hasToDateRange || /\b(present|current|now)\b/i.test(t);
+  const yearOnlyCount = (t.match(/(19|20)\d{2}/g) ?? []).length;
+  if (!hasMonthToken && !hasExplicitRangeSignal && (yearOnlyCount === 0 || t.split(/\s+/).length > 5)) return false;
   if (t.length > 70 && !/\d{4}/.test(t)) return false;
   // Prose-sentence guard: lines that end with a full-stop or start with a lowercase letter AND
   // contain 4+ non-date words are descriptive bullets/sentences, not date anchors.
@@ -1333,7 +1378,7 @@ function stitchBullets(lines: ExtractedLine[]): { bullets: string[]; prose: stri
 
     if (isBulletText(text)) {
       // Strip all leading bullet markers (Ñ/È/↳/+ PDF-encoded and standard)
-      bullets.push(text.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\d.\s]+/, '').trim());
+      bullets.push(text.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa\d.\s§]+/, '').trim());
       continue;
     }
 
@@ -1612,17 +1657,17 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   // e.g. "Singapore Design Week 2022." is not a real company name.
   const companyEndsPunct = Boolean(item.company && /[.!]$/.test(item.company.trim()));
   if (roleBad && (companyBad || companyEndsPunct)) {
-    warnings.push(`Dropped spurious continuation block #\${idx + 1} (no job-title signal).`);
+    warnings.push(`Dropped spurious continuation block #${idx + 1} (no job-title signal).`);
     return null;
   }
   // Drop bio/profile blocks where role is a single non-title word (e.g. nationality "Singaporean").
   if (item.role && item.role.split(/\s+/).length === 1 && !TITLE_HINT.test(item.role)) {
-    warnings.push(`Dropped single-word non-title role block #\${idx + 1} (${item.role}).`);
+    warnings.push(`Dropped single-word non-title role block #${idx + 1} (${item.role}).`);
     return null;
   }
   // Drop garbled or non-experience blocks with no company and no job-title signal in role.
   if (item.start.year && !item.company && !TITLE_HINT.test(item.role ?? '') && !item.isCurrent) {
-    warnings.push(`Dropped no-company/no-title-hint block #\${idx + 1}.`);
+    warnings.push(`Dropped no-company/no-title-hint block #${idx + 1}.`);
     return null;
   }
   if (!valid) {
@@ -1655,14 +1700,19 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
         merged.push(cur);
       }
     }
-    return merged;
+    return merged
+      .flatMap((value) => value.split('§').map((part) => cleanLineText(part)).filter(Boolean))
+      .filter(Boolean);
   })();
   const dateLine = lines.find((l) => looksDateAnchor(l));
   const dateInfo = parseDateRange(dateLine?.text ?? '');
 
   let school = texts.find((t) => SCHOOL_HINT.test(t)) ?? null;
   let degree = texts.find((t) => DEGREE_HINT.test(t)) ?? null;
-  let location = texts.find((t) => /,/.test(t) && !/\d/.test(t) && !SCHOOL_HINT.test(t)) ?? null;
+  let location = texts.find((t) =>
+    looksLikeLocation(t)
+    || (/^[A-Za-z\s]+,\s*[A-Za-z\s]+$/.test(t) && t.split(/\s+/).length <= 6),
+  ) ?? null;
 
   if (dateLine) {
     const afterDate = stripDatePrefix(dateLine.text);
@@ -1703,12 +1753,13 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
     }
   }
 
-  school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').trim() : null;
+  school = school ? removeDateFragments(school).replace(/\s*\/\s*$/, '').replace(/\s*\|.*$/, '').trim() : null;
   degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').replace(/[,;.]\s*$/, '').trim() : null;
   // Drop any degree that turned out to be a bullet line after date-fragment removal.
   if (degree && isBulletText(degree)) degree = null;
   // Clear school names that are bare years — artifacts from date-only blocks (e.g. "2020").
   if (school && /^\d{4}$/.test(school.trim())) school = null;
+  if (school && looksLikeLocation(school)) school = null;
 
   // Strip leading "Location, Location" prefix from school names that occur when a location
   // annotation placed in a middle column merges with the school name (e.g. in multi-column
@@ -1751,6 +1802,76 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   }
 
   return item;
+}
+
+function enrichEducationFromSectionLines(items: EducationItem[], lines: ExtractedLine[], sections: DetectedSection[]): EducationItem[] {
+  if (items.length === 0) return items;
+  const educationLines = sections
+    .filter((s) => s.type === 'education')
+    .flatMap((s) => lines.slice(s.startIdx, s.endIdx + 1));
+  if (educationLines.length === 0) return items;
+
+  const schoolCandidates = unique(
+    educationLines
+      .flatMap((line) => line.text.split('§'))
+      .map((text) => cleanLineText(text))
+      .map((text) => removeDateFragments(text).replace(/\s*\|.*$/, '').trim())
+      .filter((text) => Boolean(text))
+      .filter((text) => looksEducationSchoolLine(text))
+      .filter((text) => !looksLikeLocation(text))
+      .filter((text) => !hasDateText(text))
+      .filter((text) => !isBulletText(text))
+      .filter((text) => !AWARD_HINT.test(text))
+      .filter((text) => text.length <= 90),
+  );
+
+  const dateCandidates = unique(
+    educationLines
+      .map((line) => parseDateRange(line.text))
+      .filter((date) => date.hasAnyDate || date.isCurrent)
+      .filter((date) => Boolean(date.start.year || date.end.year || date.isCurrent))
+      .map((date) => JSON.stringify(date)),
+  )
+    .map((serialized) => JSON.parse(serialized) as { start: MonthYear; end: MonthYear; isCurrent: boolean; hasAnyDate: boolean })
+    .sort((a, b) => dateWeight(b.end, b.isCurrent) - dateWeight(a.end, a.isCurrent));
+
+  const usedSchools = new Set(
+    items
+      .map((item) => (item.school ?? '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const usedDateKeys = new Set(
+    items
+      .map((item) => `${item.start.month ?? 0}-${item.start.year ?? 0}-${item.end.month ?? 0}-${item.end.year ?? 0}-${item.isCurrent ? 1 : 0}`)
+      .filter((key) => !/^0-0-0-0-0$/.test(key)),
+  );
+
+  return items.map((item) => {
+    const next = { ...item };
+    if (!next.school) {
+      const fallbackSchool = schoolCandidates.find((candidate) => !usedSchools.has(candidate.toLowerCase())) ?? null;
+      if (fallbackSchool) {
+        next.school = fallbackSchool;
+        usedSchools.add(fallbackSchool.toLowerCase());
+      }
+    }
+
+    const missingDate = !next.start.year && !next.end.year && !next.isCurrent;
+    if (missingDate) {
+      const fallbackDate = dateCandidates.find((candidate) => {
+        const key = `${candidate.start.month ?? 0}-${candidate.start.year ?? 0}-${candidate.end.month ?? 0}-${candidate.end.year ?? 0}-${candidate.isCurrent ? 1 : 0}`;
+        return !usedDateKeys.has(key);
+      });
+      if (fallbackDate) {
+        next.start = fallbackDate.start;
+        next.end = fallbackDate.end;
+        next.isCurrent = fallbackDate.isCurrent;
+        const key = `${fallbackDate.start.month ?? 0}-${fallbackDate.start.year ?? 0}-${fallbackDate.end.month ?? 0}-${fallbackDate.end.year ?? 0}-${fallbackDate.isCurrent ? 1 : 0}`;
+        usedDateKeys.add(key);
+      }
+    }
+    return next;
+  });
 }
 
 /**
@@ -1890,7 +2011,7 @@ function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): stri
 
   const introText = intro.join(' ').trim();
   // Only accept strong paragraph-like intros; avoids pulling work lines as About.
-  if (intro.length >= 3 && introText.length >= 220) return introText;
+  if (intro.length >= 2 && introText.length >= 140) return introText;
   return null;
 }
 
@@ -2099,9 +2220,11 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
       return a.x0 - b.x0;
     });
-  const lines = splitMergedSectionHeadings(mergeFragmentedLines(
-    reorderColumnsIfNeeded(sortedRaw),
-  ));
+  const lines = splitCompositeHeadingLines(
+    splitMergedSectionHeadings(mergeFragmentedLines(
+      reorderColumnsIfNeeded(sortedRaw),
+    )),
+  );
 
   if (lines.length === 0) warnings.push('No text lines extracted from PDF.');
 
@@ -2149,7 +2272,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     return acc;
   }, []);
 
-  const education = sortRecentFirst(mergedEducation).slice(0, 2);
+  const education = sortRecentFirst(enrichEducationFromSectionLines(mergedEducation, lines, sections)).slice(0, 2);
 
   const skills = parseSkillsFromSections(lines, sections);
   const summary = inferSummary(lines, sections);

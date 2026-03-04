@@ -20,8 +20,12 @@ const SECTION_HEADERS = [
   'PUBLICATIONS',
 ];
 
-type ExtractResult = { text: string; method: 'pdf-parse' | 'pdfjs-dist' | 'pdfkit' | 'none' };
+type ExtractResult = { text: string; method: 'pdf-parse' | 'pdfjs-dist' | 'pdfium' | 'pdfkit' | 'none' };
 const execFileAsync = promisify(execFile);
+let pdfiumLibraryPromise: Promise<{ loadDocument: (buff: Uint8Array, password?: string) => Promise<{
+  pages: () => Iterable<{ getText: () => string }>;
+  destroy: () => void;
+}> } | null> | null = null;
 
 function normalizeLines(text: string): string[] {
   return text
@@ -54,7 +58,7 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string> {
     throw new Error('pdfjs-dist getDocument not found');
   }
 
-  const doc = await getDocument({ data: new Uint8Array(buffer) }).promise as {
+  const doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0 }).promise as {
     numPages: number;
     getPage: (pageNum: number) => Promise<{ getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }>;
   };
@@ -70,6 +74,44 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string> {
   }
 
   return chunks.join('\n').replace(/\u0000/g, '').trim();
+}
+
+async function getPdfiumLibrary() {
+  if (!pdfiumLibraryPromise) {
+    pdfiumLibraryPromise = (async () => {
+      try {
+        const module = await new Function('m', 'return import(m)')('@hyzyla/pdfium');
+        const PDFiumLibrary = (module as { PDFiumLibrary?: { init?: () => Promise<unknown> } }).PDFiumLibrary;
+        if (!PDFiumLibrary?.init) return null;
+        return await PDFiumLibrary.init() as {
+          loadDocument: (buff: Uint8Array, password?: string) => Promise<{
+            pages: () => Iterable<{ getText: () => string }>;
+            destroy: () => void;
+          }>;
+        };
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return pdfiumLibraryPromise;
+}
+
+async function extractWithPdfium(buffer: Buffer): Promise<string> {
+  const library = await getPdfiumLibrary();
+  if (!library) throw new Error('pdfium init failed');
+
+  const document = await library.loadDocument(new Uint8Array(buffer));
+  try {
+    const chunks: string[] = [];
+    for (const page of document.pages()) {
+      const pageText = String(page.getText() ?? '').trim();
+      if (pageText) chunks.push(pageText);
+    }
+    return chunks.join('\n').replace(/\u0000/g, '').trim();
+  } finally {
+    document.destroy();
+  }
 }
 
 async function extractWithPdfKit(buffer: Buffer): Promise<string> {
@@ -118,25 +160,34 @@ print(output)
 
 export async function extractTextFromPdfBuffer(buffer: Buffer): Promise<ExtractResult> {
   try {
-    const text = await extractWithPdfParse(buffer);
-    return { text, method: 'pdf-parse' };
+    const text = await extractWithPdfium(buffer);
+    if (text.trim()) return { text, method: 'pdfium' };
   } catch {
-    // fallback to pdfjs-dist if installed
+    // fallback below
   }
 
   try {
     const text = await extractWithPdfJs(buffer);
-    return { text, method: 'pdfjs-dist' };
+    if (text.trim()) return { text, method: 'pdfjs-dist' };
   } catch {
-    // fallback to native PDFKit on macOS when JS extractors are unavailable
+    // fallback below
+  }
+
+  try {
+    const text = await extractWithPdfParse(buffer);
+    if (text.trim()) return { text, method: 'pdf-parse' };
+  } catch {
+    // fallback below
   }
 
   try {
     const text = await extractWithPdfKit(buffer);
-    return { text, method: 'pdfkit' };
+    if (text.trim()) return { text, method: 'pdfkit' };
   } catch {
     return { text: '', method: 'none' };
   }
+
+  return { text: '', method: 'none' };
 }
 
 export function isExtractionFailure(text: string): boolean {

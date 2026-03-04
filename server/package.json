@@ -17,6 +17,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@hyzyla/pdfium": "^2.1.12",
     "@prisma/client": "^6.16.0",
     "@supabase/supabase-js": "^2.98.0",
     "cors": "^2.8.6",
