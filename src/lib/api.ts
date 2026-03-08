@@ -349,6 +349,13 @@ export interface SharedResumeResponse {
   version: unknown;
 }
 
+export interface CreateShareLinkResponse {
+  shareSlug: string;
+  sharePath: string;
+  resumeId: string;
+  versionId: string;
+}
+
 export interface ResumeUploadResponse {
   resumeId: string;
   versionId: string;
@@ -458,11 +465,15 @@ export function curateResume(payload: CurateResumeRequest) {
 }
 
 export function createResumeShareLink(resumeId: string, versionId: string) {
-  return requestJson<{ token: string; resumeId: string; versionId: string }>(`/api/resumes/${resumeId}/share`, { versionId }, { auth: true });
+  return requestJson<CreateShareLinkResponse>(`/api/resumes/${resumeId}/share`, { versionId }, { auth: true });
 }
 
 export function getSharedResume(token: string) {
   return request<SharedResumeResponse>(`/api/public/resume/${encodeURIComponent(token)}`);
+}
+
+export function getSharedResumeBySlug(shareSlug: string) {
+  return request<SharedResumeResponse>(`/api/public/resume/slug/${encodeURIComponent(shareSlug)}`);
 }
 
 export async function resolvePostLoginPath(): Promise<string> {

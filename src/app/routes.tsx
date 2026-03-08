@@ -26,4 +26,8 @@ export const router = createBrowserRouter([
     path: "/shared/:token",
     Component: SharedResumePage,
   },
+  {
+    path: "/:shareSlug",
+    Component: SharedResumePage,
+  },
 ]);

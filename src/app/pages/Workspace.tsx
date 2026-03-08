@@ -9,6 +9,7 @@ import {
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square, LoaderCircle,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
+import { buildResumeShareBaseName, buildResumeSharePath } from '../../lib/resumeShareNaming';
 import type { AIChange, Award, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 import { useIsMobile } from '../components/ui/use-mobile';
@@ -1356,6 +1357,64 @@ function MonthGridPicker({
   );
 }
 
+function YearGridPicker({
+  year,
+  onSelect,
+  minYear = 1900,
+  maxYear = CURRENT_MONTH_YEAR.year,
+}: {
+  year: number;
+  onSelect: (y: number) => void;
+  minYear?: number;
+  maxYear?: number;
+}) {
+  const [anchorYear, setAnchorYear] = useState(year);
+  useEffect(() => { setAnchorYear(year); }, [year]);
+  const startYear = anchorYear - (anchorYear % 12);
+  const years = Array.from({ length: 12 }, (_, idx) => startYear + idx);
+  const canGoPrev = startYear - 12 >= minYear;
+  const canGoNext = startYear + 12 <= maxYear;
+  return (
+    <div>
+      <div className="flex items-center justify-between px-1 mb-3">
+        <button
+          onClick={e => { e.stopPropagation(); if (canGoPrev) setAnchorYear(startYear - 12); }}
+          disabled={!canGoPrev}
+          className={`w-6 h-6 flex items-center justify-center rounded-[4px] transition-colors select-none ${canGoPrev ? 'text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0]' : 'text-[#D8D8D8] cursor-not-allowed'}`}
+          style={{ fontSize: 16 }}
+        >
+          ‹
+        </button>
+        <p className="text-sm text-[#1A1A1A] select-none">{`${years[0]} - ${years[years.length - 1]}`}</p>
+        <button
+          onClick={e => { e.stopPropagation(); if (canGoNext) setAnchorYear(startYear + 12); }}
+          disabled={!canGoNext}
+          className={`w-6 h-6 flex items-center justify-center rounded-[4px] transition-colors select-none ${canGoNext ? 'text-[#9B9B9B] hover:text-[#1A1A1A] hover:bg-[#F0F0F0]' : 'text-[#D8D8D8] cursor-not-allowed'}`}
+          style={{ fontSize: 16 }}
+        >
+          ›
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {years.map((value) => {
+          const isSelected = value === year;
+          const disabled = value < minYear || value > maxYear;
+          return (
+            <button
+              key={value}
+              onClick={e => { e.stopPropagation(); if (!disabled) onSelect(value); }}
+              disabled={disabled}
+              className={`py-2 text-xs rounded-[6px] transition-colors ${isSelected ? 'bg-[#1A1A1A] text-white' : disabled ? 'text-[#D0D0D0] cursor-not-allowed' : 'text-[#2B2B2B] hover:bg-[#F0F0F0]'}`}
+            >
+              {value}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── DateRangeEditor & MonthYearEditor ──────────────────────────────────────
 
 function DateRangeEditor({ startDate, endDate, onChangeStart, onChangeEnd }: { startDate: DateValue; endDate: DateValue; onChangeStart: (v: DateValue) => void; onChangeEnd: (v: DateValue) => void; onClose: () => void }) {
@@ -1410,6 +1469,15 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
     <div className="absolute left-0 top-full mt-2 w-[200px] bg-white border border-[#E5E5E5] rounded-[12px] shadow-[0_8px_32px_rgba(0,0,0,0.1)] p-4 z-[60] animate-[fadeInDown_150ms_ease-out]">
       <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA] mb-3">Date Issued</p>
       <MonthGridPicker year={year} month={month} maxDate={CURRENT_MONTH_YEAR} onSelect={(m, y) => onChange(m, y)} />
+    </div>
+  );
+}
+
+function YearEditor({ year, onChange, onClose }: { year: number; onChange: (y: number) => void; onClose: () => void }) {
+  return (
+    <div className="absolute left-0 top-full mt-2 w-[200px] bg-white border border-[#E5E5E5] rounded-[12px] shadow-[0_8px_32px_rgba(0,0,0,0.1)] p-4 z-[60] animate-[fadeInDown_150ms_ease-out]">
+      <p className="text-[10px] uppercase tracking-widest text-[#AAAAAA] mb-3">Year</p>
+      <YearGridPicker year={year} maxYear={CURRENT_MONTH_YEAR.year} onSelect={(nextYear) => { onChange(nextYear); onClose(); }} />
     </div>
   );
 }
@@ -1847,25 +1915,18 @@ function CertificationBlock({ cert, onUpdateCert, onDeleteCert }: { cert: Certif
 // ─── AwardBlock ──────────────────────────────────────────────────────────────
 
 function AwardBlock({ award, onUpdateAward, onDeleteAward }: { award: Award; onUpdateAward: (a: Award) => void; onDeleteAward: () => void }) {
+  const [editingDate, setEditingDate] = useState(false); const dateColRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!editingDate) return; const h = (e: MouseEvent) => { if (dateColRef.current && !dateColRef.current.contains(e.target as Node)) setEditingDate(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, [editingDate]);
   return (
     <div className="flex gap-10 group/award">
-      <div className="w-44 shrink-0 self-start pt-0.5">
-        <input
-          type="number"
-          min={1900}
-          max={2100}
-          value={award.year}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            if (!Number.isFinite(next)) return;
-            onUpdateAward({ ...award, year: Math.max(1900, Math.min(2100, next)) });
-          }}
-          className="w-full max-w-[110px] text-xs text-[#9B9B9B] bg-transparent border border-[#EFEFEF] rounded-[8px] px-2 py-1.5 outline-none focus:border-[#DADADA]"
-          aria-label="Award year"
-        />
+      <div className="w-44 shrink-0 self-start pt-0.5 relative" ref={dateColRef}>
+        <div onClick={() => setEditingDate(!editingDate)} className="cursor-pointer">
+          <p className="text-xs text-[#9B9B9B] hover:text-[#6B6B6B] transition-colors whitespace-nowrap">{award.year}</p>
+        </div>
+        {editingDate && <YearEditor year={award.year} onChange={(nextYear) => onUpdateAward({ ...award, year: nextYear })} onClose={() => setEditingDate(false)} />}
       </div>
       <div className="flex-1 min-w-0">
-        <InlineText value={award.name} onChange={(value) => onUpdateAward({ ...award, name: value })} className="text-sm text-[#1A1A1A]" placeholder="Award Name" />
+        <InlineText value={award.name} onChange={(value) => onUpdateAward({ ...award, name: value })} className="text-sm text-[#1A1A1A] mb-0.5" placeholder="Award Name" />
         <button onClick={onDeleteAward} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 opacity-0 group-hover/award:opacity-100">Remove entry</button>
       </div>
     </div>
@@ -3276,7 +3337,7 @@ export default function Workspace() {
     try {
       const exportData = applyHeaderTitleToData(activeVersion, activeVersion.data);
       const pdf = buildPdfDocument(exportData);
-      pdf.save(`${sanitizeFileName(activeVersion.name)}.pdf`);
+      pdf.save(`${sanitizeFileName(buildResumeShareBaseName(activeVersion, exportData))}.pdf`);
       showToast('PDF downloaded');
     } catch (error) {
       console.error('PDF export failed', error);
@@ -3292,7 +3353,7 @@ export default function Workspace() {
       const exportData = applyHeaderTitleToData(activeVersion, activeVersion.data);
       const doc = buildWordDocument(exportData);
       const blob = await Packer.toBlob(doc);
-      downloadBlob(blob, `${sanitizeFileName(activeVersion.name)}.docx`);
+      downloadBlob(blob, `${sanitizeFileName(buildResumeShareBaseName(activeVersion, exportData))}.docx`);
       showToast('Word document downloaded');
     } catch (error) {
       console.error('Word export failed', error);
@@ -3308,7 +3369,8 @@ export default function Workspace() {
     }
     try {
       const response = await createResumeShareLink(resumeId, activeVersion.id);
-      const shareUrl = `${window.location.origin}/shared/${response.token}`;
+      const fallbackPath = buildResumeSharePath(activeVersion, activeVersion.data);
+      const shareUrl = `${window.location.origin}${response.sharePath || response.shareSlug || fallbackPath}`;
       await navigator.clipboard.writeText(shareUrl);
       showToast('Share link copied');
     } catch (error) {

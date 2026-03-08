@@ -18,6 +18,7 @@ export interface ResumeVersionDTO {
   jobDescription?: string;
   jobLink?: string;
   lastCurationInputHash?: string;
+  shareSlug?: string;
   data: ResumeData;
   aiChanges: AIChange[];
 }

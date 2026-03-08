@@ -61,6 +61,7 @@ async function run() {
     jobDescription: '',
     jobLink: '',
     lastCurationInputHash: '',
+    shareSlug: '',
     data,
     aiChanges: [],
     createdAt: now,

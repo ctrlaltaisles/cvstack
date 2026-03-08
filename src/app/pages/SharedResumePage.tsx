@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
-import { getSharedResume } from '../../lib/api';
+import { useParams } from 'react-router';
+import { getSharedResume, getSharedResumeBySlug } from '../../lib/api';
 import type { ResumeData, ResumeVersion } from '../../lib/types';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -10,21 +10,24 @@ function formatDateRange(start: { month: number; year: number }, end: { month: n
 }
 
 export default function SharedResumePage() {
-  const { token = '' } = useParams();
-  const navigate = useNavigate();
+  const { token = '', shareSlug = '' } = useParams();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [version, setVersion] = useState<ResumeVersion | null>(null);
 
   useEffect(() => {
-    if (!token) {
+    const normalizedShareSlug = shareSlug.replace(/^\/+|\/+$/g, '');
+    if (!token && !normalizedShareSlug) {
       setError('Invalid share link');
       setIsLoading(false);
       return;
     }
     setIsLoading(true);
     setError('');
-    void getSharedResume(token)
+    const request = normalizedShareSlug
+      ? getSharedResumeBySlug(normalizedShareSlug)
+      : getSharedResume(token);
+    void request
       .then((response) => {
         setVersion(response.version as ResumeVersion);
       })
@@ -32,7 +35,7 @@ export default function SharedResumePage() {
         setError(err instanceof Error ? err.message : 'Unable to load shared resume');
       })
       .finally(() => setIsLoading(false));
-  }, [token]);
+  }, [shareSlug, token]);
 
   const data = useMemo(() => (version?.data ?? null) as ResumeData | null, [version]);
 

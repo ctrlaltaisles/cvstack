@@ -15,6 +15,7 @@ import type { ResumeData, ResumeVersionDTO } from './types';
 import { parseResumePdf, prewarmResumePdfParser, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
+import { buildResumeShareBaseName } from './shareNaming';
 import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, storeResumePdf } from './storage/pdfStorage';
 
 dotenv.config();
@@ -594,6 +595,7 @@ async function createResumeWithBaseVersion(params: {
     jobDescription: '',
     jobLink: '',
     lastCurationInputHash: '',
+    shareSlug: '',
     data: params.data,
     aiChanges: [],
     createdAt: now,
@@ -727,6 +729,7 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     jobDescription: '',
     jobLink: '',
     lastCurationInputHash: '',
+    shareSlug: '',
     data: parsed.data,
     aiChanges: [],
     createdAt: created.createdAt ?? now,
@@ -925,9 +928,28 @@ function versionToDto(v: VersionRecord): ResumeVersionDTO {
     jobDescription: v.jobDescription || undefined,
     jobLink: v.jobLink || undefined,
     lastCurationInputHash: v.lastCurationInputHash || undefined,
+    shareSlug: v.shareSlug || undefined,
     data: v.data,
     aiChanges: v.aiChanges as any,
   };
+}
+
+function buildUniqueShareSlug(state: { versions: VersionRecord[] }, version: VersionRecord): string {
+  const baseSlug = buildResumeShareBaseName(versionToDto(version));
+  const existingSlugs = new Set(
+    state.versions
+      .filter((candidate) => candidate.id !== version.id)
+      .map((candidate) => candidate.shareSlug.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  let candidate = baseSlug;
+  let suffix = 2;
+  while (existingSlugs.has(candidate.toLowerCase())) {
+    candidate = `${baseSlug}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 app.get('/api/resumes/:resumeId/versions', async (req, res) => {
@@ -968,8 +990,31 @@ app.post('/api/resumes/:resumeId/share', async (req, res) => {
     return;
   }
 
-  const token = signShareToken({ resumeId, versionId: version.id });
-  res.json({ token, resumeId, versionId: version.id });
+  const shareSlug = version.shareSlug || buildUniqueShareSlug(state, version);
+  if (shareSlug !== version.shareSlug) {
+    const updated = await patchVersionRecord({
+      versionId: version.id,
+      resumeId,
+      updatedAt: new Date().toISOString(),
+      content: {
+        versionName: version.versionName,
+        isBase: version.isBase,
+        isAI: version.isAI,
+        matchScore: version.matchScore,
+        jobTitle: version.jobTitle,
+        jobCompany: version.jobCompany,
+        jobDescription: version.jobDescription,
+        jobLink: version.jobLink,
+        lastCurationInputHash: version.lastCurationInputHash,
+        shareSlug,
+        data: version.data,
+        aiChanges: version.aiChanges,
+      },
+    });
+    if (updated) version.shareSlug = updated.shareSlug;
+  }
+
+  res.json({ shareSlug, sharePath: `/${shareSlug}`, resumeId, versionId: version.id });
 });
 
 app.get('/api/public/resume/:token', async (req, res) => {
@@ -984,6 +1029,35 @@ app.get('/api/public/resume/:token', async (req, res) => {
   const resume = state.resumes.find((r) => r.id === decoded.resumeId);
   const version = state.versions.find((v) => v.id === decoded.versionId && v.resumeId === decoded.resumeId);
   if (!resume || !version) {
+    res.status(404).json({ error: 'Shared resume not found' });
+    return;
+  }
+
+  res.json({
+    resume: {
+      id: resume.id,
+      title: resume.title,
+    },
+    version: versionToDto(version),
+  });
+});
+
+app.get('/api/public/resume/slug/:shareSlug', async (req, res) => {
+  const shareSlug = String(req.params.shareSlug ?? '').trim().toLowerCase();
+  if (!shareSlug) {
+    res.status(404).json({ error: 'Invalid share link' });
+    return;
+  }
+
+  const state = await readDb();
+  const version = state.versions.find((candidate) => candidate.shareSlug.trim().toLowerCase() === shareSlug);
+  if (!version) {
+    res.status(404).json({ error: 'Shared resume not found' });
+    return;
+  }
+
+  const resume = state.resumes.find((candidate) => candidate.id === version.resumeId);
+  if (!resume) {
     res.status(404).json({ error: 'Shared resume not found' });
     return;
   }
@@ -1021,6 +1095,7 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
     jobDescription: input.jobDescription ?? '',
     jobLink: input.jobLink ?? '',
     lastCurationInputHash: input.lastCurationInputHash ?? '',
+    shareSlug: input.shareSlug ?? '',
     data: (input.data as ResumeData) ?? defaultResumeData(),
     aiChanges: input.aiChanges ?? [],
     createdAt: now,
@@ -1040,6 +1115,7 @@ app.post('/api/resumes/:resumeId/versions', async (req, res) => {
       jobDescription: version.jobDescription,
       jobLink: version.jobLink,
       lastCurationInputHash: version.lastCurationInputHash,
+      shareSlug: version.shareSlug,
       data: version.data,
       aiChanges: version.aiChanges,
     },
@@ -1081,6 +1157,7 @@ app.patch('/api/resumes/:resumeId/versions/:versionId', async (req, res) => {
       jobDescription: input.jobDescription ?? existing.jobDescription,
       jobLink: input.jobLink ?? existing.jobLink,
       lastCurationInputHash: input.lastCurationInputHash ?? existing.lastCurationInputHash,
+      shareSlug: input.shareSlug ?? existing.shareSlug,
       data: (input.data as ResumeData) ?? existing.data,
       aiChanges: input.aiChanges ?? existing.aiChanges,
     },

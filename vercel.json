@@ -19,6 +19,10 @@
     {
       "source": "/shared/:token",
       "destination": "/index.html"
+    },
+    {
+      "source": "/:shareSlug",
+      "destination": "/index.html"
     }
   ]
 }

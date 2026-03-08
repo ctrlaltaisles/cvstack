@@ -47,6 +47,7 @@ export interface VersionRecord {
   jobDescription: string;
   jobLink: string;
   lastCurationInputHash: string;
+  shareSlug: string;
   data: ResumeData;
   aiChanges: unknown[];
   createdAt: string;
@@ -131,7 +132,26 @@ async function readJsonDb(): Promise<DbState> {
       users: Array.isArray(parsed.users) ? parsed.users as UserRecord[] : [],
       profiles: Array.isArray(parsed.profiles) ? parsed.profiles as ProfileRecord[] : [],
       resumes: Array.isArray(parsed.resumes) ? parsed.resumes as ResumeRecord[] : [],
-      versions: Array.isArray(parsed.versions) ? parsed.versions as VersionRecord[] : [],
+      versions: Array.isArray(parsed.versions)
+        ? (parsed.versions as Array<Partial<VersionRecord>>).map((version) => ({
+          id: String(version.id ?? ''),
+          resumeId: String(version.resumeId ?? ''),
+          versionName: String(version.versionName ?? 'Master Resume'),
+          isBase: Boolean(version.isBase),
+          isAI: Boolean(version.isAI),
+          matchScore: typeof version.matchScore === 'number' ? version.matchScore : null,
+          jobTitle: String(version.jobTitle ?? ''),
+          jobCompany: String(version.jobCompany ?? ''),
+          jobDescription: String(version.jobDescription ?? ''),
+          jobLink: String(version.jobLink ?? ''),
+          lastCurationInputHash: String(version.lastCurationInputHash ?? ''),
+          shareSlug: String(version.shareSlug ?? ''),
+          data: (version.data ?? {}) as ResumeData,
+          aiChanges: Array.isArray(version.aiChanges) ? version.aiChanges : [],
+          createdAt: String(version.createdAt ?? new Date(0).toISOString()),
+          updatedAt: String(version.updatedAt ?? new Date(0).toISOString()),
+        }))
+        : [],
     };
   } catch {
     return cloneDbState(EMPTY_DB_STATE);
@@ -177,6 +197,7 @@ function versionFromContent(resumeId: string, id: string, createdAt: Date, updat
     jobDescription: String(content?.jobDescription ?? ''),
     jobLink: String(content?.jobLink ?? ''),
     lastCurationInputHash: String(content?.lastCurationInputHash ?? ''),
+    shareSlug: String(content?.shareSlug ?? ''),
     data: (content?.data ?? {}) as ResumeData,
     aiChanges: (content?.aiChanges ?? []) as unknown[],
     createdAt: createdAt.toISOString(),
@@ -392,6 +413,7 @@ export async function writeDb(state: DbState): Promise<void> {
                 jobDescription: version.jobDescription,
                 jobLink: version.jobLink,
                 lastCurationInputHash: version.lastCurationInputHash,
+                shareSlug: version.shareSlug,
                 data: version.data,
                 aiChanges: version.aiChanges,
               },
@@ -450,6 +472,7 @@ function mapVersionContent(content: any) {
     jobDescription: String(content?.jobDescription ?? ''),
     jobLink: String(content?.jobLink ?? ''),
     lastCurationInputHash: String(content?.lastCurationInputHash ?? ''),
+    shareSlug: String(content?.shareSlug ?? ''),
     data: (content?.data ?? {}) as ResumeData,
     aiChanges: (content?.aiChanges ?? []) as unknown[],
   };
@@ -479,6 +502,7 @@ export async function createVersionRecord(params: {
         jobDescription: normalized.jobDescription,
         jobLink: normalized.jobLink,
         lastCurationInputHash: normalized.lastCurationInputHash,
+        shareSlug: normalized.shareSlug,
         data: normalized.data,
         aiChanges: normalized.aiChanges,
         createdAt: now,
@@ -551,6 +575,7 @@ export async function patchVersionRecord(params: {
       existing.jobDescription = normalized.jobDescription;
       existing.jobLink = normalized.jobLink;
       existing.lastCurationInputHash = normalized.lastCurationInputHash;
+      existing.shareSlug = normalized.shareSlug;
       existing.data = normalized.data;
       existing.aiChanges = normalized.aiChanges;
       existing.updatedAt = new Date(params.updatedAt).toISOString();
