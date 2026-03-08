@@ -82,7 +82,19 @@ export default function MethodSelection() {
     setIsParsingUpload(true);
     try {
       const created = await uploadResumePdf(file, 'Uploaded Resume');
-      navigate(`/workspace?resumeId=${created.resumeId}`);
+      if (created.resume && created.version) {
+        navigate(`/workspace?resumeId=${created.resumeId}`, {
+          state: {
+            uploadBootstrap: {
+              resumeId: created.resumeId,
+              resume: created.resume,
+              version: created.version,
+            },
+          },
+        });
+      } else {
+        navigate(`/workspace?resumeId=${created.resumeId}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {

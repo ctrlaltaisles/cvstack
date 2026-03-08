@@ -349,6 +349,23 @@ export interface SharedResumeResponse {
   version: unknown;
 }
 
+export interface ResumeUploadResponse {
+  resumeId: string;
+  versionId: string;
+  version?: unknown;
+  parsed: unknown;
+  extractedTextPreview: string;
+  warnings?: string[];
+  resume?: {
+    id: string;
+    title: string;
+    source: string;
+    file_name?: string;
+    created_at: string;
+    updated_at: string;
+  };
+}
+
 export function register(email: string, password: string, fullName = '') {
   return requestJson<AuthResponse>('/api/auth/register', { email, password, fullName });
 }
@@ -367,7 +384,7 @@ export function createResume(payload: { title?: string; source?: 'manual' | 'lin
 
 export function uploadResumePdf(file: File, title = 'Imported Resume') {
   const query = new URLSearchParams({ filename: file.name, title }).toString();
-  return request<{ resumeId: string; versionId: string; parsed: unknown; extractedTextPreview: string; warnings?: string[] }>(`/api/resumes/upload?${query}`, {
+  return request<ResumeUploadResponse>(`/api/resumes/upload?${query}`, {
     method: 'POST',
     auth: true,
     headers: { 'Content-Type': 'application/pdf' },

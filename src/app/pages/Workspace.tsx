@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AnimatePresence, motion } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
@@ -23,6 +23,23 @@ const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|pr
 const MIN_JD_CURATION_LENGTH = 40;
 const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
 const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Master Resume';
+
+type ResumeMetaModel = {
+  id: string;
+  title: string;
+  source: string;
+  file_name?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type UploadBootstrapState = {
+  uploadBootstrap?: {
+    resumeId: string;
+    resume: ResumeMetaModel;
+    version: unknown;
+  };
+};
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -2470,6 +2487,7 @@ function BaseResumeFileModal({
 
 export default function Workspace() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { requireAuth } = useAuthGate();
   const [searchParams] = useSearchParams();
   const [resumeId, setResumeId] = useState<string>(searchParams.get('resumeId') ?? '');
@@ -2494,7 +2512,7 @@ export default function Workspace() {
   const [toast, setToast] = useState<{ visible: boolean; message: string; tone: 'success' | 'info' | 'error' }>({ visible: false, message: '', tone: 'success' });
   const [baseResumeModel, setBaseResumeModel] = useState<BaseResumeModel | null>(null);
   const [jdVariants, setJDVariants] = useState<JDVariantModel[]>([]);
-  const [resumeMeta, setResumeMeta] = useState<{ id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string } | null>(null);
+  const [resumeMeta, setResumeMeta] = useState<ResumeMetaModel | null>(null);
   const [jdTldrByVersion, setJdTldrByVersion] = useState<Record<string, { roleAsks: string; candidateNeeds: string; keyFocusAreas: string[] }>>({});
   const avatarRef = useRef<HTMLDivElement>(null);
   const currentUser = userStore.get();
@@ -2507,6 +2525,7 @@ export default function Workspace() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(initialExpanded));
   const localStoreKey = storageKeyForResume(resumeId);
   const isMobile = useIsMobile();
+  const uploadBootstrap = (location.state as UploadBootstrapState | null)?.uploadBootstrap;
 
   const handleSidebarVersionSelect = useCallback((versionId: string) => {
     setSelectedVersionId(versionId);
@@ -2550,24 +2569,35 @@ export default function Workspace() {
       setLoadError('');
       try {
         let targetResumeId = resumeId;
-        let loadedResumeMeta: { id: string; title: string; source: string; file_name?: string; created_at: string; updated_at: string } | null = null;
-        let response: Awaited<ReturnType<typeof listVersions>>;
+        let loadedResumeMeta: ResumeMetaModel | null = null;
+        let loadedVersionsRaw: unknown[] = [];
 
         if (targetResumeId) {
-          const [resumeResponse, versionsResponse] = await Promise.all([
-            getResume(targetResumeId).catch(() => null),
-            listVersions(targetResumeId),
-          ]);
-          response = versionsResponse;
-          if (resumeResponse?.resume) {
-            loadedResumeMeta = {
-              id: resumeResponse.resume.id,
-              title: resumeResponse.resume.title,
-              source: resumeResponse.resume.source,
-              file_name: resumeResponse.resume.fileName,
-              created_at: resumeResponse.resume.createdAt,
-              updated_at: resumeResponse.resume.updatedAt,
-            };
+          const canUseBootstrap = Boolean(
+            uploadBootstrap
+              && uploadBootstrap.resumeId === targetResumeId
+              && uploadBootstrap.resume
+              && uploadBootstrap.version,
+          );
+          if (canUseBootstrap) {
+            loadedResumeMeta = uploadBootstrap!.resume;
+            loadedVersionsRaw = [uploadBootstrap!.version];
+          } else {
+            const [resumeResponse, versionsResponse] = await Promise.all([
+              getResume(targetResumeId).catch(() => null),
+              listVersions(targetResumeId),
+            ]);
+            loadedVersionsRaw = versionsResponse.versions;
+            if (resumeResponse?.resume) {
+              loadedResumeMeta = {
+                id: resumeResponse.resume.id,
+                title: resumeResponse.resume.title,
+                source: resumeResponse.resume.source,
+                file_name: resumeResponse.resume.fileName,
+                created_at: resumeResponse.resume.createdAt,
+                updated_at: resumeResponse.resume.updatedAt,
+              };
+            }
           }
         } else {
           const resumeListResponse = await listResumes();
@@ -2577,7 +2607,7 @@ export default function Workspace() {
             return;
           }
           loadedResumeMeta = resumeListResponse.resumes.find((resume) => resume.id === targetResumeId) ?? null;
-          response = await listVersions(targetResumeId);
+          loadedVersionsRaw = (await listVersions(targetResumeId)).versions;
         }
 
         if (!targetResumeId) {
@@ -2586,7 +2616,7 @@ export default function Workspace() {
         }
         if (!resumeId) setResumeId(targetResumeId);
         setResumeMeta(loadedResumeMeta);
-        const loadedVersions = response.versions as ResumeVersion[];
+        const loadedVersions = loadedVersionsRaw as ResumeVersion[];
         if (!mounted) return;
         const localStore = loadLocalWorkspaceStore(storageKeyForResume(targetResumeId));
         const nextVersions = (loadedVersions.length === 0 ? INITIAL_VERSIONS : loadedVersions)
@@ -2637,7 +2667,7 @@ export default function Workspace() {
     return () => {
       mounted = false;
     };
-  }, [navigate, resumeId, syncLocalStore]);
+  }, [navigate, resumeId, syncLocalStore, uploadBootstrap]);
 
   useEffect(() => {
     activeVersionRef.current = (versions.find(v => v.id === selectedVersionId) || versions[0] || null);

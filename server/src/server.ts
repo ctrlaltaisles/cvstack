@@ -41,6 +41,8 @@ const UPLOAD_CLEANUP_INTERVAL_MS = Number(process.env.UPLOAD_CLEANUP_INTERVAL_MS
 // Temporarily hard-disable cleanup scheduler to prevent Prisma transaction conflicts in production.
 const ENABLE_UPLOAD_CLEANUP = false;
 const MIN_OPTIMIZE_BYTES = 200 * 1024;
+const ENABLE_UPLOAD_PDF_OPTIMIZATION = String(process.env.ENABLE_UPLOAD_PDF_OPTIMIZATION ?? '0') === '1';
+const ENABLE_GHOSTSCRIPT_PDF_OPTIMIZATION = String(process.env.ENABLE_GHOSTSCRIPT_PDF_OPTIMIZATION ?? '0') === '1';
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 1024 * 1024);
 const SUPABASE_URL = String(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '').trim();
 const SUPABASE_AUTH_KEY = String(
@@ -322,7 +324,7 @@ async function tryCompressPdfWithCommand(params: {
       ? params.args.map((arg) => arg.replace('{input}', inputPath).replace('{output}', outputPath))
       : [...params.args, inputPath, outputPath];
     await execFileAsync(params.command, commandArgs, {
-      timeout: 30000,
+      timeout: 12000,
       maxBuffer: 2 * 1024 * 1024,
     });
     if (!fs.existsSync(outputPath)) {
@@ -338,6 +340,9 @@ async function tryCompressPdfWithCommand(params: {
 }
 
 async function optimizePdfBufferForStorage(inputBuffer: Buffer): Promise<CompressionResult> {
+  if (!ENABLE_UPLOAD_PDF_OPTIMIZATION) {
+    return { buffer: inputBuffer, method: 'none' };
+  }
   if (inputBuffer.length < MIN_OPTIMIZE_BYTES) {
     return { buffer: inputBuffer, method: 'none' };
   }
@@ -353,14 +358,16 @@ async function optimizePdfBufferForStorage(inputBuffer: Buffer): Promise<Compres
     candidates.push({ buffer: qpdfBuffer, method: 'qpdf' });
   }
 
-  const gsBuffer = await tryCompressPdfWithCommand({
-    command: 'gs',
-    args: ['-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4', '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dBATCH', '-dQUIET', '-sOutputFile={output}', '{input}'],
-    appendInputOutput: false,
-    inputBuffer,
-  });
-  if (gsBuffer) {
-    candidates.push({ buffer: gsBuffer, method: 'ghostscript' });
+  if (ENABLE_GHOSTSCRIPT_PDF_OPTIMIZATION) {
+    const gsBuffer = await tryCompressPdfWithCommand({
+      command: 'gs',
+      args: ['-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4', '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dBATCH', '-dQUIET', '-sOutputFile={output}', '{input}'],
+      appendInputOutput: false,
+      inputBuffer,
+    });
+    if (gsBuffer) {
+      candidates.push({ buffer: gsBuffer, method: 'ghostscript' });
+    }
   }
 
   let best = candidates[0];
@@ -608,7 +615,7 @@ async function createResumeWithBaseVersion(params: {
     db.versions.push(version);
   });
 
-  return { resumeId, versionId };
+  return { resumeId, versionId, createdAt: now, updatedAt: now };
 }
 
 async function parseUploadedResumeBuffer(buffer: Buffer) {
@@ -661,7 +668,7 @@ app.post('/api/resumes', async (req, res) => {
   const data = (req.body?.data as ResumeData | undefined) ?? defaultResumeData(email);
 
   const created = await createResumeWithBaseVersion({ userId: resolveRequestUserId(req), title, source, data });
-  res.status(201).json(created);
+  res.status(201).json({ resumeId: created.resumeId, versionId: created.versionId });
 });
 
 app.post('/api/resumes/parse', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
@@ -684,11 +691,13 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     return;
   }
 
-  const parsed = await parseUploadOrRespond(buffer, res, fileName);
+  const [parsed, storedFile] = await Promise.all([
+    parseUploadOrRespond(buffer, res, fileName),
+    persistUploadedPdf(fileName, buffer),
+  ]);
   if (!parsed) {
     return;
   }
-  const storedFile = await persistUploadedPdf(fileName, buffer);
   if (storedFile.method !== 'none') {
     console.log(`[uploads] optimized ${fileName} via ${storedFile.method} (${buffer.length} -> ${storedFile.storedBytes} bytes)`);
   }
@@ -703,12 +712,40 @@ app.post('/api/resumes/upload', express.raw({ type: 'application/pdf', limit: '1
     parsed: parsed.parsedData,
     data: parsed.data,
   });
+  const now = new Date().toISOString();
+  const baseVersionDto = versionToDto({
+    id: created.versionId,
+    resumeId: created.resumeId,
+    versionName: 'Master Resume',
+    isBase: true,
+    isAI: false,
+    matchScore: null,
+    jobTitle: '',
+    jobCompany: '',
+    jobDescription: '',
+    jobLink: '',
+    lastCurationInputHash: '',
+    data: parsed.data,
+    aiChanges: [],
+    createdAt: created.createdAt ?? now,
+    updatedAt: created.updatedAt ?? now,
+  });
 
   res.status(201).json({
-    ...created,
+    resumeId: created.resumeId,
+    versionId: created.versionId,
+    version: baseVersionDto,
     parsed: parsed.parsedData,
     warnings: parsed.warnings,
     extractedTextPreview: parsed.extractedText.slice(0, 1200),
+    resume: {
+      id: created.resumeId,
+      title,
+      source: 'upload',
+      file_name: fileName,
+      created_at: created.createdAt ?? now,
+      updated_at: created.updatedAt ?? now,
+    },
     storage: {
       provider: storedFile.provider,
       bucket: storedFile.bucket ?? null,
@@ -779,12 +816,13 @@ app.post('/api/resumes/:resumeId/upload', express.raw({ type: 'application/pdf',
     return;
   }
 
-  const parsed = await parseUploadOrRespond(buffer, res, fileName);
+  const [parsed, storedFile] = await Promise.all([
+    parseUploadOrRespond(buffer, res, fileName),
+    persistUploadedPdf(fileName, buffer),
+  ]);
   if (!parsed) {
     return;
   }
-
-  const storedFile = await persistUploadedPdf(fileName, buffer);
   if (storedFile.method !== 'none') {
     console.log(`[uploads] optimized ${fileName} via ${storedFile.method} (${buffer.length} -> ${storedFile.storedBytes} bytes)`);
   }
