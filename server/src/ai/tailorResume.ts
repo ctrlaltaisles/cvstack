@@ -763,18 +763,41 @@ function enhanceDesignerOutputFromSource(
 ): CurateResumeOutput {
   const aboutCandidate = buildDesignerAboutCandidate(resumeData);
 
-  const experience = output.improved.experience.map((exp) => {
-    const sourceExp = resumeData.workExperience.find((item) => item.id === exp.expId);
-    if (!sourceExp) return exp;
+  const improvedById = new Map(output.improved.experience.map((exp) => [exp.expId, exp]));
+  const experience: CurateResumeOutput['improved']['experience'] = [];
+
+  for (const sourceExp of resumeData.workExperience) {
+    const existing = improvedById.get(sourceExp.id);
     const rewriteBullets = buildDesignerSourceRewriteBullets(sourceExp);
-    if (rewriteBullets.length === 0) return exp;
+    if (!existing) {
+      if (rewriteBullets.length > 0) {
+        experience.push({
+          expId: sourceExp.id,
+          role: sourceExp.role,
+          company: sourceExp.company,
+          bullets: rewriteBullets,
+        });
+      }
+      continue;
+    }
+    if (rewriteBullets.length === 0) {
+      experience.push(existing);
+      continue;
+    }
     const rewriteCoverage = rewriteBullets.length / Math.max(1, sourceExp.bullets.length);
     if (shouldForceDesignerRoleRewrite(sourceExp.company) || rewriteCoverage >= 0.6) {
-      return { ...exp, bullets: rewriteBullets };
+      experience.push({ ...existing, bullets: rewriteBullets });
+      continue;
     }
-    const mergedBullets = uniqueStrings([...rewriteBullets, ...exp.bullets]).slice(0, 7);
-    return { ...exp, bullets: mergedBullets };
-  });
+    const mergedBullets = uniqueStrings([...rewriteBullets, ...existing.bullets]).slice(0, 7);
+    experience.push({ ...existing, bullets: mergedBullets });
+  }
+
+  for (const exp of output.improved.experience) {
+    if (!experience.some((item) => item.expId === exp.expId)) {
+      experience.push(exp);
+    }
+  }
 
   return {
     ...output,

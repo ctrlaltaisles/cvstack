@@ -121,7 +121,7 @@ function scoreOutput(result) {
     { id: 'stuck_systems', pattern: /(digital publication|editorial wayfinding).*(systems|frameworks|spatial narratives|audience experiences)/i },
     { id: 'tribal_research', pattern: /(user interviews|usability testing).*(websites|mobile apps|friction points)/i },
     { id: 'tribal_ia', pattern: /(user journeys|user flows|wireframes|information architecture).*(complex digital experiences|content structure|simplify)/i },
-    { id: 'tribal_recommendations', pattern: /(heuristics|iterative usability testing|research insights).*(ux recommendations|design recommendations)/i },
+    { id: 'tribal_recommendations', pattern: /((ux|design) recommendations).*(heuristics|iterative usability testing|research insights)|(heuristics|iterative usability testing|research insights).*((ux|design) recommendations)/i },
     { id: 'tribal_culture', pattern: /(knowledge-sharing|ux methods).*(human-centered design|research)/i },
   ];
   const passed = checks.filter((check) => check.pattern.test(fullText));
