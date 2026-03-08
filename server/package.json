@@ -11,7 +11,8 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "db:migrate-json": "ts-node-dev --transpile-only src/migrateJsonToPostgres.ts",
     "seed": "ts-node-dev --transpile-only src/seed.ts",
-    "test": "npm run build && mkdir -p dist/src/resumeParse && cp -R src/resumeParse/__fixtures__ dist/src/resumeParse/ && cp -R src/resumeParse/__snapshots__ dist/src/resumeParse/ && node --test dist/src/resumeParse/parseResumePdf.test.js"
+    "test": "npm run build && mkdir -p dist/src/resumeParse && cp -R src/resumeParse/__fixtures__ dist/src/resumeParse/ && cp -R src/resumeParse/__snapshots__ dist/src/resumeParse/ && node --test dist/src/resumeParse/parseResumePdf.test.js dist/src/ai/tailorResume.test.js",
+    "stress:designer": "npm run build && node scripts/stressDesignerScenario.js"
   },
   "keywords": [],
   "author": "",

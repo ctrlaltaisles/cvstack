@@ -45,9 +45,8 @@ export default function SharedResumePage() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-[960px] mx-auto py-14 px-12 pb-32">
-        <div className="flex items-start gap-5 mb-5">
-          <div className="w-14 h-14 rounded-full bg-[#E8E8E8] shrink-0 flex items-center justify-center text-[#9B9B9B] select-none" style={{ fontSize: 13 }}>CV</div>
-          <div className="flex-1 min-w-0 space-y-1 pt-1">
+        <div className="mb-5">
+          <div className="min-w-0 space-y-1">
             <p className="text-[#1A1A1A] text-[22px] leading-tight">{data.name}</p>
             <p className="text-base text-[#6B6B6B] leading-tight">{data.title}</p>
           </div>

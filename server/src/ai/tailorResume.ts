@@ -146,6 +146,7 @@ const FINAL_WRITING_SYSTEM_PROMPT = [
   'Source of truth is resume bullets/projectNotes and transformed claims.',
   'JD is prioritization only. No JD copying.',
   'No fabricated tools/metrics/systems/outcomes.',
+  'For designer and product roles, emphasize product thinking, cross-functional collaboration, systems/tooling/craft, and measurable iteration when supported by evidence.',
   'If metrics are missing, ask concise questions.',
   'Return valid JSON only.',
 ].join(' ');
@@ -206,6 +207,13 @@ const CAPABILITY_MARKER_RULES: CapabilityMarkerRule[] = [
   { id: 'journey_mapping', label: 'journey mapping', pattern: /\b(journey|touchpoints?|90-day milestone|experience journey|drop-off risks?)\b/i, modes: ['pm', 'product', 'designer', 'ops'] },
   { id: 'experimentation', label: 'pilot/experimentation', pattern: /\b(pilot|tested|post-launch|experiment|validation)\b/i, modes: ['pm', 'product', 'designer', 'analyst', 'ops'] },
   { id: 'analytics_interpretation', label: 'analytics interpretation', pattern: /\b(heatmap|analytics|conversion points?|time-on-page|engagement)\b/i, modes: ['pm', 'product', 'designer', 'analyst'] },
+  { id: 'product_strategy', label: 'product strategy and prioritization', pattern: /\b(product direction|product strategy|prioriti[sz](e|ed|ing|ation)|trade[- ]offs?|roadmap|ambiguity|decision[- ]making|0\s*(?:->|→|to)\s*1|from scratch|greenfield)\b/i, modes: ['product', 'designer', 'pm', 'strategy'] },
+  { id: 'engineering_collaboration', label: 'engineering and PM collaboration', pattern: /\b(engineer(?:s|ing)?|developer(?:s)?|product managers?|pms?\b|research(?:ers)?|worked closely with stakeholders?|cross[- ]functional team)\b/i, modes: ['designer', 'product', 'pm', 'dev'] },
+  { id: 'prototyping_craft', label: 'prototyping and visual craft', pattern: /\b(prototyp(e|ed|ing|es)|high[- ]fidelity|interaction design|visual design|typography|layout|wireframes?|motion design|origami|composition)\b/i, modes: ['designer', 'product'] },
+  { id: 'systems_tooling', label: 'systems thinking and tooling', pattern: /\b(platform|system|tooling|plugin|figma plugin|design system|components?|variables|auto layout|html\/css|html|css|react|front[- ]end|web app|internal tool)\b/i, modes: ['designer', 'product', 'dev'] },
+  { id: 'iteration_metrics', label: 'iteration and measurable impact', pattern: /\b(retention|conversion|engagement|search time|feedback time|csat|nps|usability testing|user research|surveys?|participants?|a\/b testing|ab testing|went live|launched|shipped)\b/i, modes: ['designer', 'product', 'analyst'] },
+  { id: 'error_recovery_design', label: 'error recovery and content systems', pattern: /\b(error messages?|recover faster|recovery flows?|content language|reduce[d]? churn|uniform content)\b/i, modes: ['designer', 'product'] },
+  { id: 'ai_emerging_tools', label: 'AI and emerging tools exploration', pattern: /\b(ai|artificial intelligence|emerging tools?)\b/i, modes: ['designer', 'product', 'dev'] },
   { id: 'scenario_modeling', label: 'scenario modeling', pattern: /\b(headcount planning|hiring velocity|growth trajectories?|scenario|cost implications?)\b/i, modes: ['pm', 'product', 'analyst', 'strategy', 'ops'] },
   { id: 'cadence_reporting', label: 'executive reporting cadence', pattern: /\b(recurring reports?|monthly reviews?|headcount dashboards?|cost visibility|time-to-hire|offer acceptance)\b/i, modes: ['pm', 'analyst', 'ops', 'strategy'] },
   { id: 'delivery_execution', label: 'delivery execution and schedule control', pattern: /\b(launch(ed)? in half|50% of (the )?planned timeline|behind schedule|deliverables?|timeline|schedule)\b/i, modes: ['pm', 'ops', 'strategy', 'product'] },
@@ -277,7 +285,7 @@ function hasMetric(text: string): boolean {
 }
 
 function hasScopeSignal(text: string): boolean {
-  return /\b(across|end-to-end|multi|global|portfolio|org|organization|team|squad|cross-functional|stakeholder|production|users?|customers?|client|enterprise|platform|roadmap|launch)\b/i.test(text);
+  return /\b(across|end-to-end|multi|global|portfolio|org|organization|team|squad|cross-functional|stakeholder|production|users?|customers?|client|enterprise|platform|roadmap|launch|surface|workflow|verticals?|0\s*(?:->|→|to)\s*1)\b/i.test(text);
 }
 
 function hasOwnershipSignal(text: string): boolean {
@@ -285,7 +293,7 @@ function hasOwnershipSignal(text: string): boolean {
 }
 
 function hasToolSignal(text: string): boolean {
-  return /\b(figma|react|typescript|python|sql|aws|gcp|azure|tableau|power bi|jira|notion|excel|ga4|google analytics|mixpanel|amplitude|kibana|snowflake|spark|node|next\.js|docker|kubernetes)\b/i.test(text);
+  return /\b(figma|origami|plugin|auto layout|variables|components?|react|typescript|python|sql|aws|gcp|azure|tableau|power bi|jira|notion|excel|ga4|google analytics|mixpanel|amplitude|kibana|snowflake|spark|node|next\.js|docker|kubernetes|html|css|front[- ]end)\b/i.test(text);
 }
 
 function hasOutcomeSignal(text: string): boolean {
@@ -489,6 +497,63 @@ function evaluateStrategicThemeCoverage(
   };
 }
 
+type DesignerRewriteDimension =
+  | 'product_thinking'
+  | 'collaboration'
+  | 'systems_tooling_craft'
+  | 'impact_iteration';
+
+const DESIGNER_REWRITE_DIMENSION_RULES: Array<{ dimension: DesignerRewriteDimension; pattern: RegExp }> = [
+  { dimension: 'product_thinking', pattern: /\b(product direction|product strategy|product problems?|prioriti[sz]|trade[- ]off|ambiguity|define(d|ning)|problem framing|information architecture|workflow|complex systems?|0\s*(?:->|→|to)\s*1|from scratch)\b/i },
+  { dimension: 'collaboration', pattern: /\b(engineer(?:s|ing)?|developer(?:s)?|product management|product managers?|pms?\b|research(?:ers)?|cross-functional|stakeholder)\b/i },
+  { dimension: 'systems_tooling_craft', pattern: /\b(system|platform|tooling|plugin|design system|components?|variables|auto layout|html|css|react|prototype|high[- ]fidelity|interaction design|visual craft|typography|layout|origami|front[- ]end)\b/i },
+  { dimension: 'impact_iteration', pattern: /\b(iterat|feedback|user research|usability|a\/b|experiment|metrics?|retention|conversion|engagement|search time|csat|nps|reduced|increased|launched|shipped|went live|feedback cycles?)\b/i },
+];
+
+function evaluateDesignerRewriteCoverage(
+  improved: CurateResumeOutput['improved'],
+): {
+  coverageRatio: number;
+  aboutDimensions: DesignerRewriteDimension[];
+  missingByExp: Array<{ expId: string; role: string; company: string; missingDimensions: DesignerRewriteDimension[] }>;
+} {
+  const detectDimensions = (text: string): DesignerRewriteDimension[] => DESIGNER_REWRITE_DIMENSION_RULES
+    .filter((rule) => rule.pattern.test(text))
+    .map((rule) => rule.dimension);
+
+  const aboutDimensions = detectDimensions(improved.about ?? '');
+  const eligible = improved.experience.filter((exp) => exp.bullets.some((bullet) => bullet.trim()));
+  if (eligible.length === 0) {
+    return { coverageRatio: 0, aboutDimensions, missingByExp: [] };
+  }
+
+  let covered = 0;
+  const missingByExp: Array<{ expId: string; role: string; company: string; missingDimensions: DesignerRewriteDimension[] }> = [];
+
+  for (const exp of eligible) {
+    const dimensions = detectDimensions(exp.bullets.join(' '));
+    if (dimensions.length >= 2) {
+      covered += 1;
+      continue;
+    }
+    const missingDimensions = DESIGNER_REWRITE_DIMENSION_RULES
+      .map((rule) => rule.dimension)
+      .filter((dimension) => !dimensions.includes(dimension));
+    missingByExp.push({
+      expId: exp.expId,
+      role: exp.role,
+      company: exp.company,
+      missingDimensions,
+    });
+  }
+
+  return {
+    coverageRatio: covered / eligible.length,
+    aboutDimensions,
+    missingByExp,
+  };
+}
+
 function evaluateNotesDrivenBulletLift(
   resumeData: ResumeData,
   improved: CurateResumeOutput['improved'],
@@ -673,9 +738,12 @@ const MODE_SIGNAL_CATALOG: Record<TargetRoleMode, Array<{ signal: string; capabi
     { signal: 'Cross-functional prioritization', capabilityIds: ['cross_functional_facilitation', 'scenario_modeling'], jdHints: ['prioritization', 'tradeoff', 'alignment', 'roadmap'] },
   ],
   designer: [
-    { signal: 'Journey and flow mapping', capabilityIds: ['journey_mapping', 'workflow_architecture'], jdHints: ['journey', 'flow', 'experience'] },
-    { signal: 'Feedback-led iteration', capabilityIds: ['discovery_interviews', 'theme_synthesis', 'experimentation'], jdHints: ['feedback', 'testing', 'iteration'] },
-    { signal: 'Usability and clarity improvements', capabilityIds: ['decision_frameworks', 'analytics_interpretation'], jdHints: ['usability', 'clarity', 'engagement'] },
+    { signal: 'Product thinking and ambiguous problem framing', capabilityIds: ['product_strategy', 'workflow_architecture', 'journey_mapping'], jdHints: ['product direction', 'strategy', 'ambiguity', 'problem', 'goals'] },
+    { signal: 'Cross-functional product collaboration', capabilityIds: ['engineering_collaboration', 'cross_functional_facilitation', 'product_strategy'], jdHints: ['engineering', 'product management', 'research', 'cross-functional'] },
+    { signal: 'Prototyping and interaction craft', capabilityIds: ['prototyping_craft', 'journey_mapping', 'experimentation'], jdHints: ['prototype', 'high-fidelity', 'interaction design', 'visual craft'] },
+    { signal: 'Systems thinking and tooling depth', capabilityIds: ['systems_tooling', 'workflow_architecture', 'decision_frameworks'], jdHints: ['design systems', 'dev tools', 'html/css', 'components', 'variables', 'tools'] },
+    { signal: 'User research, iteration, and measurable impact', capabilityIds: ['discovery_interviews', 'theme_synthesis', 'iteration_metrics', 'analytics_interpretation', 'experimentation', 'error_recovery_design'], jdHints: ['research', 'iteration', 'metrics', 'quality', 'ship'] },
+    { signal: 'AI and emerging-tools exploration', capabilityIds: ['ai_emerging_tools', 'systems_tooling', 'experimentation'], jdHints: ['ai', 'emerging tools', 'creativity', 'collaboration'] },
   ],
   dev: [
     { signal: 'Implementation planning and dependencies', capabilityIds: ['requirements_modeling', 'workflow_architecture'], jdHints: ['requirements', 'implementation', 'dependencies'] },
@@ -1031,6 +1099,48 @@ function claimForCapability(item: CapabilityInventoryItem, mode: TargetRoleMode)
         claim: 'Reviewed engagement and heatmap analytics to reposition careers-page content and strengthen conversion signals.',
         mechanism: 'heatmap + engagement analysis',
         impact: 'improved page performance and inbound quality',
+      };
+    case 'product_strategy':
+      return {
+        claim: 'Framed ambiguous design problems as product opportunities, clarifying priorities, trade-offs, and success criteria before execution.',
+        mechanism: 'product framing + prioritization',
+        impact: 'clearer decision-making and stronger feature direction',
+      };
+    case 'engineering_collaboration':
+      return {
+        claim: 'Partnered closely with engineers, PMs, and adjacent stakeholders to turn design intent into shippable product decisions.',
+        mechanism: 'cross-functional product collaboration',
+        impact: 'faster alignment between user needs, technical constraints, and delivery',
+      };
+    case 'prototyping_craft':
+      return {
+        claim: 'Used prototyping and interaction craft to explore nuanced flows, refine visual hierarchy, and communicate decisions with clarity.',
+        mechanism: 'prototyping + interaction craft',
+        impact: 'higher-confidence design iteration and clearer user flows',
+      };
+    case 'systems_tooling':
+      return {
+        claim: 'Applied systems thinking and tooling fluency across design and front-end workflows, including reusable patterns, plugins, or product tooling where supported.',
+        mechanism: 'systems thinking + tooling',
+        impact: 'more scalable design execution and faster team workflows',
+      };
+    case 'iteration_metrics':
+      return {
+        claim: 'Closed the loop between research, feedback, and metrics to iterate on product experience with measurable outcomes.',
+        mechanism: 'feedback loops + metrics',
+        impact: 'faster learning cycles and stronger user outcomes',
+      };
+    case 'error_recovery_design':
+      return {
+        claim: 'Redesigned failure and recovery states to improve clarity, consistency, and user confidence during error-prone flows.',
+        mechanism: 'error recovery system design',
+        impact: 'faster recovery and lower user frustration',
+      };
+    case 'ai_emerging_tools':
+      return {
+        claim: 'Explored AI and emerging tools to uncover new workflows for creative or collaborative product experiences.',
+        mechanism: 'AI workflow exploration',
+        impact: 'new product patterns for speed and creativity',
       };
     case 'scenario_modeling':
       return {
@@ -1421,6 +1531,9 @@ export function extractJDKeywords(jdText: string, targetRole?: string): string[]
     'product strategy', 'roadmap', 'stakeholder management', 'cross-functional', 'user research', 'design systems', 'accessibility',
     'a/b testing', 'experimentation', 'analytics', 'sql', 'python', 'react', 'typescript', 'frontend', 'backend', 'api', 'scalability',
     'performance', 'ownership', 'leadership', 'communication', 'execution', 'delivery', 'metrics', 'kpi', 'conversion', 'retention',
+    'product direction', 'decision-making', 'prototyping', 'prototype', 'high-fidelity', 'interaction design', 'visual craft',
+    'systems', 'quality', 'craft', 'ai', 'emerging tools', 'html/css', 'origami', 'components', 'variables', 'ambiguity', 'product designer',
+    'dev tools', 'collaboration',
   ];
   const text = `${jdText || ''} ${targetRole || ''}`.toLowerCase();
   const found = seed.filter((keyword) => text.includes(keyword.toLowerCase()));
@@ -1888,8 +2001,15 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
   const notesDrivenLift = evaluateNotesDrivenBulletLift(input.resumeData, output.improved);
   const notesLiftPass = !notesDrivenLift.hasEligibleRoles || notesDrivenLift.deficits.length === 0;
   const grounding = evaluateGroundingViolations(input.resumeData, output.improved, input.jdText ?? '');
+  const designerCoverage = targetRoleMode === 'designer' ? evaluateDesignerRewriteCoverage(output.improved) : null;
+  const designerPass = !designerCoverage
+    || (
+      designerCoverage.coverageRatio >= 0.7
+      && designerCoverage.aboutDimensions.length >= 2
+    );
+  const minImpactScore = targetRoleMode === 'designer' ? 0.3 : 0.45;
 
-  const passed = !lowValue.lowValue && !hallucination.suspicious && !grounding.suspicious && impactScore >= 0.45 && fillerImproved && projectNotesPass && strategicThemePass && capabilityPass && !mirrorRisk.risky && notesLiftPass;
+  const passed = !lowValue.lowValue && !hallucination.suspicious && !grounding.suspicious && impactScore >= minImpactScore && fillerImproved && projectNotesPass && strategicThemePass && capabilityPass && !mirrorRisk.risky && notesLiftPass && designerPass;
   const notes = [
     lowValue.notes,
     hallucination.suspicious ? hallucination.details.join(' | ') : 'No fabricated metric pattern detected.',
@@ -1908,6 +2028,10 @@ export function evaluateCurateQuality(input: { resumeData: ResumeData; targetRol
       ? `Notes-driven new-bullet lift=${notesDrivenLift.passedRoles}/${notesDrivenLift.totalEligibleRoles} eligible roles met >=2 new bullets.`
       : 'No >=100-word project notes roles requiring forced new-bullet lift.',
     grounding.suspicious ? `Grounding violations detected: ${grounding.details.join(' | ')}` : 'No JD-leakage grounding violations detected.',
+    designerCoverage
+      ? `Designer rewrite coverage=${Math.round(designerCoverage.coverageRatio * 100)}%; about dimensions=${designerCoverage.aboutDimensions.join(', ') || 'none'}.`
+      : 'Designer rewrite coverage not applicable.',
+    `Impact threshold for pass=${minImpactScore}.`,
   ].join(' ');
 
   return {
@@ -2426,6 +2550,16 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
         'Each bullet should include mechanism + action + impact signal, not only generic process language.',
         'If variant project-note sources exist, preserve at least 2 mechanism signals from those variant sources in final bullets.',
         'For pm mode, prioritize explicit execution framing: program artifacts, dependency/schedule control, risk or SLA mitigation, reporting cadence, and commercial controls when supported by evidence.',
+        ...(layer2.targetRoleMode === 'designer'
+          ? [
+            'Designer Level-3 rewrite: emphasize product thinking, not just design execution tasks.',
+            'Show collaboration with engineers, PMs, researchers, or adjacent stakeholders when supported by evidence.',
+            'Surface systems thinking, tooling, prototyping, design-dev fluency, or craft signals when supported by evidence.',
+            'Anchor bullets in user impact, iteration loops, and metrics when supported by evidence.',
+            'Avoid generic UX wording like "improved UX" unless you also specify the problem, mechanism, or measurable outcome.',
+            'For the About section, position the candidate as a product designer who can reason about complex systems and ship high-impact product experiences.',
+          ]
+          : []),
       ],
       output_schema: {
         improved: {

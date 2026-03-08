@@ -73,6 +73,7 @@ export type EducationItem = {
 
 export type AwardItem = {
   name: string;
+  organization: string | null;
   year: number | null;
 };
 
@@ -2663,6 +2664,25 @@ function parseAwardsFromSections(lines: ExtractedLine[], sections: DetectedSecti
     }
     if (year == null) continue;
 
+    const organizationSources = [
+      text.match(/\bissued\s+by\b\s*[:\-]?\s*(.+)$/i)?.[1] ?? '',
+      fragments[i + 1] && /^\s*(?:issued\s+by|by)\b/i.test(fragments[i + 1])
+        ? fragments[i + 1].replace(/^\s*(?:issued\s+by|by)\b\s*[:\-]?\s*/i, '')
+        : '',
+      fragments[i + 2] && /^\s*(?:issued\s+by|by)\b/i.test(fragments[i + 2])
+        ? fragments[i + 2].replace(/^\s*(?:issued\s+by|by)\b\s*[:\-]?\s*/i, '')
+        : '',
+    ]
+      .map((value) => normalizeOutputText(
+        value
+          .replace(/\b(19|20)\d{2}\b/g, '')
+          .replace(/\s*[↗→]\s*$/g, '')
+          .replace(/\s*,\s*$/g, '')
+          .trim(),
+      ))
+      .filter(Boolean);
+    const organization = organizationSources[0] || null;
+
     const name = normalizeOutputText(
       text
         .replace(/\bissued\s+by\b.*$/i, '')
@@ -2672,13 +2692,17 @@ function parseAwardsFromSections(lines: ExtractedLine[], sections: DetectedSecti
         .trim(),
     );
     if (name.length < 4) continue;
-    entries.push({ name, year });
+    entries.push({ name, organization, year });
   }
 
-  const deduped = unique(entries.map((item) => `${item.name.toLowerCase()}::${item.year ?? 0}`))
+  const deduped = unique(entries.map((item) => `${item.name.toLowerCase()}::${item.organization?.toLowerCase() ?? ''}::${item.year ?? 0}`))
     .map((key) => {
-      const [name, yearRaw] = key.split('::');
-      const source = entries.find((item) => item.name.toLowerCase() === name && String(item.year ?? 0) === yearRaw);
+      const [name, orgRaw, yearRaw] = key.split('::');
+      const source = entries.find((item) =>
+        item.name.toLowerCase() === name
+        && (item.organization?.toLowerCase() ?? '') === orgRaw
+        && String(item.year ?? 0) === yearRaw,
+      );
       return source ?? null;
     })
     .filter((item): item is AwardItem => Boolean(item));
@@ -3591,7 +3615,11 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       location: edu.location ? normalizeOutputText(edu.location) : null,
     })),
     awards: data.awards
-      .map((award) => ({ name: normalizeOutputText(award.name), year: award.year }))
+      .map((award) => ({
+        name: normalizeOutputText(award.name),
+        organization: award.organization ? normalizeOutputText(award.organization) : null,
+        year: award.year,
+      }))
       .filter((award) => award.name.length > 0)
       .slice(0, 8),
     skills: unique(data.skills.map((s) => normalizeOutputText(s)).filter(Boolean)).slice(0, 8),
@@ -3660,6 +3688,7 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
   data.awards = parsed.awards.map((award, idx) => ({
     id: `award-${idx + 1}`,
     name: award.name,
+    organization: award.organization ?? '',
     year: award.year ?? currentYear,
   }));
 

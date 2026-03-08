@@ -341,7 +341,10 @@ function normalizeResumeDataShape(data: ResumeData): ResumeData {
   return {
     ...data,
     workExperience: (data.workExperience ?? []).map(normalizeWorkExperienceEntry),
-    awards: data.awards ?? [],
+    awards: (data.awards ?? []).map((award) => ({
+      ...award,
+      organization: award.organization ?? '',
+    })),
   };
 }
 function buildTextResume(data: ResumeData): string {
@@ -353,6 +356,7 @@ function buildTextResume(data: ResumeData): string {
     lines.push('', 'AWARDS');
     (data.awards ?? []).forEach((award) => {
       lines.push(`${award.name} (${award.year})`);
+      if (award.organization?.trim()) lines.push(award.organization.trim());
     });
   }
   lines.push('', 'SKILLS', (data.skills ?? []).join(', '));
@@ -463,7 +467,14 @@ function buildWordDocument(data: ResumeData): Document {
         rows: [new TableRow({
           children: [
             new TableCell({ width: { size: 23, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: [new Paragraph({ children: [new TextRun({ text: String(award.year), size: 20, color: '9B9B9B' })], spacing: { after: 120 } })] }),
-            new TableCell({ width: { size: 77, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: [bodyText(award.name || '', { color: '1A1A1A', after: 80 })] }),
+            new TableCell({
+              width: { size: 77, type: WidthType.PERCENTAGE },
+              borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+              children: [
+                bodyText(award.name || '', { color: '1A1A1A', after: award.organization?.trim() ? 40 : 80 }),
+                ...(award.organization?.trim() ? [bodyText(award.organization.trim(), { color: '666666', after: 80 })] : []),
+              ],
+            }),
           ],
         })],
       }));
@@ -663,7 +674,7 @@ function buildPdfDocument(data: ResumeData): jsPDF {
     data.awards.forEach((award) => {
       row(
         [String(award.year || NOW.getFullYear())],
-        [award.name || 'Award Name'],
+        [award.name || 'Award Name', ...(award.organization?.trim() ? [award.organization.trim()] : [])],
         [],
       );
     });
@@ -1927,6 +1938,7 @@ function AwardBlock({ award, onUpdateAward, onDeleteAward }: { award: Award; onU
       </div>
       <div className="flex-1 min-w-0">
         <InlineText value={award.name} onChange={(value) => onUpdateAward({ ...award, name: value })} className="text-sm text-[#1A1A1A] mb-0.5" placeholder="Award Name" />
+        <InlineText value={award.organization} onChange={(value) => onUpdateAward({ ...award, organization: value })} className="text-sm text-[#666666] mb-0.5" placeholder="Issuing Organization" />
         <button onClick={onDeleteAward} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 opacity-0 group-hover/award:opacity-100">Remove entry</button>
       </div>
     </div>
@@ -2107,7 +2119,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
           <div className="h-px bg-[#EFEFEF] mb-7" />
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Awards</p>
           <div className="space-y-6">{(data.awards ?? []).map(award => <AwardBlock key={award.id} award={award} onUpdateAward={u => update({ awards: data.awards.map(a => a.id === award.id ? u : a) })} onDeleteAward={() => update({ awards: data.awards.filter(a => a.id !== award.id) })} />)}</div>
-          {!isReviewLocked && <button onClick={() => update({ awards: [...(data.awards ?? []), { id: `award-${Date.now()}`, name: 'Award Name', year: NOW.getFullYear() }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Award</button>}
+          {!isReviewLocked && <button onClick={() => update({ awards: [...(data.awards ?? []), { id: `award-${Date.now()}`, name: 'Award Name', organization: 'Issuing Organization', year: NOW.getFullYear() }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Award</button>}
         </div>
         {/* Skills */}
         <div className={`resume-section ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasSkills}>
