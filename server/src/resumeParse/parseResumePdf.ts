@@ -10,6 +10,24 @@ import { extractTextFromPdfBuffer, isExtractionFailure } from '../parser';
 const execFileAsync = promisify(execFile);
 let pdfjsGetDocumentPromise: Promise<((input: unknown) => { promise: Promise<unknown> }) | null> | null = null;
 
+function ensurePdfJsGetDocumentPromise(): Promise<((input: unknown) => { promise: Promise<unknown> }) | null> {
+  if (!pdfjsGetDocumentPromise) {
+    pdfjsGetDocumentPromise = (async () => {
+      const pdfjsModule = await new Function('m', 'return import(m)')('pdfjs-dist/legacy/build/pdf.mjs');
+      return (pdfjsModule as { getDocument?: (input: unknown) => { promise: Promise<unknown> } }).getDocument ?? null;
+    })();
+  }
+  return pdfjsGetDocumentPromise;
+}
+
+export async function prewarmResumePdfParser(): Promise<void> {
+  try {
+    await ensurePdfJsGetDocumentPromise();
+  } catch {
+    // Warm-up is best-effort only.
+  }
+}
+
 export type ExtractedLine = {
   text: string;
   page: number;
@@ -125,7 +143,7 @@ const SECTION_KEYWORDS: Array<{ type: SectionType; patterns: RegExp[] }> = [
   { type: 'contact', patterns: [/^contact$/i] },
 ];
 
-const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|specialist|consultant|architect|developer|coach|instructor|trainer|assistant|researcher|technologist|strategist|producer|coordinator)\b/i;
+const TITLE_HINT = /\b(designer|manager|engineer|intern|analyst|lead|director|specialist|consultant|architect|developer|coach|instructor|trainer|assistant|researcher|technologist|strategist|producer|coordinator|ambassador)\b/i;
 const COMPANY_HINT = /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|university|college|institute|labs?)/i;
 const DEGREE_HINT = /\b(bachelor|master|phd|diploma|certificate|degree|b\.?a\.?|b\.?sc\.?|bsc|bs|bba|m\.?a\.?|m\.?sc\.?|msc|m\.?s\.?|mba|hons|gce|gcse|o[\s-]?level|a[\s-]?level|n[\s-]?level)\b/i;
 const SCHOOL_HINT = /(university|college|polytechnic|school|institute|academy)/i;
@@ -261,7 +279,13 @@ function cleanLineText(text: string): string {
 
 export function normalizeOutputText(text: string): string {
   return cleanLineText(text)
+    .replace(/([.!?])([A-Z])/g, '$1 $2')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b([A-Z]{2,})([a-z]{3,})\b/g, '$1 $2')
+    .replace(/\b([a-z]{3,}s)(to|for|with|from)\b/gi, '$1 $2')
     .replace(/\b([A-Za-z0-9]+)\s*-\s*([A-Za-z0-9]+)\b/g, '$1-$2')
+    .replace(/\b(he|she|we|they)(loves?|likes?|admires?|enjoys?|is|are)\b/gi, '$1 $2')
+    .replace(/\ba(crypto|digital|product|user|service|design)\b/gi, 'a $1')
     .replace(/\byofSingapore\b/gi, 'y of Singapore')
     .replace(/\byof([A-Z][a-z]+)/g, 'y of $1')
     .replace(/\bUniv\s*ersit\s*y\s*of\b/gi, 'University of')
@@ -376,19 +400,28 @@ function monthFromToken(token: string | undefined | null): number | null {
 
 function parseYear(value: string | undefined): number | null {
   if (!value) return null;
-  const m = value.match(/(19|20)\d{2}/);
+  const compact = value.replace(/\s+/g, '');
+  const m = compact.match(/(19|20)\d{2}/);
   return m ? Number(m[0]) : null;
 }
 
+function compactSpacedYearTokens(value: string): string {
+  return value.replace(/\b(\d)\s+(\d)\s+(\d)\s+(\d)\b/g, (_m, a: string, b: string, c: string, d: string) => {
+    const digits = `${a}${b}${c}${d}`;
+    return /^(19|20)\d{2}$/.test(digits) ? digits : `${a} ${b} ${c} ${d}`;
+  });
+}
+
 function parseSingleDateToken(token: string): MonthYear {
-  const t = token.trim();
+  const t = compactSpacedYearTokens(token.trim());
   const monthMatch = t.match(/\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b/i);
   const yearMatch = t.match(/(19|20)\d{2}/);
   return { month: monthFromToken(monthMatch?.[0] ?? null), year: yearMatch ? Number(yearMatch[0]) : null };
 }
 
 function parseDateRange(text: string): { start: MonthYear; end: MonthYear; isCurrent: boolean; hasAnyDate: boolean } {
-  const normalized = text
+  const normalized = compactSpacedYearTokens(text)
+    .replace(/§/g, ' ')
     .replace(/[–—]/g, '-')
     .replace(/\s+to\s+/gi, '-')
     // Strip leading day-of-month numbers so "22 February 2016" parses the same as "February 2016".
@@ -398,6 +431,34 @@ function parseDateRange(text: string): { start: MonthYear; end: MonthYear; isCur
 
   const present = /\b(present|current|now)\b/i.test(normalized);
   const yearTokens = normalized.match(/(19|20)\d{2}/g) ?? [];
+
+  // Strong month-to-month (or month-to-present) range parser.
+  const monthToMonth = normalized.match(
+    /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s*(\d{4})\s*-\s*(?:(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s*(\d{4})|(present|current|now))/i,
+  );
+  if (monthToMonth) {
+    return {
+      start: { month: monthFromToken(monthToMonth[1]), year: parseYear(monthToMonth[2]) },
+      end: monthToMonth[5]
+        ? { month: null, year: null }
+        : { month: monthFromToken(monthToMonth[3]), year: parseYear(monthToMonth[4]) },
+      isCurrent: Boolean(monthToMonth[5]),
+      hasAnyDate: true,
+    };
+  }
+
+  // Month-year to year range (e.g. "Nov 2022 - 2023").
+  const monthToYear = normalized.match(
+    /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s*(\d{4})\s*-\s*(\d{4})\b/i,
+  );
+  if (monthToYear) {
+    return {
+      start: { month: monthFromToken(monthToYear[1]), year: parseYear(monthToYear[2]) },
+      end: { month: null, year: parseYear(monthToYear[3]) },
+      isCurrent: false,
+      hasAnyDate: true,
+    };
+  }
 
   const monthYearRange = normalized.match(
     /(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)?\s*(\d{4})?\s*-\s*(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)?\s*(\d{4})?/i,
@@ -502,6 +563,15 @@ function parseRoleCompanyFromMixedLine(line: string): { role: string | null; com
   if (titleIdx > 0) {
     const companyWords = words.slice(0, titleIdx);
     const roleWords = words.slice(titleIdx);
+    if (
+      titleIdx === words.length - 1
+      && companyWords.length === 1
+      && roleWords.length === 1
+      && !COMPANY_HINT.test(companyWords[0] ?? '')
+      && !looksExperienceOrgLine(companyWords[0] ?? '')
+    ) {
+      return { role: remainder, company: null };
+    }
     const titleOnlyPrefix = companyWords.every((w) => /^(senior|sr|junior|jr|lead|principal|staff|product|ux|ui|industrial|software|growth|brand|design|service|creative|digital|data|research|graphic|visual|motion|web|interaction|university|college|institute|freelance)$/i.test(w));
     // hasStrongOrgSignal excludes university/college/institute so that "University Research Assistant"
     // is treated as a role phrase rather than split into company="University Research", role="Assistant".
@@ -526,7 +596,7 @@ function parseRoleCompanyFromMixedLine(line: string): { role: string | null; com
 }
 
 function removeDateFragments(text: string): string {
-  return text
+  return compactSpacedYearTokens(text)
     .replace(/[–—]/g, '-')
     .replace(/\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\s*(?:19|20)\d{2}\b/gi, '')
     .replace(/\b(?:19|20)\d{2}\s*-\s*(?:present|current|now|(?:19|20)\d{2})\b/gi, '')
@@ -678,13 +748,7 @@ function extractLinesFromPdfJsContent(items: any[], page: number): ExtractedLine
 }
 
 async function extractLinesWithPdfJs(buffer: Buffer): Promise<ExtractedLine[]> {
-  if (!pdfjsGetDocumentPromise) {
-    pdfjsGetDocumentPromise = (async () => {
-      const pdfjsModule = await new Function('m', 'return import(m)')('pdfjs-dist/legacy/build/pdf.mjs');
-      return (pdfjsModule as { getDocument?: (input: unknown) => { promise: Promise<unknown> } }).getDocument ?? null;
-    })();
-  }
-  const getDocument = await pdfjsGetDocumentPromise;
+  const getDocument = await ensurePdfJsGetDocumentPromise();
   if (!getDocument) throw new Error('pdfjs-dist getDocument not found');
 
   const doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0 }).promise as {
@@ -1141,7 +1205,15 @@ function groupSectionBlocks(section: DetectedSection, lines: ExtractedLine[]): B
         !isBulletText(l.text)
         && (looksDateAnchor(l) || looksExperienceEntryHeader(l.text) || looksExperienceOrgLine(l.text)),
       ).length;
-      if (left.length >= 4 && right.length >= 4 && anchorCount(left) >= 2 && anchorCount(right) >= 2) {
+      const leftDateCount = left.filter((l) => hasDateText(l.text)).length;
+      const rightDateCount = right.filter((l) => hasDateText(l.text)).length;
+      const leftBulletCount = left.filter((l) => isBulletText(l.text)).length;
+      const rightBulletCount = right.filter((l) => isBulletText(l.text)).length;
+      const pairedColumnFlow =
+        (leftDateCount >= 3 && leftBulletCount <= 2 && rightBulletCount >= 5 && rightDateCount <= 3)
+        || (rightDateCount >= 3 && rightBulletCount <= 2 && leftBulletCount >= 5 && leftDateCount <= 3);
+
+      if (!pairedColumnFlow && left.length >= 4 && right.length >= 4 && anchorCount(left) >= 2 && anchorCount(right) >= 2) {
         return [
           ...groupSectionBlocksSingleColumn(section.type, left),
           ...groupSectionBlocksSingleColumn(section.type, right),
@@ -1168,7 +1240,97 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
     if (current.section === 'experience') {
       const currentHasDate = current.lines.some((l) => hasDateText(l.text));
       const currentHasBullets = current.lines.some((l) => isBulletText(l.text));
+      const currentHasOrgHeader = current.lines.some((l) => looksExperienceOrgLine(l.text) && !isBulletText(l.text) && !hasDateText(l.text));
       const nextHasDate = next.lines.some((l) => hasDateText(l.text));
+      const nextHasBullets = next.lines.some((l) => isBulletText(l.text));
+      const nextHasRoleHeader = next.lines.some((l) => looksExperienceEntryHeader(l.text));
+      const nextHasOrgHeader = next.lines.some((l) => looksExperienceOrgLine(l.text) && !isBulletText(l.text) && !hasDateText(l.text));
+      const nextHasDistinctOrgHeader = next.lines.some((l) =>
+        looksExperienceOrgLine(l.text)
+        && !looksExperienceEntryHeader(l.text)
+        && !isBulletText(l.text)
+        && !hasDateText(l.text),
+      );
+      const nextLooksAwards = !nextHasBullets
+        && !nextHasDate
+        && !nextHasRoleHeader
+        && next.lines.some((l) => AWARD_HINT.test(l.text));
+      const currentHasRoleHeader = current.lines.some((l) => looksExperienceEntryHeader(l.text));
+      const nextLeadLine = next.lines.find((l) => !isBulletText(l.text)) ?? next.lines[0] ?? null;
+      const nextStartsWithDateAnchor = Boolean(nextLeadLine && looksDateAnchor(nextLeadLine));
+
+      // If current ends with "Company + Role" and next starts with a date, that tail header
+      // belongs to next. Move both lines so role/date stay aligned.
+      if (next.lines.length > 0 && hasDateText(next.lines[0].text) && current.lines.length >= 2) {
+        const tailRole = current.lines[current.lines.length - 1];
+        const tailCompany = current.lines[current.lines.length - 2];
+        const tailLooksHeader =
+          !hasDateText(tailRole.text)
+          && !isBulletText(tailRole.text)
+          && looksExperienceEntryHeader(tailRole.text)
+          && !hasDateText(tailCompany.text)
+          && !isBulletText(tailCompany.text)
+          && looksExperienceOrgLine(tailCompany.text);
+        if (tailLooksHeader && currentHasBullets) {
+          current.lines.splice(current.lines.length - 2, 2);
+          next.lines.unshift(tailCompany, tailRole);
+          continue;
+        }
+      }
+
+      // Merge continuation-only blocks into the previous dated entry.
+      // This fixes split entries where role/company/date are in one block and bullets are in the next.
+      const nextStartsWithContinuation = next.lines.length > 0
+        && (isBulletText(next.lines[0].text) || looksContinuationLine(next.lines[0].text));
+      const mergeContinuationIntoCurrent =
+        currentHasDate
+        && (
+          // Current has date + role header; next is mostly bullet/prose continuation.
+          (!nextStartsWithDateAnchor && nextHasBullets && !nextHasRoleHeader && (!nextHasOrgHeader || !currentHasOrgHeader))
+          // Current has header+date; next starts with another date but has no headers (second stint date line + bullets).
+          || (currentHasRoleHeader && nextHasDate && nextHasBullets && !nextHasRoleHeader && !nextHasOrgHeader)
+          // Current already has bullets and next has more continuation bullets without a new header.
+          || (currentHasBullets && !nextStartsWithDateAnchor && (nextHasBullets || next.lines.some((l) => looksContinuationLine(l.text))) && !nextHasRoleHeader && nextStartsWithContinuation)
+          // Current has date+role but no org header; next starts with org text and bullets.
+          || (currentHasRoleHeader && !currentHasOrgHeader && !nextStartsWithDateAnchor && nextHasOrgHeader && nextHasBullets && !nextHasRoleHeader)
+        )
+        && !nextLooksAwards;
+
+      if (mergeContinuationIntoCurrent) {
+        current.lines.push(...next.lines);
+        next.lines = [];
+        continue;
+      }
+
+      // Strong continuation signal: next block starts with lowercase prose and has bullets.
+      // This usually means the top of the bullet wrapped into a separate block.
+      const forceLowercaseContinuationMerge =
+        (currentHasDate || (currentHasRoleHeader && currentHasBullets))
+        && nextHasBullets
+        && next.lines.length > 0
+        && /^[a-z]/.test((next.lines[0]?.text ?? '').trim())
+        && !nextStartsWithDateAnchor;
+      if (forceLowercaseContinuationMerge) {
+        current.lines.push(...next.lines);
+        next.lines = [];
+        continue;
+      }
+
+      // Paired-row merge: company/date-only row split from role/bullets row (Dawn-style PDFs).
+      const mergePairedRowsIntoCurrent =
+        currentHasDate
+        && currentHasOrgHeader
+        && !currentHasBullets
+        && current.lines.length <= 5
+        && nextHasRoleHeader
+        && nextHasBullets
+        && !nextHasDistinctOrgHeader;
+      if (mergePairedRowsIntoCurrent) {
+        current.lines.push(...next.lines);
+        next.lines = [];
+        continue;
+      }
+
       if (currentHasDate && currentHasBullets && !nextHasDate && next.lines.length === 1 && looksExperienceEntryHeader(next.lines[0].text)) {
         current.lines.push(next.lines[0]);
         next.lines.splice(0, 1);
@@ -1580,10 +1742,35 @@ function swapRoleCompanyIfNeeded(role: string | null, company: string | null): {
 function parseExperienceBlock(block: Block, idx: number, warnings: string[]): ExperienceItem | null {
   const lines = block.lines;
   if (lines.length === 0) return null;
+  const hasBulletInBlock = lines.some((l) => isBulletText(l.text));
 
-  const dateLine = lines.find((l) => looksDateAnchor(l));
+  const dateLineIdx = lines.findIndex((l) => looksDateAnchor(l));
+  const dateLine = dateLineIdx >= 0 ? lines[dateLineIdx] : null;
   const dateParts = dateLine ? splitColumnFragments(dateLine.text) : [];
-  const dateText = dateParts.find((part) => hasDateText(part)) ?? dateLine?.text ?? '';
+  let dateText = dateParts.find((part) => hasDateText(part)) ?? dateLine?.text ?? '';
+
+  // Stitch split date ranges: e.g. "May 2022-" on one line + "Sep 2023" on the next line.
+  if (dateLine && dateText) {
+    const parsedPrimary = parseDateRange(dateText);
+    const missingEndDate = Boolean(parsedPrimary.start.year && !parsedPrimary.end.year && !parsedPrimary.isCurrent);
+    const danglingSeparator = /[-–—/]\s*$/.test(dateText.trim());
+    if (missingEndDate || danglingSeparator) {
+      const nextDateFragment = lines
+        .slice(dateLineIdx + 1, Math.min(lines.length, dateLineIdx + 4))
+        .flatMap((l) => splitColumnFragments(l.text))
+        .map((t) => cleanLineText(t))
+        .find((t) =>
+          t.length <= 45
+          && hasDateText(t)
+          && !isBulletText(t)
+          && !looksExperienceEntryHeader(t)
+          && !looksExperienceOrgLine(t),
+        );
+      if (nextDateFragment) {
+        dateText = cleanLineText(`${dateText} ${nextDateFragment}`);
+      }
+    }
+  }
 
   // Handle "Role / Date Range" combined lines (e.g. "UX Manager / 03 October 2016-Present").
   let roleFromSlashFormat: string | null = null;
@@ -1627,10 +1814,38 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   })();
 
   const stitched = stitchBullets(lines);
-  const bulletLines = stitched.bullets
+  const bulletLinesRaw = stitched.bullets
     .flatMap((text) => splitColumnFragments(text))
     .map((text) => text.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa\d.\s]+/, '').trim())
+    .filter((text) => {
+      // Drop short title-case fragments leaked from adjacent columns
+      // (e.g. "User Flows", "Design Thinking") while keeping action bullets.
+      const words = text.split(/\s+/).filter(Boolean);
+      const allTitleCase = words.length > 0 && words.every((w) => /^[A-Z][a-zA-Z0-9/&-]*$/.test(w));
+      if (words.length <= 4 && allTitleCase && !ACTION_VERB_HINT.test(text) && !/[.!?]$/.test(text)) {
+        return false;
+      }
+      return true;
+    })
     .filter(Boolean);
+
+  const bulletLines = bulletLinesRaw.reduce((acc: string[], text) => {
+    if (acc.length === 0) {
+      acc.push(text);
+      return acc;
+    }
+    const shouldJoinPrev =
+      /^[a-z(]/.test(text)
+      && !ACTION_VERB_HINT.test(text)
+      && !looksExperienceEntryHeader(text)
+      && text.length <= 120;
+    if (shouldJoinPrev) {
+      acc[acc.length - 1] = cleanLineText(`${acc[acc.length - 1]} ${text}`);
+    } else {
+      acc.push(text);
+    }
+    return acc;
+  }, []);
 
   const contentLines = stitched.prose
     .flatMap((text) => splitColumnFragments(text))
@@ -1740,6 +1955,12 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     role = split.role ?? role;
     company = split.company ?? company;
   }
+  // Company/date-only entries can be parsed as role-only when the org name is in the first line.
+  // Promote org-like role text to company so these blocks are preserved for later pairing.
+  if (!company && role && looksExperienceOrgLine(role) && !TITLE_HINT.test(role)) {
+    company = role;
+    role = null;
+  }
   // If role and company are still identical and the value looks like an org name (not a title),
   // it was set as a fallback from a company-only block — clear role so only company is kept.
   // e.g. "STUCK Design" block → role=null, company="STUCK Design".
@@ -1771,7 +1992,8 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   }
   // firstOrgLikeLine: only genuine org names (not role-like headers, not prose sentences ending with punctuation).
   const firstOrgLikeLine = contentLines.find((t) => looksExperienceOrgLine(t) && !TITLE_HINT.test(t) && !hasDateText(t) && !isBulletText(t) && !/:/.test(t) && !/[!?]$/.test(t) && !EMPLOYMENT_TYPE.test(t)) ?? null;
-  if (firstOrgLikeLine && (!company || !looksExperienceOrgLine(company))) {
+  const companyIsShortAcronym = Boolean(company && /^[A-Z]{2,6}$/.test(company.trim()));
+  if (firstOrgLikeLine && (!company || !looksExperienceOrgLine(company) || companyIsShortAcronym)) {
     company = removeDateFragments(firstOrgLikeLine);
   }
 
@@ -1801,7 +2023,18 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
           .slice(0, 5),
   };
 
-  const valid = Boolean(item.role || item.company) && Boolean(item.start.year || item.description.length > 0);
+  // Body-only continuation blocks from split two-column layouts often get a lowercase
+  // pseudo-role (e.g. "workshops across ..."). Null it so reconciliation can merge it
+  // into the previous dated experience entry.
+  const noDateAnchor = !item.start.year && !item.end.year && !item.isCurrent;
+  const roleLooksContinuation = Boolean(item.role && /^[a-z]/.test(item.role.trim()));
+  const companyLooksContinuation = Boolean(!item.company || /^[a-z]/.test(item.company.trim()));
+  if (noDateAnchor && item.description.length > 0 && roleLooksContinuation && companyLooksContinuation) {
+    item.role = null;
+    item.company = null;
+  }
+
+  const valid = Boolean(item.role || item.company || item.description.length > 0) && Boolean(item.start.year || item.description.length > 0);
   if (AWARD_HINT.test(item.role ?? '') && !TITLE_HINT.test(item.role ?? '') && item.description.length === 0) {
     warnings.push(`Dropped award-like experience block #${idx + 1}.`);
     return null;
@@ -1810,8 +2043,10 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   // This catches contact lines that leak into the experience section (e.g. "Saffren Choo Jing Xuan").
   if (item.start.year === null && item.end.year === null && !item.isCurrent
     && !TITLE_HINT.test(item.role ?? '') && !TITLE_HINT.test(item.company ?? '')) {
-    warnings.push(`Dropped no-date/no-title block #${idx + 1} (likely contact info).`);
-    return null;
+    if (!hasBulletInBlock || item.description.length <= 1) {
+      warnings.push(`Dropped no-date/no-title block #${idx + 1} (likely contact info).`);
+      return null;
+    }
   }
   // Drop spurious continuation blocks: role starts with lowercase (prose fragment) or is a
   // parenthetical duration "(8 months |)", and company also has no title/org signal.
@@ -1820,12 +2055,12 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   // Also treat a company that ends with sentence-terminal punctuation as "bad":
   // e.g. "Singapore Design Week 2022." is not a real company name.
   const companyEndsPunct = Boolean(item.company && /[.!]$/.test(item.company.trim()));
-  if (roleBad && (companyBad || companyEndsPunct)) {
+  if (roleBad && (companyBad || companyEndsPunct) && item.description.length === 0) {
     warnings.push(`Dropped spurious continuation block #${idx + 1} (no job-title signal).`);
     return null;
   }
   // Drop bio/profile blocks where role is a single non-title word (e.g. nationality "Singaporean").
-  if (item.role && item.role.split(/\s+/).length === 1 && !TITLE_HINT.test(item.role)) {
+  if (item.role && item.role.split(/\s+/).length === 1 && !TITLE_HINT.test(item.role) && !item.company && item.description.length === 0) {
     warnings.push(`Dropped single-word non-title role block #${idx + 1} (${item.role}).`);
     return null;
   }
@@ -1839,8 +2074,13 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     return null;
   }
 
-  if (!item.role) warnings.push(`Could not confidently detect role line for experience #${idx + 1}.`);
-  if (!item.company) warnings.push(`Could not confidently detect company line for experience #${idx + 1}.`);
+  const hasDateAnchor = Boolean(item.start.year || item.end.year || item.isCurrent);
+  if (!item.role && (hasDateAnchor || item.description.length <= 1)) {
+    warnings.push(`Could not confidently detect role line for experience #${idx + 1}.`);
+  }
+  if (!item.company && (hasDateAnchor || item.description.length <= 1)) {
+    warnings.push(`Could not confidently detect company line for experience #${idx + 1}.`);
+  }
 
   return item;
 }
@@ -1874,8 +2114,13 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   let school = texts.find((t) => SCHOOL_HINT.test(t)) ?? null;
   let degree = texts.find((t) => DEGREE_HINT.test(t)) ?? null;
   let location = texts.find((t) =>
-    looksLikeLocation(t)
-    || (/^[A-Za-z\s]+,\s*[A-Za-z\s]+$/.test(t) && t.split(/\s+/).length <= 6),
+    !SCHOOL_HINT.test(t)
+    && !DEGREE_HINT.test(t)
+    && !AWARD_HINT.test(t)
+    && (
+      looksLikeLocation(t)
+      || (/^[A-Za-z\s]+,\s*[A-Za-z\s]+$/.test(t) && t.split(/\s+/).length <= 4)
+    ),
   ) ?? null;
 
   if (dateLine) {
@@ -1912,6 +2157,7 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
       && !hasDateText(nextText)
       && !SCHOOL_HINT.test(nextText)
       && !DEGREE_HINT.test(nextText)
+      && nextText.split(/\s+/).length <= 5
     ) {
       degree = `${degree} ${nextText}`;
     }
@@ -1921,8 +2167,10 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
   degree = degree ? removeDateFragments(degree).replace(/\s*\/\s*$/, '').replace(/[,;.]\s*$/, '').trim() : null;
   // Drop any degree that turned out to be a bullet line after date-fragment removal.
   if (degree && isBulletText(degree)) degree = null;
+  if (degree && degree.split(/\s+/).length > 12) degree = null;
   // Clear school names that are bare years — artifacts from date-only blocks (e.g. "2020").
   if (school && /^\d{4}$/.test(school.trim())) school = null;
+  if (school && school.split(/\s+/).length > 12 && !SCHOOL_HINT.test(school)) school = null;
   if (school && looksLikeLocation(school)) school = null;
 
   // Strip leading "Location, Location" prefix from school names that occur when a location
@@ -1959,6 +2207,13 @@ function parseEducationBlock(block: Block, idx: number, warnings: string[]): Edu
     end: dateInfo.end,
     isCurrent: dateInfo.isCurrent,
   };
+
+  const looksAwardOnlyEducation = (AWARD_HINT.test(item.degree ?? '') || AWARD_HINT.test(item.school ?? ''))
+    && !SCHOOL_HINT.test(item.school ?? '');
+  if (looksAwardOnlyEducation) {
+    warnings.push(`Dropped award-like education block #${idx + 1}.`);
+    return null;
+  }
 
   if (!item.school && !item.degree) {
     warnings.push(`Dropped low-confidence education block #${idx + 1}.`);
@@ -2156,7 +2411,7 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
 function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): string | null {
   const isSummaryNoise = (text: string): boolean => {
     if (!text) return true;
-    if (/@|https?:\/\/|www\.|linkedin|portfolio|phone|mobile|email/i.test(text)) return true;
+    if (/@|https?:\/\/|www\.|linkedin|portfolio|phone|mobile|email|password|read\.?cv/i.test(text)) return true;
     if (looksSectionHeadingText(text)) return true;
     if (!/[A-Za-z]/.test(text)) return true;
     if (text.trim().split(/\s+/).length < 3 && !/[.!?]/.test(text)) return true;
@@ -2172,6 +2427,7 @@ function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): stri
       .map((t) => cleanLineText(t))
       .filter((t) => !isSummaryNoise(t))
       .filter((t) => !isBulletText(t))
+      .filter((t) => !hasDateText(t))
       .join(' ')
       .replace(/\s{2,}/g, ' ')
       .trim();
@@ -2182,19 +2438,52 @@ function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): stri
   const firstStructured = sections.find((s) =>
     s.type === 'experience' || s.type === 'education' || s.type === 'skills' || s.type === 'projects' || s.type === 'other',
   );
-  if (!firstStructured || firstStructured.startIdx <= 1) return null;
-
-  const intro = lines
-    .slice(0, firstStructured.startIdx)
-    .flatMap((l) => splitColumnFragments(l.text))
-    .map((t) => cleanLineText(t))
-    .filter((t) => !isSummaryNoise(t))
-    .filter((t) => !looksDateAnchor({ ...lines[0], text: t }))
-    .filter((t) => t.length >= 30);
+  const intro = (!firstStructured || firstStructured.startIdx <= 1)
+    ? []
+    : lines
+      .slice(0, firstStructured.startIdx)
+      .flatMap((l) => splitColumnFragments(l.text))
+      .map((t) => cleanLineText(t))
+      .filter((t) => !isSummaryNoise(t))
+      .filter((t) => !looksDateAnchor({ ...lines[0], text: t }))
+      .filter((t) => t.length >= 20);
 
   const introText = intro.join(' ').trim();
   // Only accept strong paragraph-like intros; avoids pulling work lines as About.
-  if (intro.length >= 2 && introText.length >= 140) return introText;
+  if (intro.length >= 2 && introText.length >= 110) return introText;
+
+  // Sidebar-bio fallback for visually split layouts where profile paragraphs are rendered in a
+  // narrow side column without an explicit "About" heading (e.g. Ziling-style resumes).
+  const minX = lines
+    .map((l) => l.x0)
+    .sort((a, b) => a - b)[0] ?? 0;
+  const sidebarBio = lines
+    .filter((l) => l.x0 <= minX + 45)
+    .flatMap((l) => splitColumnFragments(l.text))
+    .map((t) => cleanLineText(t))
+    .filter((t) => !isSummaryNoise(t))
+    .filter((t) => !/[|]/.test(t))
+    .filter((t) => !/[\u3000-\u9fff\uf900-\ufaff\u3040-\u30ff]/u.test(t))
+    .filter((t) => !hasDateText(t))
+    .filter((t) => !isBulletText(t))
+    .filter((t) => !TITLE_HINT.test(t))
+    .filter((t) => !DEGREE_HINT.test(t))
+    .filter((t) => !SCHOOL_HINT.test(t))
+    .filter((t) => !/^\+?\d[\d\s-]+$/.test(t))
+    .filter((t) => !/^@/.test(t))
+    .filter((t) => {
+      const words = t.split(/\s+/).filter(Boolean);
+      return !(words.length >= 2 && words.length <= 4 && words.every((w) => /^[A-Z][a-z'-]*$/.test(w)));
+    })
+    .filter((t) => t.length >= 8);
+  const sidebarText = sidebarBio.join(' ').replace(/\s{2,}/g, ' ').trim();
+  if (
+    sidebarBio.length >= 3
+    && sidebarText.length >= 120
+    && /\b(i.?m|i am|outside of work|believing that|she is|he is)\b/i.test(sidebarText)
+  ) {
+    return sidebarText;
+  }
   return null;
 }
 
@@ -2235,9 +2524,95 @@ function reconcileSplitExperienceEntries(items: ExperienceItem[]): ExperienceIte
       if (merged.description.length === 0 && next!.description.length > 0) merged.description = [...next!.description];
       i += 1;
     }
+
+    const continuation = items[i + 1];
+    const continuationHasNoDates = continuation
+      && !continuation.start.year
+      && !continuation.end.year
+      && !continuation.isCurrent;
+    const continuationLooksBodyOnly = Boolean(
+      continuation
+      && continuationHasNoDates
+      && continuation.description.length > 0
+      && !continuation.role
+      && (!continuation.company || !looksExperienceOrgLine(continuation.company)),
+    );
+    if (continuationLooksBodyOnly && (merged.role || merged.company)) {
+      merged.description = unique([...merged.description, ...continuation!.description]).slice(0, 8);
+      i += 1;
+    }
+
     out.push(merged);
   }
   return out;
+}
+
+function mergePairedDateAndRoleExperienceEntries(items: ExperienceItem[]): ExperienceItem[] {
+  if (items.length < 4) return items;
+
+  const hasDate = (item: ExperienceItem) => Boolean(item.start.year || item.end.year || item.isCurrent);
+  const dateOnlyIdx: number[] = [];
+  const roleOnlyIdx: number[] = [];
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    const dated = hasDate(item);
+    const hasBullets = item.description.length > 0;
+    const orgLikeRole = Boolean(item.role && looksExperienceOrgLine(item.role) && !TITLE_HINT.test(item.role));
+    if (dated && !hasBullets && Boolean(item.company || orgLikeRole)) {
+      dateOnlyIdx.push(i);
+      continue;
+    }
+    if (!dated && hasBullets && Boolean(item.role)) {
+      roleOnlyIdx.push(i);
+    }
+  }
+
+  if (dateOnlyIdx.length < 2 || roleOnlyIdx.length < 2) return items;
+  if ((roleOnlyIdx[0] ?? 0) <= (dateOnlyIdx[dateOnlyIdx.length - 1] ?? 0)) return items;
+
+  const pairCount = Math.min(dateOnlyIdx.length, roleOnlyIdx.length);
+  if (pairCount < 2) return items;
+
+  const used = new Set<number>();
+  const merged: ExperienceItem[] = [];
+  for (let i = 0; i < pairCount; i += 1) {
+    const d = items[dateOnlyIdx[i]];
+    const r = items[roleOnlyIdx[i]];
+    used.add(dateOnlyIdx[i]);
+    used.add(roleOnlyIdx[i]);
+
+    const companyFromDate = d.company ?? (d.role && looksExperienceOrgLine(d.role) ? d.role : null);
+    const roleFromContent = r.role ?? d.role ?? null;
+    const companyFromContent = r.company && !looksLikeLocation(r.company) ? r.company : null;
+
+    merged.push({
+      start: { ...d.start },
+      end: { ...d.end },
+      isCurrent: d.isCurrent,
+      role: roleFromContent,
+      company: companyFromDate ?? companyFromContent ?? null,
+      description: r.description.length > 0 ? [...r.description] : [...d.description],
+    });
+  }
+
+  const leftovers = items.filter((_, idx) => !used.has(idx));
+  return [...merged, ...leftovers];
+}
+
+function dropResidualContinuationEntries(items: ExperienceItem[]): ExperienceItem[] {
+  return items.filter((item) => {
+    const hasDate = Boolean(item.start.year || item.end.year || item.isCurrent);
+    if (hasDate) return true;
+    const roleBad = !item.role
+      || (!TITLE_HINT.test(item.role) && !looksExperienceOrgLine(item.role) && (/^[a-z]/.test(item.role.trim()) || item.role.split(/\s+/).length > 4));
+    const companyBad = !item.company
+      || (!TITLE_HINT.test(item.company) && !looksExperienceOrgLine(item.company) && (/^[a-z]/.test(item.company.trim()) || item.company.split(/\s+/).length > 4));
+    if (roleBad && companyBad) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function enrichExperienceDatesFromContactLines(
@@ -2465,21 +2840,62 @@ function reorderColumnsIfNeeded(lines: ExtractedLine[]): ExtractedLine[] {
   const leftLines = page1Lines.filter((l) => l.x0 < splitX);
   const rightLines = page1Lines.filter((l) => l.x0 >= splitX);
 
-  // Find the index of the first section heading in each column.
-  const leftHeadingIdx = leftLines.findIndex((l) => isSectionHeading(l.text));
-  const rightHeadingIdx = rightLines.findIndex((l) => isSectionHeading(l.text));
+  const leftFirstHeading = leftLines.find((l) => isSectionHeading(l.text)) ?? null;
+  const rightFirstHeading = rightLines.find((l) => isSectionHeading(l.text)) ?? null;
+  const allHeadingLines = page1Lines.filter((l) => isSectionHeading(l.text));
 
-  // If neither column has a recognised section heading, skip reordering.
-  if (leftHeadingIdx < 0 && rightHeadingIdx < 0) return lines;
+  // If we cannot find any section headings on page 1, skip reordering.
+  if (allHeadingLines.length === 0) return lines;
 
-  // Split each column into a "header zone" (above first heading) and "content zone".
-  const leftHeader = leftHeadingIdx >= 0 ? leftLines.slice(0, leftHeadingIdx) : leftLines;
-  const leftContent = leftHeadingIdx >= 0 ? leftLines.slice(leftHeadingIdx) : [];
-  const rightHeader = rightHeadingIdx >= 0 ? rightLines.slice(0, rightHeadingIdx) : rightLines;
-  const rightContent = rightHeadingIdx >= 0 ? rightLines.slice(rightHeadingIdx) : [];
+  const topHeadingY = allHeadingLines
+    .map((l) => l.y0)
+    .sort((a, b) => b - a)[0] ?? Number.NEGATIVE_INFINITY;
 
-  // Merge both header zones and restore y-desc visual order.
-  const combinedHeader = [...leftHeader, ...rightHeader].sort((a, b) => b.y0 - a.y0);
+  // Keep only truly top-of-page lines above the first section heading in the header zone.
+  // This prevents right-column role/bullet content from being incorrectly moved into contact.
+  const headerZone = page1Lines.filter((l) => l.y0 > topHeadingY + 2);
+  const contentZone = page1Lines.filter((l) => l.y0 <= topHeadingY + 2);
+
+  const leftContentZone = contentZone.filter((l) => l.x0 < splitX);
+  const rightContentZone = contentZone.filter((l) => l.x0 >= splitX);
+  const leftDateCount = leftContentZone.filter((l) => hasDateText(l.text)).length;
+  const rightDateCount = rightContentZone.filter((l) => hasDateText(l.text)).length;
+  const leftBulletCount = leftContentZone.filter((l) => isBulletText(l.text)).length;
+  const rightBulletCount = rightContentZone.filter((l) => isBulletText(l.text)).length;
+
+  // In asymmetric "paired columns" layouts (company/date on one side, role/bullets on the other),
+  // forcing "left content then right content" breaks section assignment. Keep natural y-order only
+  // for that pattern; otherwise retain the original split-column ordering.
+  const isAsymmetricFlow =
+    (!rightFirstHeading || !leftFirstHeading || Math.abs(leftFirstHeading.y0 - rightFirstHeading.y0) > 180)
+    && (
+      (leftDateCount >= 3 && leftBulletCount <= 2 && rightBulletCount >= 6 && rightDateCount <= 3)
+      || (rightDateCount >= 3 && rightBulletCount <= 2 && leftBulletCount >= 6 && leftDateCount <= 3)
+    );
+
+  if (isAsymmetricFlow) {
+    const orderedHeader = [...headerZone].sort((a, b) => {
+      if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+      return a.x0 - b.x0;
+    });
+    const orderedContent = [...contentZone].sort((a, b) => {
+      if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+      return a.x0 - b.x0;
+    });
+    return [...orderedHeader, ...orderedContent, ...laterPages];
+  }
+
+  const leftHeadingIdx = leftContentZone.findIndex((l) => isSectionHeading(l.text));
+  const rightHeadingIdx = rightContentZone.findIndex((l) => isSectionHeading(l.text));
+  const leftHeader = leftHeadingIdx >= 0 ? leftContentZone.slice(0, leftHeadingIdx) : leftContentZone;
+  const leftContent = leftHeadingIdx >= 0 ? leftContentZone.slice(leftHeadingIdx) : [];
+  const rightHeader = rightHeadingIdx >= 0 ? rightContentZone.slice(0, rightHeadingIdx) : rightContentZone;
+  const rightContent = rightHeadingIdx >= 0 ? rightContentZone.slice(rightHeadingIdx) : [];
+
+  const combinedHeader = [...headerZone, ...leftHeader, ...rightHeader].sort((a, b) => {
+    if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+    return a.x0 - b.x0;
+  });
 
   // Final order: shared header → left sections (Experience/Projects) → right sections (Skills/Education).
   return [...combinedHeader, ...leftContent, ...rightContent, ...laterPages];
@@ -2514,12 +2930,20 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
 
   const contact = parseContact(contactLines, lines, warnings);
 
-  const experiences = sortRecentFirst(enrichExperienceDatesFromContactLines(reconcileSplitExperienceEntries(
-    blocks
-      .filter((b) => b.section === 'experience')
-      .map((b, idx) => parseExperienceBlock(b, idx, warnings))
-      .filter((v): v is ExperienceItem => Boolean(v)),
-  ), lines, sections)).slice(0, 5);
+  const experiences = sortRecentFirst(enrichExperienceDatesFromContactLines(
+    dropResidualContinuationEntries(
+      mergePairedDateAndRoleExperienceEntries(
+        reconcileSplitExperienceEntries(
+          blocks
+            .filter((b) => b.section === 'experience')
+            .map((b, idx) => parseExperienceBlock(b, idx, warnings))
+            .filter((v): v is ExperienceItem => Boolean(v)),
+        ),
+      ),
+    ),
+    lines,
+    sections,
+  )).slice(0, 5);
 
   const rawEducation = blocks
     .filter((b) => b.section === 'education')

@@ -12,7 +12,7 @@ import { AuthedRequest, GUEST_USER_ID, getUserIdFromAuthHeader, hashPassword, ma
 import { defaultResumeData } from './defaults';
 import { createVersionRecord, initDb, patchVersionRecord, readDb, withDb, type ProfileRecord, type ResumeRecord, type UserRecord, type VersionRecord } from './db';
 import type { ResumeData, ResumeVersionDTO } from './types';
-import { parseResumePdf, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
+import { parseResumePdf, prewarmResumePdfParser, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
 import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, storeResumePdf } from './storage/pdfStorage';
@@ -1178,6 +1178,7 @@ app.use((error: any, req: express.Request, res: express.Response, _next: express
 async function bootstrap() {
   await initDb();
   startUploadCleanupScheduler();
+  void prewarmResumePdfParser();
   app.listen(PORT, () => {
     console.log(`CVStack API listening on http://localhost:${PORT}`);
   });
