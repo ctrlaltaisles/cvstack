@@ -23,6 +23,7 @@ const ROLE_LEVEL_PREFIX_PATTERN = /^((lead|senior|sr\.?|junior|jr\.?|founding|pr
 const MIN_JD_CURATION_LENGTH = 40;
 const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
 const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Master Resume';
+const MAX_UPLOAD_SIZE_BYTES = 1024 * 1024;
 
 type ResumeMetaModel = {
   id: string;
@@ -1138,7 +1139,29 @@ function InlineArea({ value, onChange, className = '', placeholder = 'Click to e
 
 // ─── BulletInlineArea ─────────────────────────────────────────────────────────
 
-function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onEnterNewBullet, autoEdit, onAutoEditConsumed, disabled = false }: { value: string; onChange: (v: string) => void; onDeleteOnEmpty?: () => void; onFocusChange?: (f: boolean) => void; onEnterNewBullet?: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; disabled?: boolean }) {
+function BulletInlineArea({
+  value,
+  onChange,
+  onDeleteOnEmpty,
+  onFocusChange,
+  onEnterNewBullet,
+  onSplitBulletAtCursor,
+  onBackspaceAtStart,
+  autoEdit,
+  onAutoEditConsumed,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onDeleteOnEmpty?: () => void;
+  onFocusChange?: (f: boolean) => void;
+  onEnterNewBullet?: () => void;
+  onSplitBulletAtCursor?: (before: string, after: string) => void;
+  onBackspaceAtStart?: (currentText: string) => void;
+  autoEdit?: boolean;
+  onAutoEditConsumed?: () => void;
+  disabled?: boolean;
+}) {
   const [editing, setEditing] = useState(false); const [local, setLocal] = useState(value); const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { setLocal(value); }, [value]);
   useEffect(() => { if (editing && ref.current) { const el = ref.current; el.focus(); el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; const l = el.value.length; el.setSelectionRange(l, l); } }, [editing]);
@@ -1154,13 +1177,36 @@ function BulletInlineArea({ value, onChange, onDeleteOnEmpty, onFocusChange, onE
   if (editing) return <textarea ref={ref} value={local} rows={1} onChange={e => { setLocal(e.target.value); resize(e.target); }} onBlur={save} onKeyDown={e => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      if (local !== value) onChange(local);
+      const target = e.currentTarget;
+      const selectionStart = target.selectionStart ?? local.length;
+      const selectionEnd = target.selectionEnd ?? local.length;
+      const before = local.slice(0, selectionStart).trimEnd();
+      const after = local.slice(selectionEnd).trimStart();
+      if (selectionStart === local.length && selectionEnd === local.length) {
+        if (local !== value) onChange(local);
+      } else {
+        onSplitBulletAtCursor?.(before, after);
+      }
       setEditing(false);
       onFocusChange?.(false);
-      onEnterNewBullet?.();
+      if (selectionStart === local.length && selectionEnd === local.length) {
+        onEnterNewBullet?.();
+      }
       return;
     }
     if (e.key === 'Escape') { setLocal(value); setEditing(false); onFocusChange?.(false); }
+    if (e.key === 'Backspace') {
+      const target = e.currentTarget;
+      const atStart = (target.selectionStart ?? 0) === 0 && (target.selectionEnd ?? 0) === 0;
+      if (atStart && onBackspaceAtStart) {
+        e.preventDefault();
+        if (local !== value) onChange(local);
+        setEditing(false);
+        onFocusChange?.(false);
+        onBackspaceAtStart(local);
+        return;
+      }
+    }
     if (e.key === 'Backspace' && local === '' && onDeleteOnEmpty) { e.preventDefault(); onDeleteOnEmpty(); }
   }} className="w-full bg-transparent outline-none resize-none overflow-hidden text-sm text-[#2B2B2B] leading-relaxed" style={{ fontFamily: 'inherit', minHeight: '1.5em' }} />;
   return <span onClick={() => { if (!disabled) { setEditing(true); onFocusChange?.(true); } }} className={`${disabled ? '' : 'cursor-text'} inline-block w-full text-sm text-[#2B2B2B] leading-relaxed whitespace-pre-wrap break-words min-h-[1.5em]`}>{local || <span className="text-[#D0D0D0] not-italic">Add bullet text…</span>}</span>;
@@ -1337,13 +1383,13 @@ function MonthYearEditor({ month, year, onChange, onClose }: { month: number; ye
 
 // ─── BulletRow ───────────────────────────────────────────────────────────────
 
-function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, autoEdit, onAutoEditConsumed, isReviewLocked = false }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; isReviewLocked?: boolean }) {
+function BulletRow({ bullet, isDragging, isHighlighted, onGripDragStart, onGripDragEnd, onChange, onDelete, onDuplicate, onEnterNewBullet, onSplitBulletAtCursor, onBackspaceAtStart, autoEdit, onAutoEditConsumed, isReviewLocked = false }: { bullet: string; isDragging: boolean; isHighlighted: boolean; onGripDragStart: (e: React.DragEvent) => void; onGripDragEnd: () => void; onChange: (v: string) => void; onDelete: () => void; onDuplicate: () => void; onEnterNewBullet: () => void; onSplitBulletAtCursor: (before: string, after: string) => void; onBackspaceAtStart?: (currentText: string) => void; autoEdit?: boolean; onAutoEditConsumed?: () => void; isReviewLocked?: boolean }) {
   const [rowHov, setRowHov] = useState(false); const [active, setActive] = useState(false);
   return (
     <div className={`relative flex items-start gap-3 rounded-[6px] -mx-2 px-2 py-0.5 transition-colors duration-300 ${isDragging ? 'opacity-30' : ''} ${active || isHighlighted ? 'bg-[#F5F5F5]' : ''}`} onMouseEnter={() => setRowHov(true)} onMouseLeave={() => setRowHov(false)}>
       {!isReviewLocked && <div draggable onDragStart={onGripDragStart} onDragEnd={onGripDragEnd} className={`absolute -left-4 top-[3px] shrink-0 cursor-grab active:cursor-grabbing text-[#D4D4D4] hover:text-[#9B9B9B] transition-opacity ${rowHov ? 'opacity-100' : 'opacity-0'}`}><GripVertical size={13} strokeWidth={1.8} /></div>}
       <span className="text-[#CBCBCB] shrink-0 mt-px select-none text-sm">–</span>
-      <div className="flex-1 min-w-0 md:pr-10"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
+      <div className="flex-1 min-w-0 md:pr-10"><BulletInlineArea disabled={isReviewLocked} value={bullet} onChange={onChange} onDeleteOnEmpty={onDelete} onFocusChange={f => setActive(f)} onEnterNewBullet={onEnterNewBullet} onSplitBulletAtCursor={onSplitBulletAtCursor} onBackspaceAtStart={onBackspaceAtStart} autoEdit={autoEdit} onAutoEditConsumed={onAutoEditConsumed} /></div>
       {!isReviewLocked && (
         <div className={`hidden md:flex absolute right-1 top-1 items-center gap-0.5 transition-opacity ${rowHov || active || isHighlighted ? 'opacity-100' : 'opacity-0'}`}>
           <button onClick={onDuplicate} aria-label="Duplicate bullet" title="Duplicate bullet" className="p-0.5 rounded text-[#CBCBCB] hover:text-[#6B6B6B] transition-colors">
@@ -1623,6 +1669,23 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
     updateBullets(next);
     setAutoEditBulletIdx(idx + 1);
   };
+  const splitBulletAt = (idx: number, before: string, after: string) => {
+    const next = [...exp.bullets];
+    next[idx] = before;
+    next.splice(idx + 1, 0, after);
+    updateBullets(next);
+    setAutoEditBulletIdx(idx + 1);
+  };
+  const mergeBulletIntoPrevious = (idx: number, currentText: string) => {
+    if (idx <= 0) return;
+    const next = [...exp.bullets];
+    const previous = next[idx - 1]?.trimEnd() ?? '';
+    const current = currentText.trimStart();
+    next[idx - 1] = previous && current ? `${previous} ${current}` : (previous || current);
+    next.splice(idx, 1);
+    updateBullets(next);
+    setAutoEditBulletIdx(idx - 1);
+  };
   const handleDrop = (toIdx: number) => { if (dragFrom === null || dragFrom === toIdx) { setDragFrom(null); setDragTarget(null); return; } const next = [...exp.bullets]; const [moved] = next.splice(dragFrom, 1); next.splice(toIdx, 0, moved); updateBullets(next); setDragFrom(null); setDragTarget(null); };
   const duration = calcDurationFromDates(exp.startDate, exp.endDate);
   const hasPending = pendingBulletChanges.size > 0;
@@ -1663,7 +1726,7 @@ function ExperienceBlock({ exp, onUpdateExp, onDeleteExp, onDragStartExperience,
                     <p className="text-sm text-[#2B2B2B] leading-relaxed">{showOriginal ? pendingChange.original || '(new bullet)' : pendingChange.suggested || '(remove this bullet)'}</p>
                   </div>
                 ) : (
-                  <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={false} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} isReviewLocked={isReviewLocked} />
+                  <BulletRow bullet={bullet} isDragging={dragFrom === idx} isHighlighted={false} onGripDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragFrom(idx); }} onGripDragEnd={() => { setDragFrom(null); setDragTarget(null); }} onChange={v => { const n = [...exp.bullets]; n[idx] = v; updateBullets(n); }} onDelete={() => updateBullets(exp.bullets.filter((_, i) => i !== idx))} onDuplicate={() => { const n = [...exp.bullets]; n.splice(idx + 1, 0, bullet); updateBullets(n); }} onEnterNewBullet={() => insertBulletAfter(idx)} onSplitBulletAtCursor={(before, after) => splitBulletAt(idx, before, after)} onBackspaceAtStart={idx > 0 ? (currentText) => mergeBulletIntoPrevious(idx, currentText) : undefined} autoEdit={autoEditBulletIdx === idx} onAutoEditConsumed={() => setAutoEditBulletIdx(null)} isReviewLocked={isReviewLocked} />
                 )}
               </li>
             );
@@ -2398,6 +2461,7 @@ function BaseResumeFileModal({
   hasUploadedPdf,
   isLoading,
   isUploading,
+  errorMessage,
   onClose,
   onReplace,
 }: {
@@ -2406,6 +2470,7 @@ function BaseResumeFileModal({
   hasUploadedPdf: boolean;
   isLoading: boolean;
   isUploading: boolean;
+  errorMessage?: string;
   onClose: () => void;
   onReplace: (file: File) => void;
 }) {
@@ -2466,6 +2531,11 @@ function BaseResumeFileModal({
             </div>
           )}
         </div>
+        {errorMessage && (
+          <div className="px-8 pb-4">
+            <p className="text-xs text-[#D14343]">{errorMessage}</p>
+          </div>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -2501,6 +2571,7 @@ export default function Workspace() {
   const [basePdfLoading, setBasePdfLoading] = useState(false);
   const [basePdfRefreshKey, setBasePdfRefreshKey] = useState(0);
   const [isReplacingBasePdf, setIsReplacingBasePdf] = useState(false);
+  const [basePdfReplaceError, setBasePdfReplaceError] = useState('');
   const [showJDPanel, setShowJDPanel] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -3018,9 +3089,16 @@ export default function Workspace() {
   const handleReplaceBasePdf = async (file: File) => {
     if (!effectiveResumeId) return;
     if (file.type !== 'application/pdf') {
-      showToast('Please upload a PDF file');
+      setBasePdfReplaceError('Please upload a PDF file.');
+      showToast('Please upload a PDF file.', 'error');
       return;
     }
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setBasePdfReplaceError('File size must be 1MB or less.');
+      showToast('File size must be 1MB or less.', 'error');
+      return;
+    }
+    setBasePdfReplaceError('');
     setIsReplacingBasePdf(true);
     try {
       const response = await replaceResumePdf(effectiveResumeId, file, resumeMeta?.title || 'Uploaded Resume');
@@ -3050,8 +3128,10 @@ export default function Workspace() {
       setSelectedVersionId(incomingVersion.id);
       setBasePdfRefreshKey((prev) => prev + 1);
       setShowBaseFileModal(false);
+      setBasePdfReplaceError('');
       showToast('Master resume replaced from uploaded PDF');
     } catch (error) {
+      setBasePdfReplaceError(error instanceof Error ? error.message : 'Failed to replace uploaded PDF');
       showToast(error instanceof Error ? error.message : 'Failed to replace uploaded PDF');
     } finally {
       setIsReplacingBasePdf(false);
@@ -3373,7 +3453,11 @@ export default function Workspace() {
           hasUploadedPdf={hasUploadedResumePdf}
           isLoading={basePdfLoading}
           isUploading={isReplacingBasePdf}
-          onClose={() => setShowBaseFileModal(false)}
+          errorMessage={basePdfReplaceError}
+          onClose={() => {
+            setShowBaseFileModal(false);
+            setBasePdfReplaceError('');
+          }}
           onReplace={(file) => { void handleReplaceBasePdf(file); }}
         />
       )}

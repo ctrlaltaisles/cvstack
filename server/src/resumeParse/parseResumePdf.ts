@@ -158,6 +158,12 @@ const SHORTENER_DOMAIN = /(^|\.)((bit\.ly|tinyurl\.com|t\.co|ow\.ly|goo\.gl|shor
 const EMPLOYMENT_TYPE = /^(contract|freelance|part[-\s]*time|full[-\s]*time|temporary|temp|permanent|perm|secondment|attachment)$/i;
 // Strong indicators that a parenthetical is a job title rather than a company qualifier.
 const STRONG_ROLE_SUFFIX = /\b(intern|trainee|graduate|scholar)\b/i;
+const NAME_ROLE_NOISE = /\b(modell?ing|animation|language|languages|skills?|tools?|software|portfolio|website|suite|figma|photoshop|illustrator|indesign|blender|keyshot|rhino|prototyping|wireframing|typography|branding|research)\b/i;
+const NAME_SECTION_NOISE = /^(experience|education|skills?|work|contact|summary|about|projects?|certifications?|awards?)$/i;
+const COMMON_SURNAME_SUFFIXES = new Set([
+  'tan', 'lim', 'lee', 'ong', 'ng', 'goh', 'teo', 'tay', 'toh', 'koh', 'chua', 'chan',
+  'seah', 'neo', 'phua', 'yeo', 'low', 'loh', 'ang', 'chew', 'chia', 'sim', 'foo',
+]);
 
 function cleanLineText(text: string): string {
   let out = text
@@ -390,6 +396,66 @@ function findRegex(lines: ExtractedLine[], regex: RegExp): string | null {
     if (m?.[0]) return m[0];
   }
   return null;
+}
+
+function toTitleCaseWord(token: string): string {
+  if (!token) return token;
+  return token.slice(0, 1).toUpperCase() + token.slice(1).toLowerCase();
+}
+
+function normalizeNameLineCandidate(text: string): string {
+  return cleanLineText(text)
+    .replace(/\s*[|/]\s*.*$/, '')
+    .replace(/\s*§\s*(awards?|certifications?|skills?|projects?|experience|education|about|contact|summary).*$/i, '')
+    .replace(/[.,!?:;]+$/, '')
+    .trim();
+}
+
+function splitJoinedNameToken(token: string): string[] {
+  const clean = token.trim();
+  if (!/^[A-Za-z]+$/.test(clean)) return [clean];
+  if (/[a-z][A-Z]/.test(clean)) return clean.replace(/([a-z])([A-Z])/g, '$1 $2').split(/\s+/);
+
+  const lower = clean.toLowerCase();
+  for (const suffix of COMMON_SURNAME_SUFFIXES) {
+    if (lower.endsWith(suffix) && lower.length - suffix.length >= 3) {
+      return [clean.slice(0, clean.length - suffix.length), clean.slice(clean.length - suffix.length)];
+    }
+  }
+
+  let bestIdx = -1;
+  let bestScore = -1;
+  const isVowel = (char: string) => /[aeiou]/i.test(char);
+  for (let i = 3; i <= clean.length - 3; i += 1) {
+    const left = clean.slice(0, i);
+    const right = clean.slice(i);
+    let score = 0;
+    if (isVowel(left[left.length - 1] ?? '')) score += 3;
+    if (!isVowel(right[0] ?? '')) score += 1;
+    if (right.length >= 3 && right.length <= 4) score += 2;
+    if (left.length >= 4 && left.length <= 8) score += 1;
+    if (COMMON_SURNAME_SUFFIXES.has(right.toLowerCase())) score += 3;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx > 0 && bestScore >= 5) {
+    return [clean.slice(0, bestIdx), clean.slice(bestIdx)];
+  }
+  return [clean];
+}
+
+function normalizePhoneCandidate(phone: string | null): string | null {
+  if (!phone) return null;
+  const cleaned = cleanLineText(phone).replace(/[()]/g, '').trim();
+  if (!cleaned) return null;
+  const digits = cleaned.replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('65')) {
+    const local = digits.slice(2);
+    return `+65 ${local.slice(0, 4)} ${local.slice(4)}`;
+  }
+  return cleaned;
 }
 
 function monthFromToken(token: string | undefined | null): number | null {
@@ -648,8 +714,11 @@ function looksLikeLocation(text: string): boolean {
 function looksExperienceOrgLine(text: string): boolean {
   const t = text.trim();
   if (looksLikeLocation(t)) return false;
+  if (ACTION_VERB_HINT.test(t)) return false;
   if (t.length > 120) return false; // reject obvious long prose
   if (t.split(/\s+/).length > 12) return false;
+  if (/\.\s/.test(t)) return false;
+  if (/\b(to|for|with|through|across|by)\b/i.test(t) && t.split(/\s+/).length >= 8) return false;
   if (/[!?]$/.test(t)) return false;
   if (/\.$/.test(t) && !/\b[A-Z]{1,6}\.$/.test(t)) return false;
   if (!/^[A-Z0-9(']/.test(t)) return false; // org names usually start with uppercase/digit/quote
@@ -1100,6 +1169,7 @@ function splitMixedColumnLineForSection(line: ExtractedLine, sectionType: Sectio
 
   const parts = splitColumnFragments(line.text);
   if (parts.length <= 1) return [line];
+  if (parts.some((part) => /^[-*+•\u2022]+$/.test(part.trim()))) return [line];
   const companyDatePair = parts.length === 2
     && looksExperienceOrgLine(parts[0] ?? '')
     && hasDateText(parts[1] ?? '');
@@ -1463,7 +1533,7 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   const page1 = lines.filter((l) => l.page === 1);
   const top = (page1.length > 0 ? page1 : lines)
     .filter((l) => l.text.length <= 120)
-    .slice(0, 18);
+    .slice(0, 24);
 
   // For multi-column resumes, the first line may be a merged navigation bar like
   // "Introduction Experience DEBBIE NG SI MIN". Extract the all-caps suffix as the name.
@@ -1480,35 +1550,56 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
 
   // Candidate pool: first 12 lines of contact section + first 12 lines of whole document,
   // so that resumes with tiny contact sections (e.g. only 2 lines) can still find the name.
-  const allTop = allLines.filter((l) => l.page === 1).slice(0, 18);
+  const allTop = allLines.filter((l) => l.page === 1).slice(0, 40);
   const combinedTop = [...new Set([...top, ...allTop])];  // dedup while preserving order
+  const contactAnchorYs = (page1.length > 0 ? page1 : lines)
+    .filter((line) => /@|https?:\/\/|www\.|linkedin|\+?\d{2}\s*\d{4}/i.test(line.text))
+    .map((line) => line.y0);
+  const isNearContactCluster = (line: ExtractedLine): boolean => {
+    if (contactAnchorYs.length === 0) return true;
+    const minDistance = contactAnchorYs
+      .map((y) => Math.abs(line.y0 - y))
+      .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY;
+    return minDistance <= 150;
+  };
 
   const nameCandidate = [...combinedTop]
-    .filter((line) => !/@/.test(line.text) && !/\d{3,}/.test(line.text) && !/https?:\/\//i.test(line.text) && !/linkedin/i.test(line.text))
-    .filter((line) => !isBulletText(line.text))
-    .filter((line) => !TITLE_HINT.test(line.text))
-    .filter((line) => !DEGREE_HINT.test(line.text))
-    .filter((line) => !SCHOOL_HINT.test(line.text))
+    .map((line) => ({ line, text: normalizeNameLineCandidate(line.text) }))
+    .filter(({ text }) => Boolean(text))
+    .filter(({ line }) => isNearContactCluster(line))
+    .filter(({ text }) => !/@/.test(text) && !/\d/.test(text) && !/https?:\/\//i.test(text) && !/linkedin/i.test(text))
+    .filter(({ text }) => !isBulletText(text))
+    .filter(({ text }) => !TITLE_HINT.test(text))
+    .filter(({ text }) => !DEGREE_HINT.test(text))
+    .filter(({ text }) => !SCHOOL_HINT.test(text))
+    .filter(({ text }) => !AWARD_HINT.test(text))
+    .filter(({ text }) => !NAME_ROLE_NOISE.test(text))
     // Exclude greeting lines: use simple word-boundary check so we aren't tripped up by smart-quote apostrophes
-    .filter((line) => !/^(hi\b|hello\b|hey\b|i\s+am\b)/i.test(line.text.trim()))
-    .filter((line) => !/\b(resume|curriculum\s+vitae|\bcv\b)\b/i.test(line.text))
-    .filter((line) => !looksSectionHeadingText(line.text))
+    .filter(({ text }) => !/^(hi\b|hello\b|hey\b|i\s+am\b)/i.test(text.trim()))
+    .filter(({ text }) => !/\b(resume|curriculum\s+vitae|\bcv\b)\b/i.test(text))
+    .filter(({ text }) => !looksSectionHeadingText(text))
     // Filter academic discipline field names like "Industrial Design", "Computer Science"
-    .filter((line) => !/\b(design|engineering|sciences?|technology|computing|innovation|management)\s*$/i.test(line.text.trim()))
-    // Names have ALL words starting with uppercase (filters "grounded in User", "aStoryteller and" etc.)
-    .filter((line) => {
-      const asciiWords = line.text.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
-      return asciiWords.length > 0 && asciiWords.every((w) => /^[A-Z]/.test(w));
+    .filter(({ text }) => !/\b(design|engineering|sciences?|technology|computing|innovation|management)\s*$/i.test(text.trim()))
+    .filter(({ text }) => {
+      const words = text.split(/\s+/).filter((w) => /^[A-Za-z][A-Za-z'-]*$/.test(w));
+      if (words.length < 2 || words.length > 5) return false;
+      if (words.some((w) => w.length < 2)) return false;
+      if (words.some((w) => w.length > 10)) return false;
+      if (words.some((w) => /^(and|of|the|for|with|to|in|on|at|a|an)$/i.test(w))) return false;
+      if (words.some((w) => NAME_SECTION_NOISE.test(w.toLowerCase()))) return false;
+      const allTitleOrUpper = words.every((w) => /^[A-Z][a-z'-]*$/.test(w) || /^[A-Z]{2,}$/.test(w));
+      const allLower = words.every((w) => /^[a-z][a-z'-]*$/.test(w));
+      if (!allTitleOrUpper && !allLower) return false;
+      return true;
     })
-    .filter((line) => line.text.split(/\s+/).length >= 2 && line.text.split(/\s+/).length <= 5)
-    .sort((a, b) => (b.fontSize ?? 12) - (a.fontSize ?? 12))[0];
+    .sort((a, b) => ((b.line.fontSize ?? 12) - (a.line.fontSize ?? 12)) || (b.line.y0 - a.line.y0))[0]?.line;
 
   // Fallback: two adjacent single-word TitleCase lines that together form a full name.
   // E.g. "Edwind" (line 0) + "Tan." (line 1) → "Edwind Tan"
   const adjacentNameCandidate = (() => {
     for (let i = 0; i < combinedTop.length - 1; i++) {
-      const a = (combinedTop[i]?.text ?? '').trim().replace(/[.,!?:;]+$/, '');
-      const b = (combinedTop[i + 1]?.text ?? '').trim().replace(/[.,!?:;]+$/, '');
+      const a = normalizeNameLineCandidate((combinedTop[i]?.text ?? '').trim());
+      const b = normalizeNameLineCandidate((combinedTop[i + 1]?.text ?? '').trim());
       if (!a || !b) continue;
       if (a.split(/\s+/).length !== 1 || b.split(/\s+/).length !== 1) continue;
       if (!/^[A-Z]/.test(a) || !/^[A-Z]/.test(b)) continue;
@@ -1518,6 +1609,29 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
       if (/^(experience|education|skills|work|contact|summary|about|projects|introduction)$/i.test(a)) continue;
       if (/^(experience|education|skills|work|contact|summary|about|projects|introduction)$/i.test(b)) continue;
       return `${a} ${b}`;
+    }
+    return null;
+  })();
+
+  // Some multi-column resumes render the name token in the left column as
+  // "<FirstName> § Awards" with surname nearby as a separate single-word line.
+  const splitAwardNameCandidate = (() => {
+    for (let i = 0; i < combinedTop.length; i += 1) {
+      const raw = combinedTop[i]?.text ?? '';
+      const match = raw.match(/^([A-Z][A-Za-z'-]{1,20})\s*§\s*awards?\b/i);
+      if (!match?.[1]) continue;
+      const first = toTitleCaseWord(match[1]);
+      const nearbyLast = combinedTop
+        .slice(i, i + 6)
+        .map((line) => normalizeNameLineCandidate(line.text))
+        .map((t) => t.replace(/[.,!?:;]+$/, '').trim())
+        .find((t) =>
+          /^[A-Z][A-Za-z'-]{1,20}$/.test(t)
+          && !NAME_SECTION_NOISE.test(t.toLowerCase())
+          && !NAME_ROLE_NOISE.test(t)
+          && t.toLowerCase() !== first.toLowerCase(),
+        );
+      return nearbyLast ? `${first} ${nearbyLast}` : first;
     }
     return null;
   })();
@@ -1549,7 +1663,7 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   }, null);
 
   const email = findRegex(allLines, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-  const phone = findRegex(allLines, /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)\d{3,4}[\s.-]?\d{3,4}/);
+  const phone = normalizePhoneCandidate(findRegex(allLines, /(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)\d{3,4}[\s.-]?\d{3,4}/));
   const linkedin = findRegex(allLines, /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[A-Za-z0-9_\-\/]+/i);
   const emailDomain = (email?.split('@')[1] ?? '').toLowerCase().replace(/^www\./, '') || null;
   const websiteCandidates = allLines
@@ -1600,7 +1714,7 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   });
 
   // Prefer merged nav-bar name over plain candidate (nav bar is more reliable for styled resumes).
-  let name = mergedNameCandidate ?? nameCandidate?.text ?? camelCaseNameCandidate ?? adjacentNameCandidate ?? null;
+  let name = mergedNameCandidate ?? splitAwardNameCandidate ?? adjacentNameCandidate ?? nameCandidate?.text ?? camelCaseNameCandidate ?? null;
 
   // Post-process: strip Chinese/CJK suffix and "|" separator
   // e.g. "Loo Zi Ling | 呂紫寧" → "Loo Zi Ling"
@@ -1609,6 +1723,10 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     name = name.replace(/\s+[\u3000-\u9fff\uf900-\ufaff\u3040-\u30ff].*/u, '').trim();
     // Strip trailing punctuation from name (e.g. "Loo Zi Ling.")
     name = name.replace(/[.,!?:;]+$/, '').trim();
+    // If the entire detected name is lowercase, normalize casing.
+    if (/^[a-z][a-z'\s-]+$/.test(name)) {
+      name = name.split(/\s+/).map((token) => toTitleCaseWord(token)).join(' ');
+    }
   }
 
   if (!name && email) {
@@ -1618,9 +1736,12 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
     const tokens = local
       .split(/[._-]+/)
       .map((t) => t.trim())
+      .filter(Boolean);
+    const expandedTokens = tokens.length === 1 ? splitJoinedNameToken(tokens[0] ?? '') : tokens;
+    const titleTokens = expandedTokens
       .filter(Boolean)
-      .map((t) => t.slice(0, 1).toUpperCase() + t.slice(1).toLowerCase());
-    if (tokens.length >= 1) name = tokens.join(' ');
+      .map((t) => toTitleCaseWord(t));
+    if (titleTokens.length >= 1) name = titleTokens.join(' ');
   }
   let currentTitle: string | null = null;
   if (mergedNameCandidate) {
@@ -1817,6 +1938,7 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   const bulletLinesRaw = stitched.bullets
     .flatMap((text) => splitColumnFragments(text))
     .map((text) => text.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa\d.\s]+/, '').trim())
+    .map((text) => text.replace(/^(Design Thinking|User Flows?)\s+(?=[A-Z]{2,}\b)/i, '').trim())
     .filter((text) => {
       // Drop short title-case fragments leaked from adjacent columns
       // (e.g. "User Flows", "Design Thinking") while keeping action bullets.
@@ -1834,13 +1956,17 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
       acc.push(text);
       return acc;
     }
+    const previous = acc[acc.length - 1] ?? '';
     const shouldJoinPrev =
       /^[a-z(]/.test(text)
       && !ACTION_VERB_HINT.test(text)
       && !looksExperienceEntryHeader(text)
       && text.length <= 120;
-    if (shouldJoinPrev) {
-      acc[acc.length - 1] = cleanLineText(`${acc[acc.length - 1]} ${text}`);
+    const shouldJoinAcronymContinuation =
+      /^[A-Z]{2,}\b/.test(text)
+      && /[+:]$/.test(previous.trim());
+    if (shouldJoinPrev || shouldJoinAcronymContinuation) {
+      acc[acc.length - 1] = cleanLineText(`${previous} ${text}`);
     } else {
       acc.push(text);
     }
