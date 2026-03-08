@@ -15,6 +15,7 @@ import type { ResumeData, ResumeVersionDTO } from './types';
 import { parseResumePdf, prewarmResumePdfParser, toResumeDataFromParsedResume } from './resumeParse/parseResumePdf';
 import { extractTextFromPdfBuffer, parseResumeText, toResumeData as toResumeDataFromLegacyParser } from './parser';
 import { TailorResumeError, curateResumeWithAI, tailorResumeWithAI, type SeniorityLevel } from './ai/tailorResume';
+import { parseJobUrl } from './jobs/parseJobUrl';
 import { buildResumeShareBaseName } from './shareNaming';
 import { deleteStoredResumePdf, getResumePdfAccess, getStorageDiagnostics, storeResumePdf } from './storage/pdfStorage';
 
@@ -141,6 +142,21 @@ app.post('/api/ai/curate-resume', async (req, res) => {
     console.warn(`[ai-curate][${requestId}] failed status=500`);
     res.status(500).json({ error: 'Unexpected AI curation error', requestId });
   }
+});
+
+app.post('/api/jobs/parse', async (req, res) => {
+  const jobUrl = String(req.body?.jobUrl ?? '').trim();
+  if (!jobUrl) {
+    res.status(400).json({
+      sourceUrl: '',
+      success: false,
+      error: 'jobUrl is required',
+    });
+    return;
+  }
+
+  const result = await parseJobUrl(jobUrl);
+  res.json(result);
 });
 
 app.post('/api/auth/register', async (req, res) => {

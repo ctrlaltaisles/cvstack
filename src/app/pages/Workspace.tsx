@@ -8,7 +8,7 @@ import {
   Copy, GripVertical, FileText, Share2, Trash2, Menu, Minus,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square, LoaderCircle,
 } from 'lucide-react';
-import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
+import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, parseJobLink, replaceResumePdf, userStore, updateVersion, type ParsedJobDetails } from '../../lib/api';
 import { buildResumeShareBaseName, buildResumeSharePath } from '../../lib/resumeShareNaming';
 import type { AIChange, Award, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
@@ -25,6 +25,15 @@ const MIN_JD_CURATION_LENGTH = 40;
 const PROJECT_NOTES_PROMPT_HIDE_WORD_THRESHOLD = 100;
 const PROJECT_NOTES_BASE_SOURCE_LABEL = 'Master Resume';
 const MAX_UPLOAD_SIZE_BYTES = 1024 * 1024;
+const JOB_LINK_DEBOUNCE_MS = 650;
+
+type AutoFillFieldSource = 'empty' | 'auto' | 'manual';
+type AutoFillFieldKey = 'roleName' | 'company' | 'jobDesc';
+type AutoFillFieldSources = Record<AutoFillFieldKey, AutoFillFieldSource>;
+type JobLinkHelperState = {
+  tone: 'idle' | 'loading' | 'success' | 'error';
+  message: string;
+};
 
 type ResumeMetaModel = {
   id: string;
@@ -168,6 +177,21 @@ function handleStructuredPaste(
   if (!text) return;
   event.preventDefault();
   insertTextAtCursor(event.currentTarget, text, update);
+}
+function normalizeJobLinkValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const withProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    if (!/^https?:$/i.test(url.protocol)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+function shouldAutoFillField(currentValue: string, source: AutoFillFieldSource) {
+  return currentValue.trim().length === 0 || source === 'auto';
 }
 function getHeaderTitleForVersion(version: Pick<ResumeVersion, 'isAI' | 'jobTitle' | 'jobCompany' | 'data'>): string {
   if (version.isAI) {
@@ -2564,10 +2588,155 @@ function JDSidePanel({
 // ─── CreateResumeModal ───────────────────────────────────────────────────────
 
 function CreateResumeModal({ onGenerate, onClose, isGenerating }: { onGenerate: (role: string, company: string, jd: string, link: string) => void; onClose: () => void; isGenerating: boolean }) {
-  const [roleName, setRoleName] = useState(''); const [company, setCompany] = useState(''); const [jobDesc, setJobDesc] = useState(''); const [jobLink, setJobLink] = useState('');
+  const [roleName, setRoleName] = useState('');
+  const [company, setCompany] = useState('');
+  const [jobDesc, setJobDesc] = useState('');
+  const [jobLink, setJobLink] = useState('');
+  const [jobLinkHelper, setJobLinkHelper] = useState<JobLinkHelperState>({ tone: 'idle', message: '' });
+  const [fieldSources, setFieldSources] = useState<AutoFillFieldSources>({ roleName: 'empty', company: 'empty', jobDesc: 'empty' });
+  const abortRef = useRef<AbortController | null>(null);
+  const latestRequestIdRef = useRef(0);
+  const lastRequestedUrlRef = useRef('');
+  const roleNameRef = useRef(roleName);
+  const companyRef = useRef(company);
+  const jobDescRef = useRef(jobDesc);
+  const fieldSourcesRef = useRef(fieldSources);
   const fCls = "w-full px-4 py-2.5 bg-[#F7F7F8] rounded-[10px] border border-[#EFEFEF] text-sm outline-none focus:border-[#CBCBCB] placeholder:text-[#D4D4D4] transition-colors text-[#1A1A1A]";
   const canSubmit = roleName.trim().length > 0 && !isGenerating;
+  useEffect(() => { roleNameRef.current = roleName; }, [roleName]);
+  useEffect(() => { companyRef.current = company; }, [company]);
+  useEffect(() => { jobDescRef.current = jobDesc; }, [jobDesc]);
+  useEffect(() => { fieldSourcesRef.current = fieldSources; }, [fieldSources]);
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && !isGenerating) onClose(); }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h); }, [isGenerating, onClose]);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const updateFieldSource = useCallback((field: AutoFillFieldKey, source: AutoFillFieldSource) => {
+    setFieldSources((prev) => {
+      if (prev[field] === source) return prev;
+      return { ...prev, [field]: source };
+    });
+  }, []);
+
+  const handleManualFieldChange = useCallback((field: AutoFillFieldKey, value: string) => {
+    if (field === 'roleName') setRoleName(value);
+    if (field === 'company') setCompany(value);
+    if (field === 'jobDesc') setJobDesc(value);
+    updateFieldSource(field, 'manual');
+  }, [updateFieldSource]);
+
+  const applyParsedJobDetails = useCallback((details: ParsedJobDetails) => {
+    let filledCount = 0;
+    const sources = fieldSourcesRef.current;
+
+    if (details.title && shouldAutoFillField(roleNameRef.current, sources.roleName)) {
+      setRoleName(details.title);
+      updateFieldSource('roleName', 'auto');
+      filledCount += 1;
+    }
+    if (details.company && shouldAutoFillField(companyRef.current, sources.company)) {
+      setCompany(details.company);
+      updateFieldSource('company', 'auto');
+      filledCount += 1;
+    }
+    if (details.description && shouldAutoFillField(jobDescRef.current, sources.jobDesc)) {
+      setJobDesc(details.description);
+      updateFieldSource('jobDesc', 'auto');
+      filledCount += 1;
+    }
+
+    setJobLinkHelper({
+      tone: 'success',
+      message: filledCount > 0
+        ? 'Job details added. You can still edit any field.'
+        : 'Job details found. Your manual edits were kept.',
+    });
+  }, [updateFieldSource]);
+
+  const fetchJobDetails = useCallback(async (rawValue: string) => {
+    const normalizedUrl = normalizeJobLinkValue(rawValue);
+    if (!normalizedUrl) {
+      return;
+    }
+    if (lastRequestedUrlRef.current === normalizedUrl && jobLinkHelper.tone === 'success') {
+      return;
+    }
+
+    latestRequestIdRef.current += 1;
+    const requestId = latestRequestIdRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    lastRequestedUrlRef.current = normalizedUrl;
+    setJobLinkHelper({ tone: 'loading', message: 'Fetching job details…' });
+
+    try {
+      const result = await parseJobLink(normalizedUrl, controller.signal);
+      if (requestId !== latestRequestIdRef.current) return;
+      setJobLink(result.sourceUrl);
+      if (!result.success) {
+        setJobLinkHelper({
+          tone: 'error',
+          message: 'Couldn’t auto-fill this link. You can still paste the job description manually.',
+        });
+        return;
+      }
+      applyParsedJobDetails(result);
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== latestRequestIdRef.current) return;
+      setJobLinkHelper({
+        tone: 'error',
+        message: 'Couldn’t auto-fill this link. You can still paste the job description manually.',
+      });
+      if (error instanceof Error && /jobUrl is required/i.test(error.message)) {
+        lastRequestedUrlRef.current = '';
+      }
+    }
+  }, [applyParsedJobDetails, jobLinkHelper.tone]);
+
+  useEffect(() => {
+    const normalizedUrl = normalizeJobLinkValue(jobLink);
+    if (!jobLink.trim()) {
+      abortRef.current?.abort();
+      lastRequestedUrlRef.current = '';
+      setJobLinkHelper({ tone: 'idle', message: '' });
+      return;
+    }
+    if (!normalizedUrl) {
+      setJobLinkHelper((prev) => prev.tone === 'loading' ? { tone: 'idle', message: '' } : prev);
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void fetchJobDetails(jobLink);
+    }, JOB_LINK_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [fetchJobDetails, jobLink]);
+
+  const handleJobLinkBlur = useCallback(() => {
+    if (!jobLink.trim()) {
+      setJobLinkHelper({ tone: 'idle', message: '' });
+      return;
+    }
+    const normalizedUrl = normalizeJobLinkValue(jobLink);
+    if (!normalizedUrl) {
+      setJobLinkHelper({
+        tone: 'error',
+        message: 'Enter a valid job posting URL to try auto-fill.',
+      });
+      return;
+    }
+    setJobLink(normalizedUrl);
+    void fetchJobDetails(normalizedUrl);
+  }, [fetchJobDetails, jobLink]);
+
+  const handleJobLinkPaste = useCallback(() => {
+    window.setTimeout(() => {
+      const normalizedUrl = normalizeJobLinkValue(jobLinkRef.current?.value ?? '');
+      if (!normalizedUrl) return;
+      void fetchJobDetails(normalizedUrl);
+    }, 0);
+  }, [fetchJobDetails]);
+
+  const jobLinkRef = useRef<HTMLInputElement>(null);
   return (
     <div className="fixed inset-0 bg-black/20 z-[200] flex items-center justify-center p-6 backdrop-blur-[2px] animate-[fadeIn_150ms_ease-out]" onClick={() => { if (!isGenerating) onClose(); }}>
       <div className="bg-white rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.14)] w-full max-w-[600px] animate-[fadeInScale_200ms_ease-out]" onClick={e => e.stopPropagation()}>
@@ -2576,12 +2745,37 @@ function CreateResumeModal({ onGenerate, onClose, isGenerating }: { onGenerate: 
           <button onClick={onClose} disabled={isGenerating} className="w-8 h-8 flex items-center justify-center rounded-[8px] text-[#9B9B9B] hover:bg-[#F5F5F5] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"><X size={16} /></button>
         </div>
         <div className="px-8 py-6 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Role Name</label><input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Product Designer" className={fCls} autoFocus disabled={isGenerating} /></div>
-            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Company <span className="text-[#CBCBCB]">(optional)</span></label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Stripe" className={fCls} disabled={isGenerating} /></div>
+          <div>
+            <label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label>
+            <input
+              ref={jobLinkRef}
+              value={jobLink}
+              onChange={e => setJobLink(e.target.value)}
+              onBlur={handleJobLinkBlur}
+              onPaste={handleJobLinkPaste}
+              placeholder="https://…"
+              className={fCls}
+              autoFocus
+              disabled={isGenerating}
+            />
+            {jobLinkHelper.message && (
+              <p className={`mt-2 flex items-center gap-1.5 text-xs ${
+                jobLinkHelper.tone === 'error'
+                  ? 'text-[#D14343]'
+                  : jobLinkHelper.tone === 'success'
+                    ? 'text-[#6B6B6B]'
+                    : 'text-[#6B6B6B]'
+              }`}>
+                {jobLinkHelper.tone === 'loading' && <LoaderCircle size={12} className="animate-spin" />}
+                {jobLinkHelper.message}
+              </p>
+            )}
           </div>
-          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => setJobDesc(e.target.value)} onPaste={(event) => handleStructuredPaste(event, setJobDesc)} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} disabled={isGenerating} /></div>
-          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Link <span className="text-[#CBCBCB]">(optional)</span></label><input value={jobLink} onChange={e => setJobLink(e.target.value)} placeholder="https://…" className={fCls} disabled={isGenerating} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Role Name</label><input value={roleName} onChange={e => handleManualFieldChange('roleName', e.target.value)} placeholder="e.g. Product Designer" className={fCls} disabled={isGenerating} /></div>
+            <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Company <span className="text-[#CBCBCB]">(optional)</span></label><input value={company} onChange={e => handleManualFieldChange('company', e.target.value)} placeholder="e.g. Stripe" className={fCls} disabled={isGenerating} /></div>
+          </div>
+          <div><label className="block text-xs text-[#6B6B6B] mb-1.5">Job Description</label><textarea value={jobDesc} onChange={e => handleManualFieldChange('jobDesc', e.target.value)} onPaste={(event) => handleStructuredPaste(event, (value) => handleManualFieldChange('jobDesc', value))} placeholder="Paste the full job description here — the more detail, the better the tailoring." rows={7} className={`${fCls} resize-none leading-relaxed`} disabled={isGenerating} /></div>
           {isGenerating && (
             <p className="text-xs text-[#6B6B6B]">Generating your tailored resume. This can take a moment.</p>
           )}

@@ -344,6 +344,16 @@ export interface CurateResumeResponse {
   };
 }
 
+export interface ParsedJobDetails {
+  title?: string;
+  company?: string;
+  description?: string;
+  sourceUrl: string;
+  sourceType?: string;
+  success: boolean;
+  error?: string;
+}
+
 export interface SharedResumeResponse {
   resume: { id: string; title: string };
   version: unknown;
@@ -462,6 +472,10 @@ export function tailorResume(payload: TailorResumeRequest) {
 
 export function curateResume(payload: CurateResumeRequest) {
   return requestJson<CurateResumeResponse>('/api/ai/curate-resume', payload);
+}
+
+export function parseJobLink(jobUrl: string, signal?: AbortSignal) {
+  return requestJson<ParsedJobDetails>('/api/jobs/parse', { jobUrl }, { signal });
 }
 
 export function createResumeShareLink(resumeId: string, versionId: string) {
