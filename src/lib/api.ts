@@ -16,6 +16,20 @@ function resolveApiBase() {
   return 'http://localhost:4000';
 }
 
+export function resolvePublicAppBase() {
+  const envBase = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim();
+  if (envBase) return envBase.replace(/\/+$/, '');
+
+  if (typeof window === 'undefined') return '';
+
+  const { protocol, hostname, port, origin } = window.location;
+  if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '4000') {
+    return `${protocol}//${hostname}:5173`;
+  }
+
+  return origin;
+}
+
 const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'cvstack_token';
 const USER_KEY = 'cvstack_user';
@@ -348,6 +362,7 @@ export interface ParsedJobDetails {
   title?: string;
   company?: string;
   description?: string;
+  location?: string;
   sourceUrl: string;
   sourceType?: string;
   success: boolean;

@@ -8,7 +8,7 @@ import {
   Copy, GripVertical, FileText, Share2, Trash2, Menu, Minus,
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square, LoaderCircle,
 } from 'lucide-react';
-import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, parseJobLink, replaceResumePdf, userStore, updateVersion, type ParsedJobDetails } from '../../lib/api';
+import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, parseJobLink, replaceResumePdf, resolvePublicAppBase, userStore, updateVersion, type ParsedJobDetails } from '../../lib/api';
 import { buildResumeShareBaseName, buildResumeSharePath } from '../../lib/resumeShareNaming';
 import type { AIChange, Award, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
@@ -3570,17 +3570,50 @@ export default function Workspace() {
   };
   const handleShareLink = async () => {
     if (!resumeId || !activeVersion?.id) {
-      showToast('Unable to create share link');
+      showToast('Unable to create share link', 'error');
       return;
     }
     try {
-      const response = await createResumeShareLink(resumeId, activeVersion.id);
-      const fallbackPath = buildResumeSharePath(activeVersion, activeVersion.data);
-      const shareUrl = `${window.location.origin}${response.sharePath || response.shareSlug || fallbackPath}`;
+      const shareDraft = applyHeaderTitleToVersion({
+        ...activeVersion,
+        data: applyHeaderTitleToData(activeVersion, activeVersion.data),
+      });
+
+      let shareVersion = shareDraft;
+      try {
+        const updated = await updateVersion(resumeId, shareDraft.id, shareDraft);
+        const updatedVersion = updated.version as ResumeVersion;
+        shareVersion = applyHeaderTitleToVersion({
+          ...shareDraft,
+          ...updatedVersion,
+          data: normalizeResumeDataShape((updatedVersion.data as ResumeData) ?? shareDraft.data),
+          aiChanges: (updatedVersion.aiChanges as AIChange[]) ?? shareDraft.aiChanges,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to sync version';
+        if (!/version not found/i.test(message)) throw error;
+        const created = await createVersion(resumeId, shareDraft);
+        const createdVersion = created.version as ResumeVersion;
+        shareVersion = applyHeaderTitleToVersion({
+          ...shareDraft,
+          ...createdVersion,
+          data: normalizeResumeDataShape((createdVersion.data as ResumeData) ?? shareDraft.data),
+          aiChanges: (createdVersion.aiChanges as AIChange[]) ?? shareDraft.aiChanges,
+        });
+        setVersions((prev) => prev.map((version) => (version.id === activeVersion.id ? shareVersion : version)));
+        if (selectedVersionId === activeVersion.id) {
+          setSelectedVersionId(shareVersion.id);
+        }
+      }
+
+      const response = await createResumeShareLink(resumeId, shareVersion.id);
+      const fallbackPath = buildResumeSharePath(shareVersion, shareVersion.data);
+      const shareUrl = `${resolvePublicAppBase()}${response.sharePath || response.shareSlug || fallbackPath}`;
       await navigator.clipboard.writeText(shareUrl);
+      window.open(shareUrl, '_blank', 'noopener,noreferrer');
       showToast('Share link copied');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to create share link');
+      showToast(error instanceof Error ? error.message : 'Failed to create share link', 'error');
     }
   };
 

@@ -2,6 +2,7 @@ export type ParsedJobDetails = {
   title?: string;
   company?: string;
   description?: string;
+  location?: string;
   sourceUrl: string;
   sourceType?: string;
   success: boolean;
@@ -70,6 +71,29 @@ function extractTagInnerHtml(html: string, tag: string, classNamePart: string): 
   );
   const match = html.match(regex);
   return match?.[1];
+}
+
+function extractTitleTag(html: string): string | undefined {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return normalizeWhitespace(match ? decodeHtmlEntities(match[1]) : '');
+}
+
+function extractBeforeMarker(html: string, markerClassNamePart: string): string {
+  const marker = new RegExp(`<[^>]*class=["'][^"']*${escapeRegExp(markerClassNamePart)}[^"']*["'][^>]*>`, 'i');
+  const match = marker.exec(html);
+  if (!match || match.index < 0) return html;
+  return html.slice(0, match.index);
+}
+
+function extractEmbeddedJsonString(html: string, key: string): string | undefined {
+  const regex = new RegExp(`"${escapeRegExp(key)}":"([\\s\\S]*?)"(?=,")`, 'i');
+  const match = html.match(regex);
+  if (!match) return undefined;
+  try {
+    return normalizeWhitespace(stripHtml(JSON.parse(`"${match[1]}"`)));
+  } catch {
+    return normalizeWhitespace(stripHtml(decodeHtmlEntities(match[1])));
+  }
 }
 
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
@@ -145,16 +169,57 @@ function parseLinkedInJob(html: string) {
     extractMetaContent(html, 'property', 'og:description'),
     extractMetaContent(html, 'name', 'description'),
   );
+  const location = normalizeWhitespace(stripHtml(extractTagInnerHtml(html, 'span', 'topcard__flavor--bullet') ?? ''));
 
-  return { title, company, description };
+  return { title, company, description, location };
 }
 
-function parseGenericJob(html: string) {
+function parseGreenhouseTitle(title?: string) {
+  const normalized = normalizeWhitespace(title);
+  if (!normalized) return {};
+  const cleaned = normalized.replace(/^Job Application for\s+/i, '').trim();
+  const match = cleaned.match(/^(.*?)\s+at\s+(.+)$/i);
+  if (!match) return { title: cleaned };
+  return {
+    title: normalizeWhitespace(match[1]),
+    company: normalizeWhitespace(match[2]),
+  };
+}
+
+function parseGreenhouseJob(html: string) {
+  const rawTitleTag = extractTitleTag(html);
+  const titleFromTitleTag = parseGreenhouseTitle(rawTitleTag);
+  const title = firstDefined(
+    normalizeWhitespace(stripHtml(extractTagInnerHtml(html, 'h1', 'section-header--large') ?? '')),
+    extractMetaContent(html, 'property', 'og:title'),
+    titleFromTitleTag.title,
+  );
+  const company = firstDefined(
+    extractEmbeddedJsonString(html, 'company_name'),
+    titleFromTitleTag.company,
+  );
+  const location = firstDefined(
+    normalizeWhitespace(stripHtml(extractTagInnerHtml(html, 'div', 'job__location') ?? '')),
+    extractEmbeddedJsonString(html, 'job_post_location'),
+    extractMetaContent(html, 'property', 'og:description'),
+  );
+
+  const htmlBeforeApplication = extractBeforeMarker(html, 'application--container');
+  const description = firstDefined(
+    normalizeWhitespace(stripHtml(extractTagInnerHtml(htmlBeforeApplication, 'div', 'job__description') ?? '')),
+    extractEmbeddedJsonString(html, 'content'),
+  );
+
+  return { title, company, description, location };
+}
+
+function parseGenericJobPage(html: string) {
   const jobPosting = extractJsonLdJobPosting(html);
   const title = firstDefined(
     normalizeWhitespace(typeof jobPosting?.title === 'string' ? jobPosting.title : ''),
     extractMetaContent(html, 'property', 'og:title'),
     extractMetaContent(html, 'name', 'twitter:title'),
+    extractTitleTag(html),
   );
   const company = firstDefined(
     normalizeWhitespace(
@@ -169,8 +234,13 @@ function parseGenericJob(html: string) {
     extractMetaContent(html, 'property', 'og:description'),
     extractMetaContent(html, 'name', 'description'),
   );
+  const location = normalizeWhitespace(
+    typeof jobPosting?.jobLocation === 'object' && jobPosting?.jobLocation
+      ? JSON.stringify(jobPosting.jobLocation)
+      : '',
+  );
 
-  return { title, company, description };
+  return { title, company, description, location };
 }
 
 function getSourceType(url: URL) {
@@ -212,16 +282,23 @@ export async function parseJobUrl(rawUrl: string): Promise<ParsedJobDetails> {
     const html = await response.text();
     const parsed = /(^|\.)linkedin\.com$/i.test(url.hostname)
       ? parseLinkedInJob(html)
-      : parseGenericJob(html);
+      : /(^|\.)(job-boards|boards)\.greenhouse\.io$/i.test(url.hostname)
+        ? parseGreenhouseJob(html)
+        : parseGenericJobPage(html);
     const title = normalizeWhitespace(parsed.title);
     const company = normalizeWhitespace(parsed.company);
     const description = normalizeWhitespace(parsed.description);
-    const success = Boolean(title || company || description);
+    const location = normalizeWhitespace(parsed.location);
+    const isGreenhouse = /(^|\.)(job-boards|boards)\.greenhouse\.io$/i.test(url.hostname);
+    const success = isGreenhouse
+      ? Boolean(title && description)
+      : Boolean(title || company || description);
 
     return {
       title,
       company,
       description,
+      location,
       sourceUrl: url.toString(),
       sourceType: getSourceType(url),
       success,
