@@ -71,6 +71,11 @@ export type EducationItem = {
   isCurrent: boolean;
 };
 
+export type AwardItem = {
+  name: string;
+  year: number | null;
+};
+
 export type ParsedResume = {
   name: string | null;
   phone: string | null;
@@ -81,6 +86,7 @@ export type ParsedResume = {
   currentTitle: string | null;
   experiences: ExperienceItem[];
   education: EducationItem[];
+  awards: AwardItem[];
   skills: string[];
 };
 
@@ -642,6 +648,12 @@ function parseRoleCompanyFromMixedLine(line: string): { role: string | null; com
     // hasStrongOrgSignal excludes university/college/institute so that "University Research Assistant"
     // is treated as a role phrase rather than split into company="University Research", role="Assistant".
     const hasStrongOrgSignal = companyWords.some((w) => /(inc\.?|pte\.?\s+ltd|llc|ltd\.?|corp\.?|technologies|labs?)/.test(w));
+    const weakSinglePrefix = companyWords.length === 1
+      && /^(user|product|ux|ui|visual|graphic|motion|service|brand|design)$/i.test(companyWords[0] ?? '')
+      && roleWords.length >= 2;
+    if (weakSinglePrefix) {
+      return { role: remainder, company: null };
+    }
     if (titleOnlyPrefix && !hasStrongOrgSignal && words.length <= 6) {
       return { role: remainder, company: null };
     }
@@ -715,6 +727,8 @@ function looksExperienceOrgLine(text: string): boolean {
   const t = text.trim();
   if (looksLikeLocation(t)) return false;
   if (ACTION_VERB_HINT.test(t)) return false;
+  if ((t.match(/,/g)?.length ?? 0) >= 2) return false;
+  if (/\b(i|we|my|our)\b/i.test(t)) return false;
   if (t.length > 120) return false; // reject obvious long prose
   if (t.split(/\s+/).length > 12) return false;
   if (/\.\s/.test(t)) return false;
@@ -1325,6 +1339,15 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
         && !nextHasDate
         && !nextHasRoleHeader
         && next.lines.some((l) => AWARD_HINT.test(l.text));
+      const nextLooksContinuationProse = !nextHasDate
+        && !nextHasRoleHeader
+        && !nextHasOrgHeader
+        && next.lines.length > 0
+        && next.lines.every((l) =>
+          !looksDateAnchor(l)
+          && !looksExperienceEntryHeader(l.text)
+          && (looksContinuationLine(l.text) || ACTION_VERB_HINT.test(l.text)),
+        );
       const currentHasRoleHeader = current.lines.some((l) => looksExperienceEntryHeader(l.text));
       const nextLeadLine = next.lines.find((l) => !isBulletText(l.text)) ?? next.lines[0] ?? null;
       const nextStartsWithDateAnchor = Boolean(nextLeadLine && looksDateAnchor(nextLeadLine));
@@ -1363,6 +1386,8 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
           || (currentHasBullets && !nextStartsWithDateAnchor && (nextHasBullets || next.lines.some((l) => looksContinuationLine(l.text))) && !nextHasRoleHeader && nextStartsWithContinuation)
           // Current has date+role but no org header; next starts with org text and bullets.
           || (currentHasRoleHeader && !currentHasOrgHeader && !nextStartsWithDateAnchor && nextHasOrgHeader && nextHasBullets && !nextHasRoleHeader)
+          // Current has date+role and next is a prose-only continuation block.
+          || ((currentHasDate || currentHasRoleHeader) && nextLooksContinuationProse)
         )
         && !nextLooksAwards;
 
@@ -1399,6 +1424,26 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
         current.lines.push(...next.lines);
         next.lines = [];
         continue;
+      }
+
+      // When the next block starts with one or more continuation prose lines (often from the
+      // right-hand bullet column) and then introduces a fresh dated header, move only those
+      // leading prose lines back to the current block.
+      if (currentHasDate && nextHasDate && next.lines.length > 1) {
+        let leadContinuationCount = 0;
+        while (leadContinuationCount < next.lines.length) {
+          const candidate = next.lines[leadContinuationCount];
+          if (!candidate) break;
+          if (looksDateAnchor(candidate)) break;
+          const t = candidate.text.trim();
+          if (!t) break;
+          if (looksExperienceEntryHeader(t) || looksExperienceOrgLine(t)) break;
+          if (!(looksContinuationLine(t) || ACTION_VERB_HINT.test(t))) break;
+          leadContinuationCount += 1;
+        }
+        if (leadContinuationCount > 0) {
+          current.lines.push(...next.lines.splice(0, leadContinuationCount));
+        }
       }
 
       if (currentHasDate && currentHasBullets && !nextHasDate && next.lines.length === 1 && looksExperienceEntryHeader(next.lines[0].text)) {
@@ -1505,6 +1550,29 @@ function normalizeEntryBlocks(blocks: Block[]): Block[] {
     }
   }
 
+  // Final compact pass: merge tiny no-date prose-only experience blocks back into the
+  // previous dated block. This catches residual right-column continuation fragments.
+  for (let i = 0; i < out.length - 1; i += 1) {
+    const current = out[i];
+    const next = out[i + 1];
+    if (current.section !== 'experience' || next.section !== 'experience') continue;
+    const currentHasDate = current.lines.some((line) => hasDateText(line.text));
+    const nextHasDate = next.lines.some((line) => hasDateText(line.text));
+    const nextLooksTinyContinuation = !nextHasDate
+      && next.lines.length > 0
+      && next.lines.length <= 3
+      && next.lines.every((line) => {
+        const t = line.text.trim();
+        return !looksExperienceEntryHeader(t)
+          && !looksExperienceOrgLine(t)
+          && (looksSentenceLikeProse(t) || looksContinuationLine(t) || ACTION_VERB_HINT.test(t));
+      });
+    if (currentHasDate && nextLooksTinyContinuation) {
+      current.lines.push(...next.lines);
+      next.lines = [];
+    }
+  }
+
   return out.filter((b) => b.lines.length > 0);
 }
 
@@ -1555,12 +1623,18 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   const contactAnchorYs = (page1.length > 0 ? page1 : lines)
     .filter((line) => /@|https?:\/\/|www\.|linkedin|\+?\d{2}\s*\d{4}/i.test(line.text))
     .map((line) => line.y0);
+  const contactAnchorXs = (page1.length > 0 ? page1 : lines)
+    .filter((line) => /@|https?:\/\/|www\.|linkedin|\+?\d{2}\s*\d{4}/i.test(line.text))
+    .map((line) => line.x0);
   const isNearContactCluster = (line: ExtractedLine): boolean => {
     if (contactAnchorYs.length === 0) return true;
     const minDistance = contactAnchorYs
       .map((y) => Math.abs(line.y0 - y))
       .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY;
-    return minDistance <= 150;
+    const minXDistance = contactAnchorXs
+      .map((x) => Math.abs(line.x0 - x))
+      .sort((a, b) => a - b)[0] ?? Number.POSITIVE_INFINITY;
+    return minDistance <= 150 && minXDistance <= 140;
   };
 
   const nameCandidate = [...combinedTop]
@@ -1592,7 +1666,7 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
       if (!allTitleOrUpper && !allLower) return false;
       return true;
     })
-    .sort((a, b) => ((b.line.fontSize ?? 12) - (a.line.fontSize ?? 12)) || (b.line.y0 - a.line.y0))[0]?.line;
+    .sort((a, b) => (b.line.y0 - a.line.y0) || ((b.line.fontSize ?? 12) - (a.line.fontSize ?? 12)))[0]?.line;
 
   // Fallback: two adjacent single-word TitleCase lines that together form a full name.
   // E.g. "Edwind" (line 0) + "Tan." (line 1) → "Edwind Tan"
@@ -1602,8 +1676,9 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
       const b = normalizeNameLineCandidate((combinedTop[i + 1]?.text ?? '').trim());
       if (!a || !b) continue;
       if (a.split(/\s+/).length !== 1 || b.split(/\s+/).length !== 1) continue;
-      if (!/^[A-Z]/.test(a) || !/^[A-Z]/.test(b)) continue;
+      if (!/^[A-Z][a-z'-]{2,}$/.test(a) || !/^[A-Z][a-z'-]{2,}$/.test(b)) continue;
       if (/[@\d\/:]/.test(a) || /[@\d\/:]/.test(b)) continue;
+      if (NAME_ROLE_NOISE.test(a) || NAME_ROLE_NOISE.test(b)) continue;
       if (TITLE_HINT.test(a) || TITLE_HINT.test(b)) continue;
       if (DEGREE_HINT.test(a) || DEGREE_HINT.test(b)) continue;
       if (/^(experience|education|skills|work|contact|summary|about|projects|introduction)$/i.test(a)) continue;
@@ -1714,7 +1789,7 @@ function parseContact(lines: ExtractedLine[], allLines: ExtractedLine[], warning
   });
 
   // Prefer merged nav-bar name over plain candidate (nav bar is more reliable for styled resumes).
-  let name = mergedNameCandidate ?? splitAwardNameCandidate ?? adjacentNameCandidate ?? nameCandidate?.text ?? camelCaseNameCandidate ?? null;
+  let name = mergedNameCandidate ?? splitAwardNameCandidate ?? nameCandidate?.text ?? camelCaseNameCandidate ?? adjacentNameCandidate ?? null;
 
   // Post-process: strip Chinese/CJK suffix and "|" separator
   // e.g. "Loo Zi Ling | 呂紫寧" → "Loo Zi Ling"
@@ -1789,6 +1864,17 @@ function looksContinuationLine(text: string): boolean {
   if (/^[A-Z][A-Z\s]{3,}$/.test(t)) return false;
   if (/^\+?\s*add\s+/i.test(t)) return false;
   return /^[a-z(]/.test(t) || /^[A-Za-z0-9].{0,140}$/.test(t);
+}
+
+function looksSentenceLikeProse(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 6) return false;
+  if (/[.?!]$/.test(t)) return true;
+  if ((t.match(/,/g)?.length ?? 0) >= 1 && words.length >= 7) return true;
+  if (/\b(i|we|my|our|to|with|across|through|responsible)\b/i.test(t) && words.length >= 7) return true;
+  return false;
 }
 
 function stitchBullets(lines: ExtractedLine[]): { bullets: string[]; prose: string[] } {
@@ -1973,7 +2059,7 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
     return acc;
   }, []);
 
-  const contentLines = stitched.prose
+  let contentLines = stitched.prose
     .flatMap((text) => splitColumnFragments(text))
     .filter((t) => !looksDateAnchor({ ...lines[0], text: t }))
     .filter((t) => !isBulletText(t))
@@ -2074,6 +2160,10 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
       && !EMPLOYMENT_TYPE.test(t),
     ) ?? null;
   }
+  if (role && !company) {
+    const freelanceLine = contentLines.find((t) => /^freelance$/i.test(t.trim()));
+    if (freelanceLine) company = 'Freelance';
+  }
 
   const firstNonDate = contentLines.find((t) => !hasDateText(t)) ?? null;
   if (role && company && role === company && firstNonDate) {
@@ -2098,6 +2188,11 @@ function parseExperienceBlock(block: Block, idx: number, warnings: string[]): Ex
   role = swapped.role;
   company = swapped.company;
   if (swapped.swapped) warnings.push(`Swapped role/company for experience #${idx + 1} based on heuristics.`);
+
+  if (company && looksSentenceLikeProse(company)) {
+    contentLines = [company, ...contentLines];
+    company = null;
+  }
 
   role = role ? removeDateFragments(role) : null;
   company = company ? removeDateFragments(company) : null;
@@ -2534,6 +2629,63 @@ function parseSkillsFromSections(lines: ExtractedLine[], sections: DetectedSecti
   return unique(tokens).slice(0, 8);
 }
 
+function parseAwardsFromSections(lines: ExtractedLine[], sections: DetectedSection[]): AwardItem[] {
+  const awardEntryHint = /\b(award|awards|recognition|achievement|medal|honou?r|finalist|winner|first\s+place|second\s+place|third\s+place|prize|shortlist|design\s+mark)\b/i;
+  const awardStrongHint = /\b(medal|finalist|winner|first\s+place|second\s+place|third\s+place|prize|shortlist|design\s+mark|issued\s+by|honou?rable)\b/i;
+  const awardSections = sections.filter((s) => s.type === 'other');
+  const scopedLines = awardSections.flatMap((section) => lines.slice(section.startIdx, section.endIdx + 1));
+  const candidateLines = scopedLines.length > 0 ? scopedLines : lines;
+  const strictMode = scopedLines.length === 0;
+  const fragments = candidateLines
+    .flatMap((line) => splitColumnFragments(line.text).map((text) => cleanLineText(text)))
+    .filter(Boolean);
+  const entries: AwardItem[] = [];
+
+  for (let i = 0; i < fragments.length; i += 1) {
+    const text = fragments[i] ?? '';
+    if (!text) continue;
+    if (looksSectionHeadingText(text)) continue;
+    if (/^awards?(?:\s*&\s*(?:achievements?|recognition))?$/i.test(text)) continue;
+    if (!awardEntryHint.test(text)) continue;
+    if (strictMode && !awardStrongHint.test(text)) continue;
+
+    const years = [...text.matchAll(/\b(19|20)\d{2}\b/g)].map((m) => Number(m[0]));
+    let year = years.length > 0 ? years[years.length - 1] : null;
+    if (year == null) {
+      for (let j = i + 1; j <= Math.min(i + 2, fragments.length - 1); j += 1) {
+        const next = fragments[j] ?? '';
+        const nextYear = next.match(/\b(19|20)\d{2}\b/)?.[0];
+        if (nextYear && (/issued\s+by/i.test(next) || awardStrongHint.test(text))) {
+          year = Number(nextYear);
+          break;
+        }
+      }
+    }
+    if (year == null) continue;
+
+    const name = normalizeOutputText(
+      text
+        .replace(/\bissued\s+by\b.*$/i, '')
+        .replace(/\b(19|20)\d{2}\b/g, '')
+        .replace(/\s*[↗→]\s*$/g, '')
+        .replace(/\s*,\s*$/g, '')
+        .trim(),
+    );
+    if (name.length < 4) continue;
+    entries.push({ name, year });
+  }
+
+  const deduped = unique(entries.map((item) => `${item.name.toLowerCase()}::${item.year ?? 0}`))
+    .map((key) => {
+      const [name, yearRaw] = key.split('::');
+      const source = entries.find((item) => item.name.toLowerCase() === name && String(item.year ?? 0) === yearRaw);
+      return source ?? null;
+    })
+    .filter((item): item is AwardItem => Boolean(item));
+
+  return deduped.slice(0, 8);
+}
+
 function inferSummary(lines: ExtractedLine[], sections: DetectedSection[]): string | null {
   const isSummaryNoise = (text: string): boolean => {
     if (!text) return true;
@@ -2739,6 +2891,283 @@ function dropResidualContinuationEntries(items: ExperienceItem[]): ExperienceIte
     }
     return true;
   });
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+}
+
+function normalizeInlineLocationNoise(text: string): string {
+  return text
+    .replace(/\b[A-Z][A-Za-z' -]{1,24},\s*(?:singapore|france|malaysia|indonesia|thailand|philippines|vietnam|india|china|japan|australia|canada|uk|usa)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function collapseRepeatedLeadPhrase(text: string): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  const normalizeToken = (token: string) => token.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalized = words.map(normalizeToken);
+  for (let phraseLen = 4; phraseLen <= Math.min(14, Math.floor(normalized.length / 2)); phraseLen += 1) {
+    const first = normalized.slice(0, phraseLen).join(' ');
+    const second = normalized.slice(phraseLen, phraseLen * 2).join(' ');
+    if (first && first === second) {
+      return [...words.slice(0, phraseLen), ...words.slice(phraseLen * 2)].join(' ').trim();
+    }
+  }
+  return text;
+}
+
+function normalizeExperienceRoleText(text: string): string {
+  let out = cleanLineText(text)
+    .replace(/UI\/U\s*X/gi, 'UI/UX')
+    .replace(/UI\/UXD\s*esigner/gi, 'UI/UX Designer')
+    .replace(/\bXDesigner\b/gi, 'X Designer')
+    .replace(/\bD esigner\b/gi, 'Designer')
+    .replace(/\s+\./g, '.')
+    .trim();
+  out = out.replace(/\s+In\s+[A-Z][A-Za-z0-9&' .-]{2,50},?\s+I[a-z].*$/i, '').trim();
+  out = out.replace(/,\s*I[a-z].*$/i, '').trim();
+  return out;
+}
+
+function normalizeExperienceBulletText(text: string): string {
+  let out = cleanLineText(text);
+  out = collapseRepeatedLeadPhrase(out);
+  out = normalizeInlineLocationNoise(out);
+  out = out
+    .replace(/\b[Ii]nthe\b/g, 'In the')
+    .replace(/\b[Ii]\s*nthe\b/g, 'In the')
+    .replace(/\b[Ii]was\b/g, 'I was')
+    .replace(/\b[Ii]\s*was\b/g, 'I was')
+    .replace(/\b[Ii]redesigned\b/g, 'I redesigned')
+    .replace(/\b[Ii]\s*redesigned\b/g, 'I redesigned')
+    .replace(/\bPMsandData\b/g, 'PMs and Data')
+    .replace(/\bPMsand\b/g, 'PMs and')
+    .replace(/\bPMsto\b/g, 'PMs to')
+    .replace(/\bSE Ofrom\b/g, 'SEO from')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return out;
+}
+
+function buildBulletsFromContinuationLines(lines: string[]): string[] {
+  const bullets: string[] = [];
+  let current = '';
+  for (const raw of lines) {
+    const text = cleanLineText(raw);
+    if (!text) continue;
+    if (!current) {
+      current = text;
+      continue;
+    }
+    const currentWordCount = current.split(/\s+/).filter(Boolean).length;
+    const startsWithVerb = ACTION_VERB_HINT.test(text) || /^(?:[A-Z][a-z]+ed|Improved|Optimized|Led|Built|Managed)\b/.test(text);
+    const startsWithListMarker = /^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa]\s*/.test(raw);
+    const startsLikeContinuation = /^(and|or|to|for|with|on|in|of|the)\b/i.test(text);
+    const startNewBullet =
+      (startsWithListMarker && currentWordCount >= 3)
+      || (startsWithVerb && !startsLikeContinuation && currentWordCount >= 6)
+      || (/[.!?]$/.test(current) && /^[A-Z]/.test(text) && currentWordCount >= 6);
+    if (startNewBullet) {
+      bullets.push(cleanLineText(current));
+      current = text;
+      continue;
+    }
+    current = cleanLineText(`${current} ${text}`);
+  }
+  if (current) bullets.push(cleanLineText(current));
+
+  return bullets
+    .map((b) => b.replace(/^[•\-*+\u2022\u00d1\u00c8\u21b3\u2197\u25cf\u25aa\d.\s]+/, '').trim())
+    .map((b) => normalizeExperienceBulletText(b))
+    .filter((b) => b.length > 0)
+    .filter((b) => !looksLikeLocation(b))
+    .slice(0, 8);
+}
+
+function parseExperienceFromPairedColumns(lines: ExtractedLine[], sections: DetectedSection[]): ExperienceItem[] | null {
+  const expSections = sections.filter((s) => s.type === 'experience');
+  if (expSections.length === 0) return null;
+  const sectionLines = expSections.flatMap((section) => lines.slice(section.startIdx, section.endIdx + 1));
+  const dateCandidates = sectionLines.filter((line) => looksDateAnchor(line));
+  if (dateCandidates.length < 3) return null;
+  const hasParallelDatePairs = dateCandidates.some((anchor, idx) =>
+    dateCandidates.slice(idx + 1).some((other) =>
+      anchor.page === other.page
+      && Math.abs(anchor.y0 - other.y0) <= 4
+      && Math.abs(anchor.x0 - other.x0) >= 120,
+    ));
+  if (hasParallelDatePairs) return null;
+
+  const bucketCounts = new Map<number, number>();
+  for (const anchor of dateCandidates) {
+    const bucket = Math.round(anchor.x0 / 20) * 20;
+    bucketCounts.set(bucket, (bucketCounts.get(bucket) ?? 0) + 1);
+  }
+  const rankedBuckets = [...bucketCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const primaryBucket = rankedBuckets[0];
+  const secondaryBucket = rankedBuckets[1];
+  if (!primaryBucket) return null;
+  const primaryCount = primaryBucket[1];
+  const secondaryCount = secondaryBucket?.[1] ?? 0;
+  // Guard against dual-column timeline layouts where both columns have date anchors.
+  if (primaryCount < 3 || (secondaryCount > 0 && primaryCount < secondaryCount + 2)) return null;
+
+  const dateAnchors = dateCandidates
+    .filter((anchor) => Math.abs(anchor.x0 - primaryBucket[0]) <= 35)
+    .sort((a, b) => (a.page === b.page ? b.y0 - a.y0 : a.page - b.page));
+  if (dateAnchors.length < 3) return null;
+
+  const metaX = median(dateAnchors.map((line) => line.x0));
+  if (metaX == null) return null;
+
+  const rightLineCount = sectionLines.filter((line) => line.x0 > metaX + 60).length;
+  const leftLineCount = sectionLines.filter((line) => line.x0 < metaX - 60).length;
+  const bodyOnRight = rightLineCount >= leftLineCount;
+  const bodyCount = bodyOnRight ? rightLineCount : leftLineCount;
+  if (bodyCount < dateAnchors.length * 2) return null;
+
+  const out: ExperienceItem[] = [];
+  const anchorsByPage = new Map<number, ExtractedLine[]>();
+  for (const anchor of dateAnchors) {
+    const pageAnchors = anchorsByPage.get(anchor.page) ?? [];
+    pageAnchors.push(anchor);
+    anchorsByPage.set(anchor.page, pageAnchors);
+  }
+
+  for (const [page, anchors] of anchorsByPage.entries()) {
+    const pageLines = sectionLines.filter((line) => line.page === page);
+    if (pageLines.length === 0) continue;
+    const sortedAnchors = [...anchors].sort((a, b) => b.y0 - a.y0);
+    const entryBuckets: ExtractedLine[][] = sortedAnchors.map(() => []);
+
+    for (const line of pageLines) {
+      let bestIdx = -1;
+      let bestScore = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < sortedAnchors.length; i += 1) {
+        const anchor = sortedAnchors[i];
+        if (!anchor) continue;
+        let score = Math.abs(line.y0 - anchor.y0);
+        // Most body lines are below the date anchor while headers are just above it.
+        // Bias assignments toward "below the anchor" to reduce cross-entry bleeding.
+        score += line.y0 > anchor.y0 ? 24 : -24;
+        if (looksDateAnchor(line) && line !== anchor) score += 90;
+        if (score < bestScore) {
+          bestScore = score;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx >= 0 && bestScore < 260) {
+        entryBuckets[bestIdx]!.push(line);
+      }
+    }
+
+    for (let i = 0; i < sortedAnchors.length; i += 1) {
+      const anchor = sortedAnchors[i];
+      if (!anchor) continue;
+      const entryLines = (entryBuckets[i] ?? [])
+        .sort((a, b) => {
+          if (Math.abs(a.y0 - b.y0) > 2) return b.y0 - a.y0;
+          return a.x0 - b.x0;
+        });
+      if (entryLines.length === 0) continue;
+
+      const metaLines = entryLines.filter((line) => Math.abs(line.x0 - metaX) <= 90);
+      const bodyLines = entryLines.filter((line) => (bodyOnRight ? line.x0 > metaX + 60 : line.x0 < metaX - 60));
+      const dateInfo = parseDateRange(anchor.text);
+
+      let role: string | null = null;
+      let company: string | null = null;
+      const carryIntoBullets: string[] = [];
+
+      for (const line of metaLines) {
+        if (line === anchor) continue;
+        const parts = splitColumnFragments(line.text);
+        for (let pIdx = 0; pIdx < parts.length; pIdx += 1) {
+          const part = cleanLineText(parts[pIdx] ?? '');
+          if (!part || hasDateText(part)) continue;
+          if (!role && looksExperienceEntryHeader(part)) {
+            role = part;
+            if (parts.length > 1 && pIdx === 0) {
+              carryIntoBullets.push(...parts.slice(1).map((p) => cleanLineText(p)).filter(Boolean));
+            }
+            continue;
+          }
+          const companyLooksLikeProse = /\b(i|my|we|our)\b/i.test(part) || (part.includes(',') && part.split(/\s+/).length > 6);
+          if (!company && !looksLikeLocation(part) && !looksSentenceLikeProse(part) && !companyLooksLikeProse && !ACTION_VERB_HINT.test(part)) {
+            company = part;
+          } else if (!looksLikeLocation(part)) {
+            carryIntoBullets.push(part);
+          }
+        }
+      }
+
+      const bodyParts = bodyLines
+        .flatMap((line) => splitColumnFragments(line.text))
+        .map((text) => cleanLineText(text))
+        .filter(Boolean);
+      let roleFromBody: string | null = null;
+      let companyFromBody: string | null = null;
+      for (const part of bodyParts.slice(0, 5)) {
+        if (!part || looksDateAnchor({ ...anchor, text: part }) || looksLikeLocation(part)) continue;
+        if (!roleFromBody && looksExperienceEntryHeader(part) && part.split(/\s+/).length <= 10) {
+          roleFromBody = part;
+          continue;
+        }
+        if (!companyFromBody && !TITLE_HINT.test(part) && looksExperienceOrgLine(part) && part.split(/\s+/).length <= 8) {
+          companyFromBody = part;
+        }
+      }
+      if (!role && roleFromBody) role = roleFromBody;
+      if (!company && companyFromBody) company = companyFromBody;
+
+      const headerPartsToStrip = new Set([roleFromBody, companyFromBody].filter(Boolean));
+      const bodyFragments = bodyParts
+        .filter((text) => !looksDateAnchor({ ...anchor, text }))
+        .filter((text) => !looksExperienceEntryHeader(text))
+        .filter((text) => !looksLikeLocation(text))
+        .filter((text) => !headerPartsToStrip.has(text));
+      const normalizedBodySet = new Set(bodyFragments.map((text) => text.toLowerCase().replace(/[^a-z0-9]+/g, '')));
+      const carryFragments = carryIntoBullets.filter((text) => {
+        const normalized = text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        return normalized.length > 0 && !normalizedBodySet.has(normalized);
+      });
+      const bullets = buildBulletsFromContinuationLines([...carryFragments, ...bodyFragments]).filter((bullet) => {
+        if (!bullet) return false;
+        if (EMPLOYMENT_TYPE.test(bullet)) return false;
+        const norm = bullet.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const roleNorm = (role ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const companyNorm = (company ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        return norm !== roleNorm && norm !== companyNorm;
+      });
+      if (!role && bullets.length === 0) continue;
+      if (!company && role && looksExperienceOrgLine(role) && !TITLE_HINT.test(role)) {
+        company = role;
+        role = null;
+      }
+      const cleanedRole = role ? normalizeExperienceRoleText(removeDateFragments(role)) : null;
+      const cleanedCompany = company
+        ? normalizeOutputText(removeDateFragments(company))
+          .replace(/\s+\./g, '.')
+          .replace(/\.$/, '')
+          .trim()
+        : null;
+
+      out.push({
+        start: dateInfo.start,
+        end: dateInfo.end,
+        isCurrent: dateInfo.isCurrent,
+        role: cleanedRole,
+        company: cleanedCompany,
+        description: bullets,
+      });
+    }
+  }
+
+  return out.length >= 3 ? out : null;
 }
 
 function enrichExperienceDatesFromContactLines(
@@ -3056,7 +3485,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
 
   const contact = parseContact(contactLines, lines, warnings);
 
-  const experiences = sortRecentFirst(enrichExperienceDatesFromContactLines(
+  const regularExperiences = sortRecentFirst(enrichExperienceDatesFromContactLines(
     dropResidualContinuationEntries(
       mergePairedDateAndRoleExperienceEntries(
         reconcileSplitExperienceEntries(
@@ -3070,6 +3499,16 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     lines,
     sections,
   )).slice(0, 5);
+
+  let experiences = regularExperiences;
+  const pairedColumnExperiences = parseExperienceFromPairedColumns(lines, sections);
+  if (pairedColumnExperiences) {
+    const candidate = sortRecentFirst(pairedColumnExperiences).slice(0, 5);
+    if (candidate.length > 0) {
+      experiences = candidate;
+      warnings.push('Applied paired-column experience parser fallback.');
+    }
+  }
 
   const rawEducation = blocks
     .filter((b) => b.section === 'education')
@@ -3100,6 +3539,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
   const education = sortRecentFirst(enrichEducationFromSectionLines(mergedEducation, lines, sections)).slice(0, 2);
 
   const skills = parseSkillsFromSections(lines, sections);
+  const awards = parseAwardsFromSections(lines, sections);
   const summary = inferSummary(lines, sections);
   const experienceCountry = experiences
     .flatMap((e) => [e.company ?? '', e.role ?? ''])
@@ -3118,6 +3558,7 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
     currentTitle: (contact.currentTitle ?? experiences.find((e) => e.isCurrent)?.role ?? experiences.find((e) => TITLE_HINT.test(e.role ?? ''))?.role ?? null)?.replace(/\s*[|/]\s*$/, '').replace(/,\s*$/, '').trim() || null,
     experiences,
     education,
+    awards,
     skills,
   };
 
@@ -3149,6 +3590,10 @@ export function parseResumeFromLines(linesInput: ExtractedLine[], opts: ParseOpt
       school: edu.school ? normalizeOutputText(edu.school) : null,
       location: edu.location ? normalizeOutputText(edu.location) : null,
     })),
+    awards: data.awards
+      .map((award) => ({ name: normalizeOutputText(award.name), year: award.year }))
+      .filter((award) => award.name.length > 0)
+      .slice(0, 8),
     skills: unique(data.skills.map((s) => normalizeOutputText(s)).filter(Boolean)).slice(0, 8),
   };
 
@@ -3210,6 +3655,12 @@ export function toResumeDataFromParsedResume(parsed: ParsedResume): ResumeData {
     endDate: (edu.end.month == null || edu.end.year == null)
       ? { ...unknownEnd, present: edu.isCurrent }
       : { month: edu.end.month, year: edu.end.year, present: edu.isCurrent },
+  }));
+
+  data.awards = parsed.awards.map((award, idx) => ({
+    id: `award-${idx + 1}`,
+    name: award.name,
+    year: award.year ?? currentYear,
   }));
 
   return data;

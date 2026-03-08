@@ -14,5 +14,6 @@ export const defaultResumeData = (email = ''): ResumeData => ({
   workExperience: [],
   education: [],
   certifications: [],
+  awards: [],
   skills: [],
 });

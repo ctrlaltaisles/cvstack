@@ -497,6 +497,7 @@ async function parseUploadOrRespond(buffer: Buffer, res: express.Response, fileN
             end: { month: edu.endDate?.month ?? null, year: edu.endDate?.year ?? null },
             isCurrent: Boolean(edu.endDate?.present),
           })),
+          awards: [],
           skills: data.skills ?? [],
         };
 
@@ -525,6 +526,7 @@ async function parseUploadOrRespond(buffer: Buffer, res: express.Response, fileN
       currentTitle: null,
       experiences: [],
       education: [],
+      awards: [],
       skills: [],
     };
 

@@ -1475,6 +1475,7 @@ function compactResumeDataForCuration(resumeData: ResumeData): ResumeData {
     })),
     education: (resumeData.education ?? []).slice(0, 5),
     certifications: (resumeData.certifications ?? []).slice(0, 5),
+    awards: (resumeData.awards ?? []).slice(0, 8),
     skills: (resumeData.skills ?? []).slice(0, 40).map((skill) => clamp(skill, 40)),
   };
 }

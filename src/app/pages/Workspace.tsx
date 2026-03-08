@@ -9,7 +9,7 @@ import {
   Paperclip, ExternalLink, AlertCircle, Info, Mic, Square, LoaderCircle,
 } from 'lucide-react';
 import { clearAuthStorage, createResumeShareLink, createVersion, curateResume, deleteVersion, getResume, getResumePdfBlob, listResumes, listVersions, replaceResumePdf, userStore, updateVersion } from '../../lib/api';
-import type { AIChange, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
+import type { AIChange, Award, BaseResumeModel, Certification, ContactInfo, DateValue, EducationEntry, JDVariantModel, ResumeData, ResumeVersion, WorkExperience } from '../../lib/types';
 import { useAuthGate } from '../components/AuthGate';
 import { useIsMobile } from '../components/ui/use-mobile';
 import cvLogo from '../assets/branding/cv-logo.svg';
@@ -340,6 +340,7 @@ function normalizeResumeDataShape(data: ResumeData): ResumeData {
   return {
     ...data,
     workExperience: (data.workExperience ?? []).map(normalizeWorkExperienceEntry),
+    awards: data.awards ?? [],
   };
 }
 function buildTextResume(data: ResumeData): string {
@@ -347,6 +348,12 @@ function buildTextResume(data: ResumeData): string {
   (data.workExperience ?? []).forEach(exp => { lines.push('', `${exp.role} at ${exp.company}`, formatDateRange(exp.startDate, exp.endDate)); exp.bullets.forEach(b => lines.push(`• ${b}`)); });
   lines.push('', 'EDUCATION');
   (data.education ?? []).forEach(edu => { lines.push('', `${edu.degree} — ${edu.school}`); if (edu.location) lines.push(edu.location); });
+  if ((data.awards ?? []).length > 0) {
+    lines.push('', 'AWARDS');
+    (data.awards ?? []).forEach((award) => {
+      lines.push(`${award.name} (${award.year})`);
+    });
+  }
   lines.push('', 'SKILLS', (data.skills ?? []).join(', '));
   return lines.join('\n');
 }
@@ -444,6 +451,21 @@ function buildWordDocument(data: ResumeData): Document {
         })],
       }));
       children.push(new Paragraph({ text: '', spacing: { after: 100 } }));
+    });
+  }
+  if (data.awards.length > 0) {
+    children.push(heading('AWARDS'));
+    data.awards.forEach((award) => {
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } },
+        rows: [new TableRow({
+          children: [
+            new TableCell({ width: { size: 23, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: [new Paragraph({ children: [new TextRun({ text: String(award.year), size: 20, color: '9B9B9B' })], spacing: { after: 120 } })] }),
+            new TableCell({ width: { size: 77, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }, right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } }, children: [bodyText(award.name || '', { color: '1A1A1A', after: 80 })] }),
+          ],
+        })],
+      }));
     });
   }
   if (data.skills.length > 0) {
@@ -635,6 +657,16 @@ function buildPdfDocument(data: ResumeData): jsPDF {
       );
     });
   }
+  if (data.awards.length > 0) {
+    section('AWARDS');
+    data.awards.forEach((award) => {
+      row(
+        [String(award.year || NOW.getFullYear())],
+        [award.name || 'Award Name'],
+        [],
+      );
+    });
+  }
   if (data.skills.length > 0) {
     section('SKILLS');
     writeParagraph(data.skills.join(' • '), { x: marginLeft, size: BODY_SIZE, color: [43, 43, 43], maxW: fullWidth, gap: 2 });
@@ -653,6 +685,7 @@ const EMPTY_DATA: ResumeData = {
   workExperience: [],
   education: [],
   certifications: [],
+  awards: [],
   skills: [],
 };
 const INITIAL_VERSIONS: ResumeVersion[] = [
@@ -1811,6 +1844,34 @@ function CertificationBlock({ cert, onUpdateCert, onDeleteCert }: { cert: Certif
   );
 }
 
+// ─── AwardBlock ──────────────────────────────────────────────────────────────
+
+function AwardBlock({ award, onUpdateAward, onDeleteAward }: { award: Award; onUpdateAward: (a: Award) => void; onDeleteAward: () => void }) {
+  return (
+    <div className="flex gap-10 group/award">
+      <div className="w-44 shrink-0 self-start pt-0.5">
+        <input
+          type="number"
+          min={1900}
+          max={2100}
+          value={award.year}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isFinite(next)) return;
+            onUpdateAward({ ...award, year: Math.max(1900, Math.min(2100, next)) });
+          }}
+          className="w-full max-w-[110px] text-xs text-[#9B9B9B] bg-transparent border border-[#EFEFEF] rounded-[8px] px-2 py-1.5 outline-none focus:border-[#DADADA]"
+          aria-label="Award year"
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <InlineText value={award.name} onChange={(value) => onUpdateAward({ ...award, name: value })} className="text-sm text-[#1A1A1A]" placeholder="Award Name" />
+        <button onClick={onDeleteAward} className="block mt-2 text-xs text-[#CBCBCB] hover:text-red-400 opacity-0 group-hover/award:opacity-100">Remove entry</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── SuggestionCard ──────────────────────────────────────────────────────────
 
 // ─── ResumeView ──────────────────────────────────────────────────────────────
@@ -1841,6 +1902,7 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
   const hasWorkExperience = (data.workExperience ?? []).length > 0;
   const hasEducation = (data.education ?? []).length > 0;
   const hasCertifications = (data.certifications ?? []).length > 0;
+  const hasAwards = (data.awards ?? []).length > 0;
   const hasSkills = (data.skills ?? []).length > 0;
   const toggleOriginal = (groupKey: string) => {
     setShowOriginalGroups((prev) => {
@@ -1978,6 +2040,13 @@ function ResumeView({ version, onUpdateData, onAcceptChange, onRejectChange, onS
           <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Certifications</p>
           <div className="space-y-6">{(data.certifications ?? []).map(cert => <CertificationBlock key={cert.id} cert={cert} onUpdateCert={u => update({ certifications: data.certifications.map(c => c.id === cert.id ? u : c) })} onDeleteCert={() => update({ certifications: data.certifications.filter(c => c.id !== cert.id) })} />)}</div>
           {!isReviewLocked && <button onClick={() => update({ certifications: [...data.certifications, { id: `cert-${Date.now()}`, name: 'Certificate Name', organization: 'Issuing Organization', issuedMonth: 1, issuedYear: 2024, credentialId: '' }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Certification</button>}
+        </div>
+        {/* Awards */}
+        <div className={`resume-section mb-7 ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasAwards}>
+          <div className="h-px bg-[#EFEFEF] mb-7" />
+          <p className="text-[11px] uppercase tracking-widest text-[#AAAAAA] mb-7">Awards</p>
+          <div className="space-y-6">{(data.awards ?? []).map(award => <AwardBlock key={award.id} award={award} onUpdateAward={u => update({ awards: data.awards.map(a => a.id === award.id ? u : a) })} onDeleteAward={() => update({ awards: data.awards.filter(a => a.id !== award.id) })} />)}</div>
+          {!isReviewLocked && <button onClick={() => update({ awards: [...(data.awards ?? []), { id: `award-${Date.now()}`, name: 'Award Name', year: NOW.getFullYear() }] })} className="mt-6 flex items-center gap-1.5 text-sm text-[#CBCBCB] hover:text-[#9B9B9B]"><Plus size={13} strokeWidth={1.8} /> Add Award</button>}
         </div>
         {/* Skills */}
         <div className={`resume-section ${isReviewLocked ? 'pointer-events-none' : ''}`} data-empty={!hasSkills}>
