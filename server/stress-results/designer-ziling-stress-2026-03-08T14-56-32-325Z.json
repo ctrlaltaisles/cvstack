@@ -1,0 +1,314 @@
+{
+  "generatedAt": "2026-03-08T14:56:32.327Z",
+  "runs": [
+    {
+      "run": 1,
+      "elapsedMs": 67435,
+      "qualityPassed": true,
+      "score": 0.36,
+      "passedIds": [
+        "about_product",
+        "about_systems",
+        "about_research_craft",
+        "nus_editorial",
+        "tribal_research"
+      ],
+      "missedIds": [
+        "philips_research",
+        "philips_workshops",
+        "philips_strategy",
+        "philips_market",
+        "nus_brand",
+        "stuck_systems",
+        "tribal_ia",
+        "tribal_recommendations",
+        "tribal_culture"
+      ],
+      "about": "Product designer focused on turning complex workflows into clear, high-quality product experiences. Combines design, research, and iteration to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "Philips Experience Design",
+          "role": "Service Designer (Contract)",
+          "bullets": [
+            "Partnered closely with engineers, product managers, and stakeholders to translate design intent into shippable product decisions, enhancing alignment between user needs, technical constraints, and delivery timelines.",
+            "Conducted market research and social media analysis to inform strategic consulting projects across Personal Health to Health Systems business units in APAC, improving cross-functional execution quality.",
+            "Developed and facilitated design thinking workshops and moderated co-create sessions involving multiple high-level stakeholders, fostering collaborative decision-making and clearer product direction."
+          ]
+        },
+        {
+          "company": "Tribal Worldwide, DDB Group",
+          "role": "Jr. UX Designer",
+          "bullets": [
+            "Built detailed user flows and wireframes to explore nuanced interaction designs, refine visual hierarchy, and communicate design decisions with clarity, enabling higher-confidence iteration.",
+            "Conducted one-on-one user interviews, usability testing, and content audits to identify pain points and recommend design improvements for websites and mobile apps, enhancing delivery consistency.",
+            "Translated complex content into efficient, bite-sized formats and constructed information architecture to facilitate effective communication and improve user journeys."
+          ]
+        },
+        {
+          "company": "Communication Design Hub, NUS",
+          "role": "Communication Designer (Part-time)",
+          "bullets": [
+            "Spearheaded the creation and development of brand identity and design concepts for NUS CDE Open House 2023, elevating visual craft and cross-functional collaboration.",
+            "Conceptualised and executed editorial design for Tan Ean Kiam Arts Awards 2023, presenting design proposals to key decision-makers to secure alignment and support."
+          ]
+        },
+        {
+          "company": "STUCK Design",
+          "role": "Communication Designer (Contract)",
+          "bullets": [
+            "Led art direction and developed digital publication and editorial wayfinding designs for an architectural blueprint, applying high-quality visual craft to improve project delivery."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "elapsedMs": 61724,
+      "qualityPassed": true,
+      "score": 0.43,
+      "passedIds": [
+        "about_product",
+        "about_systems",
+        "about_research_craft",
+        "philips_market",
+        "nus_editorial",
+        "tribal_ia"
+      ],
+      "missedIds": [
+        "philips_research",
+        "philips_workshops",
+        "philips_strategy",
+        "nus_brand",
+        "stuck_systems",
+        "tribal_research",
+        "tribal_recommendations",
+        "tribal_culture"
+      ],
+      "about": "Product designer focused on turning complex workflows into clear, high-quality product experiences. Combines design, research, and iteration to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "Philips Experience Design",
+          "role": "Service Designer (Contract)",
+          "bullets": [
+            "Partnered closely with engineers, product managers, and stakeholders to translate design intent into shippable product decisions, accelerating alignment between user needs, technical constraints, and delivery timelines.",
+            "Conducted market research and social media analysis to inform branding and retail concept revamps for Philips Male Grooming and Mother and Child Care, enhancing cross-functional execution quality.",
+            "Developed and facilitated design thinking workshops across virtual and physical spaces involving multiple high-level stakeholders, improving strategic decision-making and delivery consistency.",
+            "Moderated co-creation workshops and presented findings to stakeholders, fostering collaborative decision-making and clearer product direction.",
+            "Provided design consulting for healthcare projects within APAC markets, applying service design principles to improve system-level user experiences."
+          ]
+        },
+        {
+          "company": "Communication Design Hub, NUS",
+          "role": "Communication Designer (Part-time)",
+          "bullets": [
+            "Spearheaded the creation and development of brand identity and design concepts for NUS CDE Open House 2023, elevating visual craft and cross-functional collaboration.",
+            "Conceptualised and executed editorial design for Tan Ean Kiam Arts Awards 2023, presenting design proposals to key decision-makers to ensure alignment and quality delivery."
+          ]
+        },
+        {
+          "company": "Tribal Worldwide, DDB Group",
+          "role": "Jr. UX Designer",
+          "bullets": [
+            "Built detailed user flows and wireframes to explore nuanced interaction designs, enhancing visual hierarchy and enabling higher-confidence design iteration.",
+            "Conducted one-on-one user interviews and usability testing, recommending design improvements based on iterative feedback and best practices to improve product usability.",
+            "Performed content audits and developed information architecture to simplify complex content, facilitating effective communication and better delivery consistency.",
+            "Translated complex content into efficient, bite-sized formats to support clear communication across teams and stakeholders."
+          ]
+        },
+        {
+          "company": "STUCK Design",
+          "role": "Communication Designer (Contract)",
+          "bullets": [
+            "Led art direction and editorial wayfinding design for an architectural blueprint digital publication, enhancing cross-functional execution quality through strong visual craft."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "elapsedMs": 99096,
+      "qualityPassed": true,
+      "score": 0.5,
+      "passedIds": [
+        "about_product",
+        "about_systems",
+        "about_research_craft",
+        "philips_market",
+        "nus_editorial",
+        "stuck_systems",
+        "tribal_research"
+      ],
+      "missedIds": [
+        "philips_research",
+        "philips_workshops",
+        "philips_strategy",
+        "nus_brand",
+        "tribal_ia",
+        "tribal_recommendations",
+        "tribal_culture"
+      ],
+      "about": "Product designer focused on turning complex workflows into clear, high-quality product experiences. Combines design, research, and iteration to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "Philips Experience Design",
+          "role": "Service Designer (Contract)",
+          "bullets": [
+            "Partnered closely with engineers, product managers, and stakeholders to translate design intent into shippable product decisions, enabling faster alignment between user needs, technical constraints, and delivery.",
+            "Developed and facilitated design thinking workshops across virtual and physical spaces involving multiple high-level stakeholders, improving cross-functional execution quality and strategic decision-making.",
+            "Conducted market research and social media analysis to revamp Philips Male Grooming and Mother and Child Care branding and retail concepts, enhancing delivery consistency and product relevance.",
+            "Provided design consulting for healthcare projects within APAC markets, applying service design to improve system-level user experiences."
+          ]
+        },
+        {
+          "company": "Communication Design Hub, NUS",
+          "role": "Communication Designer (Part-time)",
+          "bullets": [
+            "Spearheaded the creation and development of brand identity and design concepts for NUS CDE Open House 2023, improving cross-functional execution quality through strong visual craft.",
+            "Conceptualised and executed editorial design for Tan Ean Kiam Arts Awards 2023 and presented design proposals to key decision-makers, demonstrating effective storytelling and design communication."
+          ]
+        },
+        {
+          "company": "Tribal Worldwide, DDB Group",
+          "role": "Jr. UX Designer",
+          "bullets": [
+            "Built user flows and wireframes to explore nuanced interaction designs and refine visual hierarchy, supporting higher-confidence design iteration and clearer user flows.",
+            "Conducted one-on-one user interviews and usability testing to recommend design improvements for websites and mobile apps, enhancing product usability through iterative feedback.",
+            "Translated complex content into efficient, bite-sized formats to facilitate effective communication and improve cross-functional collaboration.",
+            "Conducted content audits and built information architecture to support coherent and scalable digital experiences."
+          ]
+        },
+        {
+          "company": "STUCK Design",
+          "role": "Communication Designer (Contract)",
+          "bullets": [
+            "Created and developed art direction, digital publication, and editorial wayfinding design for an architectural blueprint, enhancing cross-functional execution quality through clear visual systems."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 4,
+      "elapsedMs": 75138,
+      "qualityPassed": true,
+      "score": 0.43,
+      "passedIds": [
+        "about_product",
+        "about_systems",
+        "about_research_craft",
+        "philips_market",
+        "nus_editorial",
+        "tribal_research"
+      ],
+      "missedIds": [
+        "philips_research",
+        "philips_workshops",
+        "philips_strategy",
+        "nus_brand",
+        "stuck_systems",
+        "tribal_ia",
+        "tribal_recommendations",
+        "tribal_culture"
+      ],
+      "about": "Product designer focused on turning complex workflows into clear, high-quality product experiences. Combines design, research, and iteration to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "Philips Experience Design",
+          "role": "Service Designer (Contract)",
+          "bullets": [
+            "Partnered closely with engineers, product managers, and stakeholders to translate design intent into shippable product decisions, enhancing alignment between user needs, technical constraints, and delivery.",
+            "Conducted market research and social media analysis to revamp branding and retail concepts for Philips Male Grooming and Mother and Child Care, improving cross-functional execution quality.",
+            "Developed and facilitated design thinking workshops across virtual and physical spaces involving multiple high-level stakeholders, driving better delivery consistency.",
+            "Moderated co-create workshops and presented findings to stakeholders, supporting strategic consulting projects for various Personal Health to Health Systems business units within Philips APAC."
+          ]
+        },
+        {
+          "company": "Communication Design Hub, NUS",
+          "role": "Communication Designer (Part-time)",
+          "bullets": [
+            "Spearheaded the creation and development of brand identity and design concepts for NUS CDE Open House 2023, improving cross-functional execution quality.",
+            "Conceptualised and executed editorial design for Tan Ean Kiam Arts Awards 2023 and presented design proposals to key decision-makers, enhancing delivery consistency."
+          ]
+        },
+        {
+          "company": "Tribal Worldwide, DDB Group",
+          "role": "Jr. UX Designer",
+          "bullets": [
+            "Built user flows and wireframes to explore nuanced flows, refine visual hierarchy, and communicate design decisions with clarity, enabling higher-confidence design iteration and clearer user flows.",
+            "Translated complex content into efficient, bite-sized formats to facilitate effective communication and improve cross-functional execution quality.",
+            "Conducted one-on-one user interviews and usability testing, recommending design improvements for websites and mobile apps based on iterative testing, design heuristics, and best practices.",
+            "Conducted content audits and built information architecture to support better delivery consistency."
+          ]
+        },
+        {
+          "company": "STUCK Design",
+          "role": "Communication Designer (Contract)",
+          "bullets": [
+            "Created and developed art direction, digital publication, and editorial wayfinding design for an architectural blueprint, improving cross-functional execution quality."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 5,
+      "elapsedMs": 70313,
+      "qualityPassed": true,
+      "score": 0.5,
+      "passedIds": [
+        "about_product",
+        "about_systems",
+        "about_research_craft",
+        "philips_market",
+        "nus_editorial",
+        "tribal_research",
+        "tribal_ia"
+      ],
+      "missedIds": [
+        "philips_research",
+        "philips_workshops",
+        "philips_strategy",
+        "nus_brand",
+        "stuck_systems",
+        "tribal_recommendations",
+        "tribal_culture"
+      ],
+      "about": "Product designer focused on turning complex workflows into clear, high-quality product experiences. Combines design, research, and iteration to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "Philips Experience Design",
+          "role": "Service Designer (Contract)",
+          "bullets": [
+            "Partnered closely with engineers, product managers, and stakeholders to translate design intent into shippable product decisions, enhancing alignment between user needs, technical constraints, and delivery timelines.",
+            "Conducted market research and social media analysis to inform branding and retail concept revamps for Philips Male Grooming and Mother and Child Care, improving cross-functional execution quality.",
+            "Developed and facilitated design thinking workshops and moderated co-create sessions involving multiple high-level stakeholders, driving strategic decision-making and fostering collaborative problem-solving.",
+            "Provided design consulting for healthcare projects across APAC markets, contributing to better delivery consistency through structured user-centered approaches."
+          ]
+        },
+        {
+          "company": "Tribal Worldwide, DDB Group",
+          "role": "Jr. UX Designer",
+          "bullets": [
+            "Built detailed user flows and wireframes to explore nuanced interaction designs, refine visual hierarchy, and communicate design decisions clearly, enabling higher-confidence iteration and improved user journeys.",
+            "Conducted one-on-one user interviews and usability testing to identify pain points and recommend design improvements for websites and mobile apps, enhancing cross-functional delivery quality.",
+            "Performed content audits and developed information architecture to streamline content structure and facilitate efficient communication.",
+            "Translated complex content into concise, bite-sized formats through content design, improving clarity and user engagement."
+          ]
+        },
+        {
+          "company": "Communication Design Hub, NUS",
+          "role": "Communication Designer (Part-time)",
+          "bullets": [
+            "Spearheaded brand identity creation and design concepts for NUS CDE Open House 2023, elevating visual craft and reinforcing event messaging.",
+            "Conceptualised and executed editorial design for Tan Ean Kiam Arts Awards 2023, presenting design proposals to key decision-makers to support effective storytelling."
+          ]
+        },
+        {
+          "company": "STUCK Design",
+          "role": "Communication Designer (Contract)",
+          "bullets": [
+            "Created and developed art direction, digital publication, and editorial wayfinding designs for an architectural blueprint, enhancing visual communication and user navigation."
+          ]
+        }
+      ]
+    }
+  ]
+}

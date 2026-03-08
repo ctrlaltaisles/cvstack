@@ -3,26 +3,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 try {
+  // eslint-disable-next-line global-require
   require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 } catch (_) {
   // Optional in some environments.
 }
 
-const { curateResumeWithAI, evaluateCurateQuality } = require('../dist/src/ai/tailorResume.js');
+const { curateResumeWithAI } = require('../dist/src/ai/tailorResume.js');
 
-const FIGMA_JD = `
-Product Designer - Design, Dev, & AI Tools
-Contribute to overall strategy and decision-making about product direction.
-Work cross-functionally with product management, engineering, design, and research peers.
-Create and iterate on flows, prototypes, and high-fidelity visuals.
-Design and ship high-quality features and product improvements in Figma's core product surfaces.
-The ability to guide decision-making with structured thinking and user-centered research.
-Experience researching, prototyping, or building products with AI and other emerging tools.
-Familiarity with web technologies like HTML/CSS, prototyping tools such as Origami, or advanced Figma features like Auto Layout, Variables, and Components.
-Prior work involving design systems or tools that support creative workflows.
-`;
+const JD_PATH = '/Users/aileenooi/Downloads/Job Application for Product Designer - Design, Dev, & AI Tools at Figma.html';
 
-function makeResumeData() {
+function jdFromHtml(html) {
+  const sections = [...html.matchAll(/<li>(.*?)<\/li>|<p>(.*?)<\/p>/g)]
+    .map((match) => (match[1] || match[2] || ''))
+    .map((value) => value.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return sections.join('\n');
+}
+
+function buildResumeData() {
   return {
     name: 'Choo Yuan Jie',
     title: 'Product Designer',
@@ -30,13 +29,13 @@ function makeResumeData() {
       email: 'deceiveyoureyes@gmail.com',
       phone: '+65 8133 5537',
       location: 'Singapore',
-      website: 'https://yuanjie.info',
-      linkedin: '',
+      website: 'yuanjie.info',
+      linkedin: 'LinkedIn',
     },
-    bio: '',
+    bio: 'Yuan Jie designs simple and logical digital user experiences, informed through research and built intuition. He loves diving deep into interesting problem spaces, is a crypto native and admires data as an art form.',
     workExperience: [
       {
-        id: 'exp-cg',
+        id: 'cg',
         company: 'CoinGecko',
         role: 'Product Designer II',
         startDate: { month: 11, year: 2023, present: false },
@@ -51,7 +50,7 @@ function makeResumeData() {
         projectNotes: '',
       },
       {
-        id: 'exp-binance',
+        id: 'bn',
         company: 'Binance',
         role: 'Product Designer (Contract)',
         startDate: { month: 6, year: 2023, present: false },
@@ -63,7 +62,7 @@ function makeResumeData() {
         projectNotes: '',
       },
       {
-        id: 'exp-grab',
+        id: 'gr',
         company: 'Grab',
         role: 'Product Designer Intern',
         startDate: { month: 11, year: 2022, present: false },
@@ -74,21 +73,21 @@ function makeResumeData() {
         projectNotes: '',
       },
       {
-        id: 'exp-shopee',
+        id: 'sh',
         company: 'Shopee',
         role: 'UX Designer Intern',
         startDate: { month: 11, year: 2021, present: false },
         endDate: { month: 1, year: 2022, present: false },
         bullets: [
-          'Collaborated with stakeholders to audit ShopeePay’s Payment UX to let users make payments more efficiently.',
+          'Collaborated with stakeholders to audit ShopeePay’s Payment UX to let users make payments more efciently.',
           'Planned, recruited and conducted live usability testing on 10 participants.',
           'Executed A/B testing by building and testing two prototypes on Origami Studio and Figma.',
-          'Uncovered 4 improvements areas and explored various UI and Interaction Design solutions, which went live.',
+          'Uncovered 4 improvements areas and explored various UI and Interaction Design solutions, which went live',
         ],
         projectNotes: '',
       },
       {
-        id: 'exp-freelance',
+        id: 'fr',
         company: 'Various Brands',
         role: 'Freelance Designer & Developer',
         startDate: { month: 3, year: 2019, present: false },
@@ -102,77 +101,98 @@ function makeResumeData() {
     ],
     education: [],
     certifications: [],
-    awards: [],
-    skills: ['Figma', 'Origami Studio', 'HTML/CSS', 'React', 'User Research'],
+    skills: [
+      'Interaction Design',
+      'Visual Design',
+      'Motion Design',
+      'Usability Testing',
+      'User Interviews',
+      'User Research',
+      'Surveys',
+      'User Flows',
+      'Origami Studio',
+      'Figma',
+      'HTML/CSS',
+      'Javascript',
+      'React',
+    ],
   };
 }
 
-const MARKERS = {
-  productThinking: /\b(product|priorit|decision|information architecture|workflow|0 to 1|0->1|from 0 to 1|strategy)\b/i,
-  collaboration: /\b(engineer|product management|pm\b|cross-functional|stakeholder|research)\b/i,
-  systemsToolingCraft: /\b(plugin|tool|system|design system|components?|variables|html|css|react|prototype|origami|figma|craft)\b/i,
-  impactIteration: /\b(iterat|feedback|research|usability|a\/b|retention|conversion|engagement|search time|csat|nps|reduced|increased|launched|shipped)\b/i,
-};
-
-function scoreBullets(bullets) {
-  const text = bullets.join('\n');
+function scoreOutput(result) {
+  const about = String(result.improved?.about || '');
+  const bullets = (result.improved?.experience || []).flatMap((exp) => exp.bullets || []);
+  const fullText = `${about}\n${bullets.join('\n')}`;
+  const checks = [
+    { id: 'about_product_systems', pattern: /product designer.*(complex systems|data-driven|tools)/i },
+    { id: 'about_dev_fluency', pattern: /(front-end development|tooling fluency|design, research, and tooling)/i },
+    { id: 'coingecko_0to1', pattern: /dex tracking platform.*(0 to 1|from 0 to 1|foundation of the product experience)/i },
+    { id: 'coingecko_prioritization', pattern: /(ux risk|prioritization).*(50\+|50)/i },
+    { id: 'coingecko_retention', pattern: /retention time.*(2x|2 x|doubled)/i },
+    { id: 'coingecko_search', pattern: /search time.*75%/i },
+    { id: 'coingecko_feedback', pattern: /feedback (cycles|time).*(2 days).*(10 minutes)/i },
+    { id: 'binance_homepage', pattern: /binance earn homepage.*(conversion|cross-product discovery|information hierarchy)/i },
+    { id: 'binance_plugin', pattern: /figma plugin.*(2000\+|2000).*(csat|nps).*(30%|30)/i },
+    { id: 'grab_error_system', pattern: /error messaging.*(verticals|content system|recover faster|reduced churn)/i },
+    { id: 'shopee_audit', pattern: /shopeepay.*(payment flows|payment experience|audit)/i },
+    { id: 'shopee_testing', pattern: /(usability testing).*(10 participants|10)/i },
+    { id: 'shopee_ab', pattern: /(origami studio|figma).*(a\/b testing|competing prototypes|interaction patterns)/i },
+    { id: 'shopee_shipped', pattern: /(4|four).*(improvements|usability improvements).*(shipped|went live)/i },
+    { id: 'freelance_react', pattern: /react.*(web app|front-end)/i },
+    { id: 'freelance_40', pattern: /40%/i },
+  ];
+  const passed = checks.filter((check) => check.pattern.test(fullText));
   return {
-    productThinking: MARKERS.productThinking.test(text),
-    collaboration: MARKERS.collaboration.test(text),
-    systemsToolingCraft: MARKERS.systemsToolingCraft.test(text),
-    impactIteration: MARKERS.impactIteration.test(text),
-  };
-}
-
-async function runOnce(run) {
-  const resumeData = makeResumeData();
-  const result = await curateResumeWithAI(
-    {
-      resumeData,
-      targetRole: 'Product Designer - Design, Dev, & AI Tools',
-      jdText: FIGMA_JD,
-      jobCompany: 'Figma',
-    },
-    `designer_stress_${run}`,
-  );
-
-  const quality = evaluateCurateQuality(
-    { resumeData, targetRole: 'Product Designer - Design, Dev, & AI Tools', jdText: FIGMA_JD },
-    result,
-  );
-  const allBullets = result.improved.experience.flatMap((exp) => exp.bullets);
-  return {
-    run,
-    providerStatus: result.meta?.providerStatus ?? 'unknown',
-    fallbackReason: result.meta?.fallbackReason ?? '',
-    quality,
-    dimensions: scoreBullets(allBullets),
-    about: result.improved.about,
-    experience: result.improved.experience,
+    score: Number((passed.length / checks.length).toFixed(2)),
+    passedIds: passed.map((check) => check.id),
+    missedIds: checks.filter((check) => !check.pattern.test(fullText)).map((check) => check.id),
   };
 }
 
 async function main() {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Missing OPENAI_API_KEY. Export it or add it to server/.env before running this stress test.');
+    console.error('Missing OPENAI_API_KEY. Add it to server/.env or export it in your shell before running the designer stress test.');
     process.exit(1);
   }
 
-  const runs = Number(process.env.CVSTACK_DESIGNER_STRESS_RUNS ?? 3);
-  const results = [];
-  for (let run = 1; run <= runs; run += 1) {
-    console.log(`Running Figma designer stress test ${run}/${runs}...`);
-    const result = await runOnce(run);
-    results.push(result);
-    console.log(`  -> provider=${result.providerStatus} passed=${result.quality.passed} impact=${result.quality.impactScore} ats=${result.quality.atsScore}`);
+  const jdHtml = fs.readFileSync(JD_PATH, 'utf8');
+  const jdText = jdFromHtml(jdHtml);
+  const resumeData = buildResumeData();
+  const runs = [];
+
+  for (let run = 1; run <= 3; run += 1) {
+    const started = Date.now();
+    const result = await curateResumeWithAI({
+      resumeData,
+      targetRole: 'Product Designer - Design, Dev, & AI Tools',
+      jdText,
+      jobCompany: 'Figma',
+    }, `designer_figma_${run}`);
+    const score = scoreOutput(result);
+    const exp = result.improved.experience.map((item) => ({
+      company: item.company,
+      role: item.role,
+      bullets: item.bullets,
+    }));
+    runs.push({
+      run,
+      elapsedMs: Date.now() - started,
+      qualityPassed: Boolean(result.quality?.passed),
+      score: score.score,
+      passedIds: score.passedIds,
+      missedIds: score.missedIds,
+      about: result.improved.about,
+      experience: exp,
+    });
+    console.log(`run=${run} elapsedMs=${Date.now() - started} quality=${result.quality?.passed} score=${score.score}`);
   }
 
-  const outDir = path.resolve(__dirname, '..', 'stress-results');
-  fs.mkdirSync(outDir, { recursive: true });
+  const outputDir = path.resolve(__dirname, '..', 'stress-results');
+  fs.mkdirSync(outputDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outPath = path.join(outDir, `designer-stress-${timestamp}.json`);
-  fs.writeFileSync(outPath, JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2), 'utf8');
-  console.log(`Saved detailed results to ${outPath}`);
+  const outputPath = path.join(outputDir, `designer-stress-${timestamp}.json`);
+  fs.writeFileSync(outputPath, JSON.stringify({ generatedAt: new Date().toISOString(), runs }, null, 2), 'utf8');
+  console.log(`Saved detailed results to: ${outputPath}`);
 }
 
 main().catch((error) => {

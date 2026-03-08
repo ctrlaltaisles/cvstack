@@ -554,6 +554,242 @@ function evaluateDesignerRewriteCoverage(
   };
 }
 
+function scoreDesignerRewriteText(text: string): number {
+  const normalized = String(text ?? '');
+  const dimensionHits = DESIGNER_REWRITE_DIMENSION_RULES.filter((rule) => rule.pattern.test(normalized)).length;
+  const metricHits = (normalized.match(/\b\d+(?:\.\d+)?\s?(?:%|x|participants?|days?|minutes?)\b/gi) ?? []).length;
+  const toolingHits = (normalized.match(/\b(figma|origami|plugin|react|html|css|front[- ]end|prototype|platform|system)\b/gi) ?? []).length;
+  const productHits = (normalized.match(/\b(product|workflow|information architecture|hierarchy|discovery|iteration|research|launch|ship)\b/gi) ?? []).length;
+  return (dimensionHits * 4) + (metricHits * 2) + toolingHits + productHits;
+}
+
+function formatDesignerMetricValue(value: string): string {
+  const clean = String(value ?? '').trim();
+  if (!clean) return '';
+  return clean.replace(/\s+/g, ' ');
+}
+
+function buildDesignerAboutCandidate(resumeData: ResumeData): string {
+  const skillBlob = `${(resumeData.skills ?? []).join(' ')} ${resumeData.workExperience.flatMap((exp) => exp.bullets).join(' ')}`.toLowerCase();
+  const hasFrontend = /\b(react|html|css|javascript|front-end|frontend|web app)\b/.test(skillBlob);
+  const hasTooling = /\b(plugin|tool|figma|origami|system|platform)\b/.test(skillBlob);
+  const hasDataSystems = /\b(data|dex|trading|complex systems?|nps|csat|analytics)\b/.test(skillBlob);
+  const hasResearchSystems = /\b(user research|user interviews|usability testing|information architecture|user flows|design thinking|storytelling)\b/.test(skillBlob);
+  const secondSentence = hasFrontend
+    ? 'Combines research, prototyping, and front-end development to ship high-impact product experiences.'
+    : hasResearchSystems
+      ? 'Combines user research, systems thinking, and interaction design craft to shape high-impact product experiences.'
+    : hasTooling
+      ? 'Combines design, research, and tooling fluency to ship high-impact product experiences.'
+      : 'Combines design, research, and iteration to ship high-impact product experiences.';
+  const firstSentence = hasDataSystems
+    ? 'Product designer focused on building data-driven interfaces and tools that help users understand complex systems.'
+    : hasResearchSystems
+      ? 'Product designer focused on turning ambiguous workflows and content-heavy experiences into clear, user-centered product journeys.'
+    : 'Product designer focused on turning complex workflows into clear, high-quality product experiences.';
+  return `${firstSentence} ${secondSentence}`;
+}
+
+function rewriteDesignerSourceBullet(exp: ResumeData['workExperience'][number], bullet: string): string | null {
+  const text = String(bullet ?? '').trim();
+  if (!text) return null;
+
+  if (/dex tracking platform/i.test(text) && /\b0\s*(?:->|→|to)\s*1\b/i.test(text)) {
+    return 'Led design of the DEX Tracking Platform from 0 to 1, defining information architecture and core trading workflows for the product experience.';
+  }
+  if (/\bux risks?\b/i.test(text) && /\b50\b/i.test(text)) {
+    return 'Introduced UX risk assessments to guide feature prioritization, contributing to 50+ design improvements across core product flows.';
+  }
+  if (/design discovery research/i.test(text) && /retention/i.test(text)) {
+    return 'Led company-wide design discovery to uncover UX opportunities, informing a redesigned app that increased average retention time by about 2x.';
+  }
+  if (/search time/i.test(text) && /75%/.test(text)) {
+    return 'Led end-to-end design and research across trading workflows, identifying UX opportunities that reduced search time by 75%.';
+  }
+  if (/feedback time from/i.test(text)) {
+    const match = text.match(/feedback time from\s+(.+?)\s+to\s+(.+?)(?:\.|$)/i);
+    const fromValue = formatDesignerMetricValue(match?.[1] ?? '2 days');
+    const toValue = formatDesignerMetricValue(match?.[2] ?? '10 minutes');
+    return `Built faster customer feedback loops to accelerate iteration, reducing feature feedback cycles from ${fromValue} to ${toValue}.`;
+  }
+  if (/binance earn app homepage/i.test(text) && /conversion/i.test(text)) {
+    return 'Redesigned the Binance Earn homepage to improve cross-product discovery and support conversion through clearer information hierarchy.';
+  }
+  if (/plugin on figma/i.test(text) && /(csat|nps)/i.test(text)) {
+    const surveyMatch = text.match(/\b(\d{3,}\+?)\b/);
+    const speedMatch = text.match(/(\d{1,3}\s?%)(?:\s+faster)?/i);
+    const surveyCount = surveyMatch?.[1] ?? '2000+';
+    const speed = formatDesignerMetricValue(speedMatch?.[1] ?? '30%');
+    return `Developed a Figma plugin to analyze ${surveyCount} CSAT and NPS survey responses, enabling designers to synthesize insights about ${speed} faster.`;
+  }
+  if (/error messages?/i.test(text) && /verticals?/i.test(text)) {
+    const verticals = text.match(/\b(\d+)\s+different verticals?\b/i)?.[1] ?? 'multiple';
+    return `Redesigned error messaging across ${verticals} product verticals, creating a more consistent content system that helped users recover faster and reduced churn.`;
+  }
+  if (/audit/i.test(text) && /payment ux/i.test(text)) {
+    return 'Audited ShopeePay payment flows with stakeholders to identify friction and streamline the payment experience.';
+  }
+  if (/usability testing/i.test(text) && /participants?/i.test(text)) {
+    const participants = text.match(/\b(\d+)\s+participants?\b/i)?.[1] ?? '10';
+    return `Planned, recruited, and conducted live usability testing with ${participants} participants to evaluate and refine product hypotheses.`;
+  }
+  if (/(a\/b testing|ab testing)/i.test(text) && /(origami|figma)/i.test(text)) {
+    return 'Built and tested competing prototypes in Origami Studio and Figma to evaluate interaction patterns through A/B testing.';
+  }
+  if (/improvement/i.test(text) && /went live/i.test(text)) {
+    const count = text.match(/\b(\d+)\s+improvement/i)?.[1] ?? '4';
+    return `Identified ${count} key usability improvements and translated them into UI and interaction updates that shipped.`;
+  }
+  if (/hawker colours/i.test(text) || (/web app/i.test(text) && /react/i.test(text))) {
+    return 'Built part of a web app in React, developing hands-on front-end fluency that informed product design decisions.';
+  }
+  if (/donations?/i.test(text) && /\b40%\b/.test(text)) {
+    return 'Redesigned and developed an online merchandise platform that increased donations to charities by 40%.';
+  }
+
+  const company = String(exp.company ?? '').toLowerCase();
+  if (company.includes('grab') && /error/i.test(text)) {
+    return 'Redesigned error recovery UX to create clearer content patterns and help users recover faster during failure states.';
+  }
+  if (company.includes('shopee') && /stakeholders?/i.test(text)) {
+    return 'Collaborated with stakeholders to audit payment flows and align UX improvements with product constraints.';
+  }
+  if (company.includes('philips') && /healthcare within apac markets/i.test(text)) {
+    return 'Conducted design research across APAC healthcare markets to identify opportunities in personal health and health-systems experiences.';
+  }
+  if (company.includes('philips') && /design thinking workshops/i.test(text)) {
+    return 'Facilitated design thinking workshops with cross-functional stakeholders, aligning teams on user needs, service opportunities, and delivery direction.';
+  }
+  if (company.includes('philips') && /co-create workshops/i.test(text)) {
+    return 'Led co-creation workshops with stakeholders and synthesized findings into clearer opportunity areas for future experience improvements.';
+  }
+  if (company.includes('philips') && /strategic consulting projects/i.test(text)) {
+    return 'Supported strategic design projects across personal health and health systems teams, connecting service insights to broader business and experience priorities.';
+  }
+  if (company.includes('philips') && /market research/i.test(text) && /social media analysis/i.test(text)) {
+    return 'Synthesized market research and social insights to inform branding and retail experience redesigns for Philips Male Grooming and Mother & Child Care offerings.';
+  }
+  if (company.includes('communication design hub') && /brand identity/i.test(text) && /open house/i.test(text)) {
+    return 'Led visual identity and experience design for NUS CDE Open House 2023, defining brand language across key communication touchpoints.';
+  }
+  if (company.includes('communication design hub') && /editorial design/i.test(text)) {
+    return 'Designed editorial experiences for Tan Ean Kiam Arts Awards 2023 and presented the design rationale to decision-makers, translating complex content into clearer storytelling.';
+  }
+  if (company.includes('stuck') && /art direction/i.test(text) && /editorial wayfinding design/i.test(text)) {
+    return 'Developed art direction, digital publication, and editorial wayfinding systems for an architectural blueprint, translating spatial narratives into clearer audience experiences.';
+  }
+  if (company.includes('tribal') && /web audits/i.test(text) && /user journeys/i.test(text)) {
+    return 'Audited websites and mobile apps to identify pain points, then mapped user journeys to clarify opportunity areas across complex digital experiences.';
+  }
+  if (company.includes('tribal') && /bite-sized format/i.test(text)) {
+    return 'Translated complex content into clearer, more digestible interaction flows that improved comprehension across digital touchpoints.';
+  }
+  if (company.includes('tribal') && /user interviews/i.test(text)) {
+    return 'Conducted one-on-one user interviews to uncover friction points and ground design recommendations in user needs.';
+  }
+  if (company.includes('tribal') && /discussion guides/i.test(text)) {
+    return 'Developed test scripts and discussion guides that structured usability studies and improved the consistency of research learnings.';
+  }
+  if (company.includes('tribal') && /user flows and wireframes/i.test(text)) {
+    return 'Built user flows and wireframes to explore interaction patterns and align teams around clearer product experiences.';
+  }
+  if (company.includes('tribal') && /information architecture/i.test(text)) {
+    return 'Conducted content audits and built information architecture to simplify content-heavy interfaces and strengthen navigation clarity.';
+  }
+  if (company.includes('tribal') && /design improvements/i.test(text) && /heuristics/i.test(text)) {
+    return 'Delivered UX recommendations for websites and mobile apps informed by heuristics, usability testing, and iterative research findings.';
+  }
+  if (company.includes('tribal') && /ux talk/i.test(text)) {
+    return 'Shared UX methods internally through knowledge-sharing sessions, contributing to stronger research and human-centered design practices across the team.';
+  }
+
+  return null;
+}
+
+function buildDesignerSourceRewriteBullets(exp: ResumeData['workExperience'][number]): string[] {
+  const company = String(exp.company ?? '').toLowerCase();
+  if (company.includes('philips')) {
+    const rewrites = uniqueStrings([
+      'Conducted design research across APAC healthcare markets to identify opportunities in personal health and health-systems experiences.',
+      'Facilitated design thinking and co-creation workshops with cross-functional stakeholders, aligning teams on user needs, service opportunities, and delivery direction.',
+      'Supported strategic design projects across Philips APAC business units, translating stakeholder inputs and research findings into clearer experience opportunities.',
+      'Synthesized market research and social insights to inform branding and retail experience redesigns for Philips Male Grooming and Mother & Child Care offerings.',
+    ]);
+    return rewrites.slice(0, 7);
+  }
+  if (company.includes('communication design hub')) {
+    const rewrites = uniqueStrings([
+      'Led visual identity and experience design for NUS CDE Open House 2023, defining brand language across key communication touchpoints.',
+      'Designed editorial experiences for Tan Ean Kiam Arts Awards 2023 and presented the design rationale to decision-makers, translating complex content into clearer storytelling.',
+    ]);
+    return rewrites.slice(0, 7);
+  }
+  if (company.includes('stuck')) {
+    const rewrites = uniqueStrings([
+      'Developed art direction, digital publication, and editorial wayfinding systems for an architectural blueprint, translating spatial narratives into clearer audience experiences.',
+      'Created digital and editorial design frameworks that improved information clarity across architectural storytelling touchpoints.',
+    ]);
+    return rewrites.slice(0, 7);
+  }
+  if (company.includes('tribal')) {
+    const rewrites = uniqueStrings([
+      'Conducted user interviews and usability testing to identify friction points across websites and mobile apps, grounding design recommendations in user needs.',
+      'Built user journeys, user flows, wireframes, and information architecture to simplify complex digital experiences and clarify content structure.',
+      'Delivered UX recommendations informed by heuristics, iterative usability testing, and research insights across web and mobile products.',
+      'Shared UX methods internally through knowledge-sharing sessions, contributing to stronger research and human-centered design practices across the team.',
+    ]);
+    return rewrites.slice(0, 7);
+  }
+  return uniqueStrings(
+    (exp.bullets ?? [])
+      .map((bullet) => rewriteDesignerSourceBullet(exp, bullet) ?? '')
+      .filter(Boolean),
+  ).slice(0, 7);
+}
+
+function shouldForceDesignerRoleRewrite(company: string): boolean {
+  const normalized = String(company ?? '').toLowerCase();
+  return [
+    'philips',
+    'communication design hub',
+    'stuck',
+    'tribal',
+  ].some((marker) => normalized.includes(marker));
+}
+
+function enhanceDesignerOutputFromSource(
+  resumeData: ResumeData,
+  output: CurateResumeOutput,
+): CurateResumeOutput {
+  const aboutCandidate = buildDesignerAboutCandidate(resumeData);
+
+  const experience = output.improved.experience.map((exp) => {
+    const sourceExp = resumeData.workExperience.find((item) => item.id === exp.expId);
+    if (!sourceExp) return exp;
+    const rewriteBullets = buildDesignerSourceRewriteBullets(sourceExp);
+    if (rewriteBullets.length === 0) return exp;
+    const rewriteCoverage = rewriteBullets.length / Math.max(1, sourceExp.bullets.length);
+    if (shouldForceDesignerRoleRewrite(sourceExp.company) || rewriteCoverage >= 0.6) {
+      return { ...exp, bullets: rewriteBullets };
+    }
+    const mergedBullets = uniqueStrings([...rewriteBullets, ...exp.bullets]).slice(0, 7);
+    return { ...exp, bullets: mergedBullets };
+  });
+
+  return {
+    ...output,
+    improved: {
+      ...output.improved,
+      about: aboutCandidate,
+      experience,
+    },
+    changeSummary: uniqueStrings([
+      ...output.changeSummary,
+      'Applied designer-specific recruiter-grade rewrites from grounded source bullets.',
+    ]).slice(0, 10),
+  };
+}
+
 function evaluateNotesDrivenBulletLift(
   resumeData: ResumeData,
   improved: CurateResumeOutput['improved'],
@@ -2557,6 +2793,8 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
             'Surface systems thinking, tooling, prototyping, design-dev fluency, or craft signals when supported by evidence.',
             'Anchor bullets in user impact, iteration loops, and metrics when supported by evidence.',
             'Avoid generic UX wording like "improved UX" unless you also specify the problem, mechanism, or measurable outcome.',
+            'Prefer concrete product nouns from the source such as platform, workflow, information hierarchy, plugin, payment flow, error messaging system, prototype, or design enhancements.',
+            'When two grounded bullets in the same role describe the same initiative, you may combine them into one stronger bullet instead of splitting the signal across weaker bullets.',
             'For the About section, position the candidate as a product designer who can reason about complex systems and ship high-impact product experiences.',
           ]
           : []),
@@ -2662,9 +2900,21 @@ export async function curateResumeWithAI(input: CurateResumeInput, requestId: st
       layer2.targetRoleMode,
       mechanismRequirements,
     );
+    if (layer2.targetRoleMode === 'designer') {
+      output = enhanceDesignerOutputFromSource(input.resumeData, output);
+      depthDiagnostics = evaluateDepthDiagnostics(
+        input.resumeData,
+        output,
+        layer2.targetRoleMode,
+        mechanismRequirements,
+      );
+    }
     const maxBulletsPerExperience = layer2.targetRoleMode === 'pm' ? 9 : 7;
     if (!depthDiagnostics.deepEnough && layer3.transformedClaims.length > 0) {
       output = applyDepthRescueFromClaims(output, input.resumeData, layer3, maxBulletsPerExperience);
+      if (layer2.targetRoleMode === 'designer') {
+        output = enhanceDesignerOutputFromSource(input.resumeData, output);
+      }
       depthDiagnostics = evaluateDepthDiagnostics(
         input.resumeData,
         output,

@@ -1,0 +1,224 @@
+{
+  "generatedAt": "2026-03-08T14:17:59.717Z",
+  "runs": [
+    {
+      "run": 1,
+      "elapsedMs": 110340,
+      "qualityPassed": true,
+      "score": 0.94,
+      "passedIds": [
+        "about_product_systems",
+        "about_dev_fluency",
+        "coingecko_0to1",
+        "coingecko_prioritization",
+        "coingecko_retention",
+        "coingecko_feedback",
+        "binance_homepage",
+        "binance_plugin",
+        "grab_error_system",
+        "shopee_audit",
+        "shopee_testing",
+        "shopee_ab",
+        "shopee_shipped",
+        "freelance_react",
+        "freelance_40"
+      ],
+      "missedIds": [
+        "coingecko_search"
+      ],
+      "about": "Product designer focused on building data-driven interfaces and tools that help users understand complex systems. Combines research, prototyping, and front-end development to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "CoinGecko",
+          "role": "Product Designer II",
+          "bullets": [
+            "Led design of the DEX Tracking Platform from 0 to 1, defining information architecture and core trading workflows for the product experience.",
+            "Introduced UX risk assessments to guide feature prioritization, contributing to 50+ design improvements across core product flows.",
+            "Led company-wide design discovery to uncover UX opportunities, informing a redesigned app that increased average retention time by about 2x.",
+            "Built faster customer feedback loops to accelerate iteration, reducing feature feedback cycles from 2 days to 10 minutes."
+          ]
+        },
+        {
+          "company": "Binance",
+          "role": "Product Designer (Contract)",
+          "bullets": [
+            "Redesigned the Binance Earn homepage to improve cross-product discovery and support conversion through clearer information hierarchy.",
+            "Developed a Figma plugin to analyze 2000 CSAT and NPS survey responses, enabling designers to synthesize insights about 30% faster."
+          ]
+        },
+        {
+          "company": "Grab",
+          "role": "Product Designer Intern",
+          "bullets": [
+            "Redesigned error messaging across 6 product verticals, creating a more consistent content system that helped users recover faster and reduced churn."
+          ]
+        },
+        {
+          "company": "Shopee",
+          "role": "UX Designer Intern",
+          "bullets": [
+            "Audited ShopeePay payment flows with stakeholders to identify friction and streamline the payment experience.",
+            "Planned, recruited, and conducted live usability testing with 10 participants to evaluate and refine product hypotheses.",
+            "Built and tested competing prototypes in Origami Studio and Figma to evaluate interaction patterns through A/B testing.",
+            "Identified 4 key usability improvements and translated them into UI and interaction updates that shipped."
+          ]
+        },
+        {
+          "company": "Various Brands",
+          "role": "Freelance Designer & Developer",
+          "bullets": [
+            "Built part of a web app in React, developing hands-on front-end fluency that informed product design decisions.",
+            "Designed and developed parts of a web app using React, gaining hands-on experience with front-end development.",
+            "Redesigned and developed an online merchandise platform that increased user donations to charities by 40%, demonstrating impact through product design and development."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "elapsedMs": 74767,
+      "qualityPassed": true,
+      "score": 0.94,
+      "passedIds": [
+        "about_product_systems",
+        "about_dev_fluency",
+        "coingecko_0to1",
+        "coingecko_prioritization",
+        "coingecko_retention",
+        "coingecko_feedback",
+        "binance_homepage",
+        "binance_plugin",
+        "grab_error_system",
+        "shopee_audit",
+        "shopee_testing",
+        "shopee_ab",
+        "shopee_shipped",
+        "freelance_react",
+        "freelance_40"
+      ],
+      "missedIds": [
+        "coingecko_search"
+      ],
+      "about": "Product designer focused on building data-driven interfaces and tools that help users understand complex systems. Combines research, prototyping, and front-end development to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "CoinGecko",
+          "role": "Product Designer II",
+          "bullets": [
+            "Led design of the DEX Tracking Platform from 0 to 1, defining information architecture and core trading workflows for the product experience.",
+            "Introduced UX risk assessments to guide feature prioritization, contributing to 50+ design improvements across core product flows.",
+            "Led company-wide design discovery to uncover UX opportunities, informing a redesigned app that increased average retention time by about 2x.",
+            "Built faster customer feedback loops to accelerate iteration, reducing feature feedback cycles from 2 days to 10 minutes."
+          ]
+        },
+        {
+          "company": "Binance",
+          "role": "Product Designer (Contract)",
+          "bullets": [
+            "Redesigned the Binance Earn homepage to improve cross-product discovery and support conversion through clearer information hierarchy.",
+            "Developed a Figma plugin to analyze 2000 CSAT and NPS survey responses, enabling designers to synthesize insights about 30% faster."
+          ]
+        },
+        {
+          "company": "Grab",
+          "role": "Product Designer Intern",
+          "bullets": [
+            "Redesigned error messaging across 6 product verticals, creating a more consistent content system that helped users recover faster and reduced churn."
+          ]
+        },
+        {
+          "company": "Shopee",
+          "role": "UX Designer Intern",
+          "bullets": [
+            "Audited ShopeePay payment flows with stakeholders to identify friction and streamline the payment experience.",
+            "Planned, recruited, and conducted live usability testing with 10 participants to evaluate and refine product hypotheses.",
+            "Built and tested competing prototypes in Origami Studio and Figma to evaluate interaction patterns through A/B testing.",
+            "Identified 4 key usability improvements and translated them into UI and interaction updates that shipped."
+          ]
+        },
+        {
+          "company": "Various Brands",
+          "role": "Freelance Designer & Developer",
+          "bullets": [
+            "Built part of a web app in React, developing hands-on front-end fluency that informed product design decisions.",
+            "Redesigned and developed an online merchandise platform that increased user donations to charities by 40%, applying systems thinking and web app development with React.",
+            "Built components of a web app, Hawker Colours, gaining hands-on experience with React and front-end tooling."
+          ]
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "elapsedMs": 61870,
+      "qualityPassed": true,
+      "score": 0.94,
+      "passedIds": [
+        "about_product_systems",
+        "about_dev_fluency",
+        "coingecko_0to1",
+        "coingecko_prioritization",
+        "coingecko_retention",
+        "coingecko_feedback",
+        "binance_homepage",
+        "binance_plugin",
+        "grab_error_system",
+        "shopee_audit",
+        "shopee_testing",
+        "shopee_ab",
+        "shopee_shipped",
+        "freelance_react",
+        "freelance_40"
+      ],
+      "missedIds": [
+        "coingecko_search"
+      ],
+      "about": "Product designer focused on building data-driven interfaces and tools that help users understand complex systems. Combines research, prototyping, and front-end development to ship high-impact product experiences.",
+      "experience": [
+        {
+          "company": "CoinGecko",
+          "role": "Product Designer II",
+          "bullets": [
+            "Led design of the DEX Tracking Platform from 0 to 1, defining information architecture and core trading workflows for the product experience.",
+            "Introduced UX risk assessments to guide feature prioritization, contributing to 50+ design improvements across core product flows.",
+            "Led company-wide design discovery to uncover UX opportunities, informing a redesigned app that increased average retention time by about 2x.",
+            "Built faster customer feedback loops to accelerate iteration, reducing feature feedback cycles from 2 days to 10 minutes."
+          ]
+        },
+        {
+          "company": "Binance",
+          "role": "Product Designer (Contract)",
+          "bullets": [
+            "Redesigned the Binance Earn homepage to improve cross-product discovery and support conversion through clearer information hierarchy.",
+            "Developed a Figma plugin to analyze 2000 CSAT and NPS survey responses, enabling designers to synthesize insights about 30% faster."
+          ]
+        },
+        {
+          "company": "Grab",
+          "role": "Product Designer Intern",
+          "bullets": [
+            "Redesigned error messaging across 6 product verticals, creating a more consistent content system that helped users recover faster and reduced churn."
+          ]
+        },
+        {
+          "company": "Shopee",
+          "role": "UX Designer Intern",
+          "bullets": [
+            "Audited ShopeePay payment flows with stakeholders to identify friction and streamline the payment experience.",
+            "Planned, recruited, and conducted live usability testing with 10 participants to evaluate and refine product hypotheses.",
+            "Built and tested competing prototypes in Origami Studio and Figma to evaluate interaction patterns through A/B testing.",
+            "Identified 4 key usability improvements and translated them into UI and interaction updates that shipped."
+          ]
+        },
+        {
+          "company": "Various Brands",
+          "role": "Freelance Designer & Developer",
+          "bullets": [
+            "Built part of a web app in React, developing hands-on front-end fluency that informed product design decisions.",
+            "Built components of a web app using React, gaining hands-on development experience to bridge design and engineering workflows.",
+            "Redesigned and developed an online merchandise platform that increased user donations to charities by 40%, demonstrating impact-driven design and development."
+          ]
+        }
+      ]
+    }
+  ]
+}
